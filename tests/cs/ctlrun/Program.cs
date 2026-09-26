@@ -466,6 +466,67 @@ static class P {
     foreach (var rg in r9)
         for (int yy = rg.Y; yy < rg.Bottom; yy++) for (int xx = rg.X; xx < rg.Right; xx++) { if (++cover[xx, yy] > 1) once = false; }
     bool full = true; for (int xx = 0; xx < 813 && full; xx++) for (int yy = 0; yy < 720; yy++) if (cover[xx, yy] != 1) { full = false; break; }
+    // ---- EditHistory: rect snapshots, undo/redo, cap, voxel boxes
+    var es = new Sprite(64, 48);
+    for (int i = 0; i < es.Pixels.Length; i++) es.Pixels[i] = unchecked((int)0xFF000000 | (i * 7 & 0xFFFFFF));   // a known gradient
+    var hist = new EditHistory();
+    var rec = hist.Record(es, new Rectangle(10, 10, 20, 16));
+    Chk(rec == new Rectangle(10, 10, 20, 16) && hist.CanUndo, "Record returns the clipped rect and arms undo");
+    Chk(hist.Record(es, new Rectangle(100, 100, 5, 5)) == Rectangle.Empty && !hist.CanRedo, "a fully outside rect records nothing");
+    es.FillRect(10, 10, 20, 16, unchecked((int)0xFF00FF00));
+    Chk(hist.Undo(es) && es.GetPixel(15, 15) == (unchecked((int)0xFF000000 | ((15 * 64 + 15) * 7 & 0xFFFFFF))), "undo restores the recorded pixels");
+    Chk(hist.Redo(es) && es.GetPixel(15, 15) == unchecked((int)0xFF00FF00), "redo re-applies the newer state");
+    int steps = 0; while (hist.Undo(es)) steps++;
+    Chk(steps == 1 && !hist.CanRedo == false && hist.CanRedo, "undo drains to the beginning");
+    bool same = true; var px = es.Pixels;
+    for (int i = 0; i < px.Length && same; i++) if (px[i] != (unchecked((int)0xFF000000 | (i * 7 & 0xFFFFFF)))) same = false;
+    Chk(same, "after undoing everything the sprite matches the original pixel for pixel");
+    while (hist.Redo(es)) ;
+    // a new record discards the redo tail
+    hist.Record(es, new Rectangle(0, 0, 8, 8));
+    es.FillRect(0, 0, 8, 8, unchecked((int)0xFFFF0000));
+    hist.Undo(es);
+    hist.Record(es, new Rectangle(32, 32, 4, 4));
+    Chk(!hist.CanRedo, "a new record discards the redo tail");
+    hist.Clear();
+    // memory cap: entries drop oldest-first, bytes stay within the cap
+    var histCap = new EditHistory(8192);
+    for (int i = 0; i < 20; i++) histCap.Record(es, new Rectangle(0, i * 2, 16, 16));   // 1 KB each
+    Chk(histCap.MemoryBytes <= 8192 && histCap.UndoCount < 20 && histCap.UndoCount > 0, $"the cap drops the oldest entries ({histCap.UndoCount} left, {histCap.MemoryBytes} bytes)");
+    // dimension mismatch is refused, not corrupted
+    var other = new Sprite(32, 32);
+    Chk(!histCap.Undo(other), "undo into a differently sized sprite is refused");
+    // voxel boxes
+    var g = new VoxelGrid(4, 3, 2);
+    for (int vz = 0; vz < 2; vz++) for (int vy = 0; vy < 3; vy++) for (int vx = 0; vx < 4; vx++) g[vx, vy, vz] = new Voxel { Argb = 0xFF000000u | (uint)(vx * 1000 + vy * 10 + vz), Material = (byte)(vx + vy) };
+    var vh = new EditHistory();
+    Chk(vh.Record(g, 1, 1, 0, 3, 3, 2), "voxel box recorded");
+    g[1, 1, 0] = new Voxel { Argb = 0xFF112233u, Material = 9 };
+    Chk(vh.Undo(g) && g[1, 1, 0].Argb == (0xFF000000u | 1010u) && g[2, 2, 1].Material == 4, "voxel undo restores the box");
+    Chk(vh.Redo(g) && g[1, 1, 0].Argb == 0xFF112233u && g[1, 1, 0].Material == 9, "voxel redo re-applies the edit");
+    // ---- SpriteBox partial render: ClipRectangle flows to the handler, outside pixels stay
+    var db = new SpriteBox { Size = new Size(100, 80) };
+    var clips = new List<Rectangle>();
+    db.Render += (_, e) =>
+    {
+        clips.Add(e.ClipRectangle);
+        var reg = e.ClipRectangle.IsEmpty ? new Rectangle(0, 0, e.Width, e.Height) : e.ClipRectangle;
+        for (int y = reg.Y; y < reg.Bottom; y++) for (int x = reg.X; x < reg.Right; x++) e.Surface.Pixels[y * e.Width + x] = unchecked((int)0xFF101010);
+    };
+    db.RenderOnce();
+    Chk(clips[^1] == Rectangle.Empty, "a full render reports an empty clip (everything)");
+    var snap = db.Surface.Pixels.ToArray();
+    var part = new Rectangle(20, 15, 30, 25);
+    db.Redraw(part); db.Redraw(new Rectangle(80, 60, 40, 40)); db.Redraw(new Rectangle(90, 70, 100, 100));   // unions + clamps to 100x80
+    var expect = Rectangle.Union(part, new Rectangle(80, 60, 20, 20));                                        // 80,60,40,40 clamped to 100x80; 90,70,.. covered by the full-pending rule? no: partial pending -> unions
+    db.RenderOnce();
+    Chk(clips[^1] == Rectangle.Union(expect, new Rectangle(90, 70, 10, 10)), $"pending partials union into one clip ({clips[^1]})");
+    bool untouched = true;
+    for (int qy = 0; qy < 80 && untouched; qy++) for (int qx = 0; qx < 100; qx++)
+        if (!clips[^1].Contains(qx, qy) && db.Surface.Pixels[qy * 100 + qx] != snap[qy * 100 + qx]) { untouched = false; break; }
+    Chk(untouched, "pixels outside the clip keep the previous frame");
+    db.Redraw(); db.RenderOnce();
+    Chk(clips[^1] == Rectangle.Empty, "a full Redraw supersedes partials (clip empty again)");
     bool balanced = true; long prevMax = long.MaxValue;                        // the largest area must shrink (or stay) with every extra copy
     for (int n = 1; n <= 24; n++)
     {
