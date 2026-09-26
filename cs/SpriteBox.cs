@@ -34,9 +34,14 @@ namespace Sr2d64CSport
     /// <summary>Argument of <see cref="SpriteBox.Render"/>: the surface to draw into (already the right size).</summary>
     internal sealed class RenderEventArgs : EventArgs
     {
-        public RenderEventArgs(Sprite surface) { Surface = surface; }
+        public RenderEventArgs(Sprite surface) : this(surface, Rectangle.Empty) { }
+        public RenderEventArgs(Sprite surface, Rectangle clip) { Surface = surface; ClipRectangle = clip; }
         /// <summary>The back buffer of the control: draw the whole scene into it.</summary>
         public Sprite Surface { get; }
+        /// <summary>The part of the surface that must be redrawn (surface pixels; every <see cref="SpriteBox.Redraw(Rectangle)"/> before
+        /// this paint is unioned in). <see cref="Rectangle.Empty"/> = the whole surface. ADVISORY: honour it to skip the work outside -
+        /// whatever the handler draws is kept only inside this rectangle, the rest keeps the previous frame's pixels.</summary>
+        public Rectangle ClipRectangle { get; private set; }
         /// <summary>Width / height of the surface (shorthand for Surface.Width / .Height).</summary>
         public int Width => Surface.Width;
         public int Height => Surface.Height;
@@ -47,6 +52,7 @@ namespace Sr2d64CSport
     {
         private Sprite? _surface;
         private bool _dirty = true;
+        private Rectangle _dirtyRect = Rectangle.Empty;   // partial region pending (surface pixels); Empty with _dirty = the whole surface
 
         private Size _fixedSize = Size.Empty;
         private bool _gdi = true;
@@ -120,6 +126,12 @@ namespace Sr2d64CSport
         /// to their own event. Override <see cref="HasRenderer"/> too when you override this.
         /// </summary>
         protected virtual void OnRender(Sprite surface) => Render?.Invoke(this, new RenderEventArgs(surface));
+        /// <summary>Partial render: same as <see cref="OnRender(Sprite)"/>, but the handler's <see cref="RenderEventArgs.ClipRectangle"/>
+        /// names the region that changed (the union of the pending <see cref="Redraw(Rectangle)"/> rectangles). The base
+        /// <see cref="OnRender(Sprite)"/> implementation routes here when a partial region is pending; a subclass that overrode only
+        /// <see cref="OnRender(Sprite)"/> still works - it simply renders everything.</summary>
+        protected virtual void OnRender(Sprite surface, Rectangle clip) => Render?.Invoke(this, new RenderEventArgs(surface, clip));
+        void RunRender(Rectangle clip) { if (clip.IsEmpty) OnRender(_surface!); else OnRender(_surface!, clip); }
         /// <summary>True when something will draw the scene (the Render event has subscribers, or a subclass overrides OnRender).</summary>
         protected virtual bool HasRenderer => Render != null;
 
@@ -147,7 +159,7 @@ namespace Sr2d64CSport
         {
             if (!NativeAvailable) { OnPaintUnavailable(e); base.OnPaint(e); return; }
             EnsureSurface();
-            if (_dirty && HasRenderer) { OnRender(_surface!); _dirty = false; ContentChanged(); }
+            if (_dirty && HasRenderer) { RunRender(_dirtyRect); _dirty = false; _dirtyRect = Rectangle.Empty; ContentChanged(); }
             else if (_surface!.IsGdiSurface) _surface.GdiSync();
             IntPtr hdc = e.Graphics.GetHdc();
             try
@@ -177,9 +189,40 @@ namespace Sr2d64CSport
         /// </summary>
         /// <summary>Renders on demand, without a WM_PAINT: creates the surface, runs the renderer when dirty and returns it.
         /// What the headless tests (tests/cs/ctlrun) use instead of OnPaint; also handy for "render once, save the picture".</summary>
-        public Sprite RenderOnce() { EnsureSurface(); if (_dirty && HasRenderer) { OnRender(_surface!); _dirty = false; ContentChanged(); } return _surface!; }
+        public Sprite RenderOnce() { EnsureSurface(); if (_dirty && HasRenderer) { RunRender(_dirtyRect); _dirty = false; _dirtyRect = Rectangle.Empty; ContentChanged(); } return _surface!; }
+
+        /// <summary>Renders exactly <paramref name="clip"/> right now (headless tests, "refresh just this part before saving") and returns the
+        /// surface. The handler receives the clip in <see cref="RenderEventArgs.ClipRectangle"/>; only the clipped region is guaranteed to
+        /// hold the new picture - outside it the previous surface pixels stay.</summary>
+        public Sprite RenderOnce(Rectangle clip)
+        {
+            EnsureSurface();
+            clip = Rectangle.Intersect(clip, new Rectangle(0, 0, _surface!.Width, _surface.Height));
+            if (HasRenderer) { if (clip.IsEmpty) OnRender(_surface!); else OnRender(_surface!, clip); _dirty = false; _dirtyRect = Rectangle.Empty; ContentChanged(); }
+            return _surface!;
+        }
         
-        public void Redraw() { _dirty = true; ContentChanged(); Invalidate(); }
+        public void Redraw() { _dirty = true; _dirtyRect = Rectangle.Empty; ContentChanged(); Invalidate(); }
+
+        /// <summary>
+        /// Requests a PARTIAL redraw: only <paramref name="surfaceRect"/> (in surface pixels) is re-rendered on the next
+        /// paint, and the handler can skip the rest via <see cref="RenderEventArgs.ClipRectangle"/>. Several calls union
+        /// into one region; a full <see cref="Redraw()"/> supersedes them. The caller promises the scene did NOT change
+        /// outside the rectangle - whatever the handler draws, only the rectangle is guaranteed to show the new picture.
+        /// In classic mode (no SizeMode, no FixedSurfaceSize) the surface is the client area, so the invalidation is
+        /// narrowed to the rectangle as well; the blit side always was clipped.
+        /// </summary>
+        public void Redraw(Rectangle surfaceRect)
+        {
+            if (!NativeAvailable || surfaceRect.IsEmpty) return;
+            EnsureSurface();
+            surfaceRect = Rectangle.Intersect(surfaceRect, new Rectangle(0, 0, _surface!.Width, _surface.Height));
+            if (surfaceRect.IsEmpty) return;
+            if (_dirty && _dirtyRect.IsEmpty) return;                        // a full render is pending - it covers this
+            _dirtyRect = _dirtyRect.IsEmpty ? surfaceRect : Rectangle.Union(_dirtyRect, surfaceRect);
+            _dirty = true; ContentChanged();
+            Invalidate(!Viewed && FixedSurfaceSize.IsEmpty ? _dirtyRect : ClientRectangle);   // classic mode: the surface is the client area
+        }
 
         /// <summary>Same as <see cref="Redraw"/> (older name, kept).</summary>
         public void RefreshScene() => Redraw();
@@ -193,7 +236,7 @@ namespace Sr2d64CSport
         {
             if (!NativeAvailable) { Invalidate(); return; }         // placeholder only (designer / no DLL)
             EnsureSurface();
-            if (HasRenderer) { OnRender(_surface!); _dirty = false; }
+            if (HasRenderer) { OnRender(_surface!); _dirty = false; _dirtyRect = Rectangle.Empty; }
             Present();
         }
 
@@ -243,7 +286,7 @@ namespace Sr2d64CSport
             if (!NativeAvailable) throw new DllNotFoundException("SR2D64.dll could not be loaded (see SR2D.DllPath / the SR2D_DLL environment variable).");
             Size sz = Viewed ? ImageSize : FixedSurfaceSize.IsEmpty ? ClientSize : FixedSurfaceSize;
             _surface = new Sprite(Math.Max(1, sz.Width), Math.Max(1, sz.Height), GdiSurface);
-            _dirty = true;
+            _dirty = true; _dirtyRect = Rectangle.Empty;
         }
 
         protected override void OnResize(EventArgs e)

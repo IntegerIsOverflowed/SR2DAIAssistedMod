@@ -8,10 +8,21 @@ Entries from 2026-09-18 on are dated. The "[earlier NN]" entries reconstruct the
 before the log existed, in order (higher number = more recent), without dates.
 
 Conventions
-  REPO     project moved to git (github.com/IntegerIsOverflowed/SR2DAIAssistedMod, branch ai-updates): the original
-           pre-mod engine sources were relocated from the upload area to legacy/original-engine, the AI-format vector
-           samples to legacy/test-assets/ai, Corel + cursor material to legacy/reference; chat screenshots and scratch
-           files were deleted. Everything else is unchanged.
+  ADDED    cs/EditHistory.cs: rect-based undo/redo for in-place edits. EditHistory.Record(sprite, rect) (or the
+           VoxelGrid box overload) snapshots the affected pixels BEFORE a verb mutates them; Undo pastes them back,
+           Redo re-applies the newer state (captured on the first undo). Only the affected rectangle is stored
+           (Sprite.Pixels spans / the Voxel indexer), entries are independent snapshots on one timeline, a new record
+           discards the redo tail, a memory cap (default 64 MB) drops the oldest entries first, and Undo validates the
+           target dimensions instead of corrupting. Covers Sprite.Edit / Selection / effects and VoxelGrid edits
+           through the public APIs. ctlrun: 12 new checks (pixel-exact restore, redo, tail discard, cap, dim
+           mismatch, voxel box undo/redo), 112 total.
+  ADDED    cs/SpriteBox: dirty-rect redraw. Redraw(Rectangle surfaceRect) re-renders only that region on the next
+           paint - pending partials union into one clip, a full Redraw() supersedes them - and the Render handler can
+           skip the rest via the new RenderEventArgs.ClipRectangle (Rectangle.Empty = everything; advisory: only the
+           clipped region is guaranteed to hold the new picture). In classic mode (no SizeMode / FixedSurfaceSize)
+           the invalidation is narrowed to the clip as well, so the blit side saves too; RenderOnce(Rectangle) runs a
+           partial render synchronously for headless tests. ctlrun: 4 new checks (clip flow, union + clamp, outside
+           pixels keep the previous frame, full-redraw supersede).
   ADDED    new capability, nothing existing changes
   CHANGED  existing behaviour or API changed (a compat note says how to keep the old behaviour)
   FIXED    a bug

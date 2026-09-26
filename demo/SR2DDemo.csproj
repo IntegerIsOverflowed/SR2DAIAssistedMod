@@ -72,6 +72,7 @@
     <Compile Include="..\cs\Vector.PdfText.cs" Link="cs\Vector.PdfText.cs" />
     <Compile Include="..\cs\Vector.Fonts.cs" Link="cs\Vector.Fonts.cs" />
     <Compile Include="..\cs\ImportLog.cs" Link="cs\ImportLog.cs" />
+    <Compile Include="..\cs\EditHistory.cs" Link="cs\EditHistory.cs" />
     <Compile Include="..\cs\SpriteFont.cs" Link="cs\SpriteFont.cs" />
     <Compile Include="..\cs\SpriteFont.Cache.cs" Link="cs\SpriteFont.Cache.cs" />
     <Compile Include="..\cs\Vector.FontData.cs" Link="cs\Vector.FontData.cs" />
