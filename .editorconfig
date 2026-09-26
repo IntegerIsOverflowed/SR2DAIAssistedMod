@@ -1,0 +1,69 @@
+# SR2D - analyzer configuration for cs/, demo/ and template/ (picked up by Visual Studio, Rider and dotnet build).
+# Enabled by <EnableNETAnalyzers> + <AnalysisLevel>latest-recommended</AnalysisLevel> in the csproj files.
+# The severities below are the outcome of the 2026-09-23 audit (CHANGELOG): what the code base is clean on is a
+# warning so it stays clean; what it deliberately does is silenced with the reason next to it.
+root = true
+
+[*.cs]
+# ---- correctness: keep at warning (the code is clean on these) -------------------------------------------
+dotnet_diagnostic.CA1305.severity = warning   # IFormatProvider on number parse / format (ru-RU decimal comma!)
+dotnet_diagnostic.CA1310.severity = warning   # StartsWith / EndsWith without StringComparison
+dotnet_diagnostic.CA1309.severity = warning   # string.Equals without StringComparison
+dotnet_diagnostic.CA2213.severity = warning   # disposable field never disposed
+dotnet_diagnostic.CA2245.severity = warning   # property assigned to itself (see note in SpriteRangeControl: Value = Value is a deliberate re-clamp)
+dotnet_diagnostic.CA1508.severity = warning   # dead conditional code
+dotnet_diagnostic.CA2208.severity = warning   # ArgumentException without paramName
+dotnet_diagnostic.CA1806.severity = warning   # ignored method result
+dotnet_diagnostic.CA2012.severity = warning   # ValueTask misuse
+dotnet_diagnostic.CA1063.severity = warning   # IDisposable pattern
+dotnet_diagnostic.CA1816.severity = warning   # GC.SuppressFinalize
+
+# ---- deliberate in this code base ---------------------------------------------------------------------------
+dotnet_diagnostic.CA1031.severity = none      # catch-all in the importers = "damaged object -> skip it, keep the file" (the fuzzers rely on it)
+dotnet_diagnostic.CA1307.severity = none      # string.Contains(string) / Replace: ordinal by definition in .NET Core+ (rule is legacy)
+dotnet_diagnostic.CA1308.severity = none      # ToLowerInvariant for case-folding of tokens is intended (file formats are lower-case)
+dotnet_diagnostic.CA2000.severity = suggestion # ownership handed to the caller / added to Controls is the pattern here; real leaks are caught by the runners
+dotnet_diagnostic.CA1805.severity = none      # explicit = 0 / = null initialisers are used as documentation
+dotnet_diagnostic.CA1814.severity = none      # multidimensional arrays where they read better (tables)
+dotnet_diagnostic.CA1822.severity = none      # instance methods that could be static: API shape is intentional
+dotnet_diagnostic.CA1861.severity = none      # constant arrays as arguments (one-off tables in tests / lookups)
+dotnet_diagnostic.CA1866.severity = none      # StartsWith(char) vs StartsWith(string): the string forms carry StringComparison.Ordinal explicitly
+dotnet_diagnostic.CA5392.severity = none      # DefaultDllImportSearchPaths: SR2D resolves its DLL itself (SR2D.cs resolver)
+dotnet_diagnostic.CA5394.severity = none      # System.Random is fine for dither / noise / dissolve
+dotnet_diagnostic.CA5351.severity = none      # MD5 is used as a content hash for the vector cache, not for security
+dotnet_diagnostic.CA1510.severity = none      # ArgumentNullException.ThrowIfNull: the explicit form compiles on older language levels too
+dotnet_diagnostic.CA1512.severity = none
+dotnet_diagnostic.CA1513.severity = none
+dotnet_diagnostic.CA1064.severity = none      # internal exception types
+dotnet_diagnostic.CA2201.severity = none      # reserved exception types (IndexOutOfRange rethrown as InvalidData in decoders)
+dotnet_diagnostic.CA1845.severity = none      # string.Concat vs AsSpan: not on a hot path
+dotnet_diagnostic.CA1850.severity = none
+dotnet_diagnostic.CA1859.severity = none      # concrete types for performance: the hot paths already use them
+dotnet_diagnostic.CA1870.severity = none
+dotnet_diagnostic.CA1852.severity = none      # sealed: the SR2D classes are internal and already sealed where it matters
+dotnet_diagnostic.CA1846.severity = none
+dotnet_diagnostic.CA1823.severity = none
+dotnet_diagnostic.CA2249.severity = none      # IndexOf >= 0 vs Contains: both ordinal, either reads fine
+dotnet_diagnostic.CA1416.severity = none      # platform compatibility: the WinForms files are Windows-only by project type
+
+# ---- IDE hints (Message level in Visual Studio's error list) -------------------------------------------------
+# Style-only suggestions that would touch hundreds of lines for no behavioural gain; the code keeps the explicit
+# forms so it reads the same on every language level. Turn any of them back to "suggestion" if you want the lightbulbs.
+dotnet_diagnostic.IDE0090.severity = silent   # target-typed 'new()' - the explicit type name is kept on purpose
+dotnet_diagnostic.IDE0028.severity = silent   # collection initialisers
+dotnet_diagnostic.IDE0300.severity = silent   # collection expressions [..] for arrays
+dotnet_diagnostic.IDE0305.severity = silent   # collection expressions for ToArray / ToList
+dotnet_diagnostic.SYSLIB1054.severity = silent # LibraryImport source generator: the handful of DllImports in the demo are not on a hot path
+                                               # (cs/SR2D.cs uses function pointers resolved by its own loader, so the rule does not apply there)
+
+# ---- Roslynator (if installed in the IDE) -------------------------------------------------------------------
+dotnet_diagnostic.RCS1123.severity = none     # parentheses for clarity are added consistently (user preference)
+dotnet_diagnostic.RCS1146.severity = silent   # "use conditional access": `if (x != null) x.Foo()` is kept where it reads better than `x?.Foo()`
+dotnet_diagnostic.RCS1003.severity = silent   # braces on multi-line if/else: the one-statement bodies stay brace-less by house style
+
+# ---- style ----------------------------------------------------------------------------------------------------
+indent_style = space
+indent_size = 4
+# end_of_line: not enforced (the repo files are LF; git autocrlf handles Windows checkouts)
+insert_final_newline = true
+charset = utf-8

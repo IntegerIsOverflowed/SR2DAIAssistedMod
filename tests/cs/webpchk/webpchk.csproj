@@ -1,0 +1,47 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- WebP decoder check: decodes tests/webp/*.webp with cs/WebP.cs and compares pixel for pixel with the
+       libwebp reference decode stored beside each file (*.ref.png, read with the engine's PngDecoder);
+       "fuzz N" mutates the corpus and requires that only InvalidDataException ever escapes. Linux / net9.0, no DLL needed. -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType><TargetFramework>net9.0</TargetFramework><AllowUnsafeBlocks>true</AllowUnsafeBlocks><Nullable>enable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings><EnableDefaultCompileItems>false</EnableDefaultCompileItems><NoWarn>CS0436;CS8981</NoWarn>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="../../../cs/WebP.cs" />
+    <Compile Include="../../../cs/Jpeg.cs;../../../cs/ImageCodec.cs" />
+    <Compile Include="../../../cs/Png.cs;../../../cs/Sprite.Stroke.cs" />
+    <Compile Include="../../../cs/SpriteTransform.cs" />
+    <Compile Include="../../../cs/Vector.Image.cs" />
+    <Compile Include="../../../cs/Vector.cs" />
+    <Compile Include="../../../cs/Vector.Render.cs" />
+    <Compile Include="../../../cs/Vector.Cache.cs" />
+    <Compile Include="../../../cs/Vector.Edit.cs" />
+    <Compile Include="../../../cs/Vector.Svg.cs;../../../cs/Vector.SvgText.cs" />
+    <Compile Include="../../../cs/Vector.Ps.cs" />
+    <Compile Include="../../../cs/Vector.PsImage.cs" />
+    <Compile Include="../../../cs/Vector.Ai.cs" />
+    <Compile Include="../../../cs/Vector.Pdf.cs" />
+    <Compile Include="../../../cs/Vector.PdfText.cs" />
+    <Compile Include="../../../cs/Vector.Fonts.cs;../../../cs/ImportLog.cs;../../../cs/SpriteFont.cs;../../../cs/SpriteFont.Cache.cs;../../../cs/Sprite.Font.cs" />
+    <Compile Include="../../../cs/Vector.FontData.cs" />
+    <Compile Include="../../../cs/SR2D.cs" />
+    <Compile Include="../../../cs/Sprite.cs" />
+    <Compile Include="../../../cs/Sprite.Rect.cs" />
+    <Compile Include="../../../cs/Sprite.Shapes.cs" />
+    <Compile Include="../../../cs/Sprite.Blend.cs" />
+    <Compile Include="../../../cs/Sprite.Edit.cs" />
+    <Compile Include="../../../cs/Sprite.Curves.cs" />
+    <Compile Include="../../../cs/Sprite.Effects.cs" />
+    <Compile Include="../../../cs/Sprite.Shear.cs" />
+    <Compile Include="../../../cs/Sprite.Gradient.cs" />
+    <Compile Include="../../../cs/Sprite.Text.cs" />
+    <Compile Include="../../../cs/PixelFont.cs" />
+    <Compile Include="../../../cs/PixelFont.Unicode.cs" />
+    <Compile Include="../../../cs/Effects.cs" />
+    <Compile Include="../../../cs/LayeredSprite.cs" />
+    <Compile Include="../../../cs/Selection.cs" />
+    <Compile Include="../../../cs/SpriteView.cs" />
+    <Compile Include="Program.cs" />
+    <PackageReference Include="System.Drawing.Common" Version="9.0.0" />
+  </ItemGroup>
+</Project>

@@ -1,0 +1,999 @@
+SR2D - change log
+=================
+Newest first. One entry per delivery; every entry says what was added / changed, which files,
+and whether anything existing behaves differently ("compat" lines). The API details are in
+README.md - this file is the "what happened when" record.
+
+Entries from 2026-09-18 on are dated. The "[earlier NN]" entries reconstruct the deliveries
+before the log existed, in order (higher number = more recent), without dates.
+
+Conventions
+  REPO     project moved to git (github.com/IntegerIsOverflowed/SR2DAIAssistedMod, branch ai-updates): the original
+           pre-mod engine sources were relocated from the upload area to legacy/original-engine, the AI-format vector
+           samples to legacy/test-assets/ai, Corel + cursor material to legacy/reference; chat screenshots and scratch
+           files were deleted. Everything else is unchanged.
+  ADDED    new capability, nothing existing changes
+  CHANGED  existing behaviour or API changed (a compat note says how to keep the old behaviour)
+  FIXED    a bug
+  DEMO     the demo app / strips
+  TESTS    headless checks (tests/)
+  DOCS     README / comments only
+
+
+2026-09-25  Demo on SR2D controls (SpriteTextView / SpriteStackPanel new, list headers), pixel font: Cyrillic / Greek /
+            Latin-1 + Ext-A / symbols, real-font fallback, text box selection delete
+---------------------------------------------------------------------------
+  ADDED    cs/SpriteControls.TextView.cs (new): SpriteTextView - a read-only multi-line text view (log, description,
+           code): SetLines(lines, runs) / Text / AppendLine(line, color) (with MaxLines, FollowTail), WordWrap (keeps
+           columns, so runs still line up), LineNumbers, TabSize, LineSpacing, per-line colour runs (TextRun(start, len,
+           rgb)) or a Colorizer callback (asked once per line, cached), mouse selection (drag, double click = word,
+           Shift+click), Ctrl+A / Ctrl+C / Ctrl+Insert / Escape, SelectedText / Copy(), vertical + horizontal
+           SpriteScrollBars (auto), wheel (Shift = sideways), keyboard scrolling (arrows, Page, Ctrl+Home / End),
+           ScrollToEnd / ScrollToLine / TopLine. Pixel font by default, TextFontFamily for a real font.
+  ADDED    cs/SpriteControls.Static.cs SpriteStackPanel : SpritePanel - lays its children out in a column (Vertical) or
+           a row (Horizontal): Gap, Stretch (full width / height), Wrap (row: continue on the next line), AutoSize (to
+           the content), hidden children are skipped, a vertical column taller than the panel gets a SpriteScrollBar +
+           wheel; ContentSize. Nest them for label-over-control fields or button rows (the demo does).
+  AUDIT    revision against the awesome-copilot CSharpExpert / WinFormsExpert agent checklists. Already compliant:
+           nullable events + object? handlers, no async (sync engine by design), catch-alls only via ImportLog.Swallowed
+           (the agreed warnings policy), numeric CompareTo only, designer-serialization attribute on every public control
+           property, template designer file clean, Application.SetHighDpiMode at startup. Fixed / added:
+  ADDED    demo: global exception handling (WinFormsExpert): Application.ThreadException + AppDomain.UnhandledException
+           write crash.log next to the exe and show the report with the details pre-copied to the clipboard (a
+           StackOverflowException stays process-fatal - nothing can catch it). Replaces the default Continue/Quit dialog.
+  ADDED    accessibility (WinFormsExpert): every SpriteControlBase control now has an AccessibleRole (button, check,
+           radio, slider, combo, list, tab, grouping ...) and AccessibleName kept in sync with Text; VoxelBox = Graphic.
+  FIXED    cs/Png.cs: the PNG signature was a "=> new byte[]" property (a fresh array per access) - now static readonly
+           (the WinFormsExpert property-pattern rule).
+  ADDED    ArgumentNullException.ThrowIfNull on SpriteFont.Load(data/stream) and SpriteTextView.SetLines where null
+           would have surfaced as a deep, unrelated exception (VoxelBox.Grid stays null-tolerant on purpose).
+  NOTE     not applied on purpose: resource-file localisation of the demo strings (single-language demo), TFM bump to
+           net10.0-windows10.0.22000.0 (no CsWin32 projections; "don't change TFM unless asked"), Application.SetColorMode
+           (the controls are fully owner-drawn with absolute colours), records/DI/MVVM (no DTOs, no such layers).
+  FIXED    SpriteBox (View): the deferred scroll-bar re-layout could recurse forever - ViewResized -> SyncBars ->
+           ViewResized ran INLINE when the control had no handle yet (a strip built while its host is still invisible,
+           e.g. the demo's "SpriteBox SizeMode" test selected as the very first test) = StackOverflowException on the
+           first click. The re-layout is now only ever deferred through BeginInvoke (no synchronous fallback), runs
+           under the resize guard, and the pending flag is cleared by the re-layout itself; the decision vs. shown-bars
+           pair is covered by a new ctlrun check.
+  ADDED    SpriteBox.RenderOnce(): renders on demand without a WM_PAINT (runs the renderer when dirty, returns the
+           surface) - what the headless tests use instead of OnPaint; also handy for "render once, save the picture".
+  ROBUSTNESS Sprite / SpriteBox: the GDI P/Invokes (CreateDIBSection, GetDC) now fall back silently to a plain buffer /
+           WM_PAINT painting when the platform has no GDI (a Linux test runner). Windows behaviour is unchanged.
+  TESTS    ctlrun compiles the REAL SpriteBox + SpriteBox.View.cs now (new SizeModeBox section, 6 checks) - the
+           SizeMode machinery was previously only compiled by the demo and never exercised headless. Fakes extended
+           (PaintEventArgs, ImageLayout, ContextMenuStrip, KeyEventArgs.Control/Alt, Control.MouseButtons / Font /
+           BeginInvoke / BackgroundImage / OnPaint, virtual Cursor); the fake SpriteBox stub is gone. 74 checks.
+  FIXED    demo: the "spiralling fractal" placement now divides the NEWEST region (the second half of the previous
+           split), not always a largest one - exactly the reference screenshots: 1 = whole viewport, 2 = left | right,
+           3 = left | right-top over right-bottom, 4 = the right-bottom splits into two side by side (the split line
+           spirals, the older tiles keep their size). The rectangles are precalculated once per viewport size (the
+           per-test RegionCache rebuilds when the canvas resizes) and the Copies slider of the fractal tests is CAPPED
+           to FractalLayout.MaxRegions - the last split whose both halves stay >= 16 px (11 copies on 832x720); the
+           cap follows the viewport on resize. ctlrun: exact 2- and 4-copy reference partitions, the cap, and the
+           too-small-to-split case, 96 checks total.
+  ADDED    demo: grabbable checker backdrops without the "follow the mouse" check box: DemoTest.GrabBackdrop lets any
+           test drag the backdrop with the hand cursor through the new Ctx.BackdropX/BackdropY (a plain offset, NOT the
+           Mouse parameter - the check box no longer appears for backdrop-only tests, and no pivot crosshair is drawn).
+           Restored on Draw (Op selector), Draw - all 9 ops, Blend (factor slider) and added to Draw (Op selector)
+           <new> (MulAddS2X <new> / MoveByte <new> stay as they were: their tiles cover the viewport opaquely, a
+           backdrop would never be visible).
+  FIXED    Controls: a click on an open drop list's own field now only CLOSES it. The outside-click filter used to close
+           the menu and let the same click through - the combo field toggled it open again ("blinks and stays open,
+           double click to close", the fast second click worked only because it arrived as a WM_LBUTTONDBLCLK routed to
+           the menu's capture window). The filter now recognises the opener (root.Panel.Owner) and swallows a left
+           button-down on it; clicks on any OTHER window still close the menu and pass through. ctlrun: 2 new checks,
+           92 total (Fake gained chain-aware Visible + RectangleToScreen).
+  FIXED    demo: the "Limit fps to" checkbox sat 2 px right of the other check boxes - every nested SpriteStackPanel row
+           added its own 2 px frame on top of the parent's padding. The demo's nested rows (fps, suite, test buttons,
+           mask-bit field) now cancel the frame with a -2 px padding and line up exactly. Answer to "why 2 px": the row
+           is a child of the stack, so its children start at the stack's 6 px PLUS the row's own 2 px frame = 8.
+  FIXED    demo: moving the mouse over the canvas dropped the fps to the mouse poll rate - the game loop rendered only
+           while the message queue was empty, and WM_MOUSEMOVE / WM_SETCURSOR at up to 1000/s kept it permanently
+           non-empty (rendering was not slower; the frames were simply starved out). The Idle loop now hands back to
+           the main pump only for real input / paint / timer messages and coalesces a pending move flood inline every
+           4 frames - full fps with a few ms of input latency, animation no longer stops when the mouse rests.
+  ADDED    demo/FractalLayout.cs: the "spiralling fractal" copy placement (a binary space partition - copy 1 fills the
+           viewport, every further copy splits a largest region across its longer side; 2 = left | right, 3 = left |
+           right-top over right-bottom, 4 = quarters ...) + the channel-swap strip of the MoveByte <new> test.
+           ctlrun compiles it and checks the exact 1 / 2 / 3-copy partitions and the cover-exactly-once + balance
+           property of a 9-copy 813x720 partition.
+  ADDED    demo tests: "Draw (Op selector) <new>", "MulAddS2X <new>", "MoveByte (channel swap) <new>" - the fractal copy
+           placement with every region's sprite PRESCALED + PRECROPPED once per layout (per-region RegionCache: a frame
+           is one plain Draw per copy, nothing cropped or scaled per frame). MoveByte <new>: a combo picks the channel
+           pair of the first copy (R<->G / R<->B / R<->A / G<->B / G<->A / B<->A), the other copies switch channels
+           randomly (stable per region, re-shuffled on rebuild); swaps read from a pristine copy, since two in-place
+           MoveByte calls would chain through the already-swapped byte. The old three tests stay unchanged for now
+           (replacement is a separate step). "Draw - all 9 ops": the nine tiles now use the same fractal partition with
+           prescaled region sprites, copies stack on top of each other per tile, and the op captions are drawn INSIDE
+           their tile at a pixel-font scale that fits (full name -> short form -> clipped), clear of the info panel -
+           they were cut off at small viewport sizes before.
+  CHANGED  demo tests: "Draw - clipped" and "Blend (factor slider)" default to Count = 10; the backdrop-drag flag
+           (DragAnywhere) is off in "Draw (Op selector)", "Draw - all 9 ops" and "Blend" (static checker backdrop);
+           "MulAddS2X" and "MoveByte (channel swap)" lay their grid out centred instead of following the mouse
+           (dragging the hand cursor still moves things where a drag makes sense). codechk: 101 tests / 0 failed.
+  FIXED    Controls: SpriteStackPanel no longer runs layout passes while it is chain-hidden. WinForms' Visible walks
+           the whole ancestor chain, so any pass triggered while the form / tab page was hidden saw every child as
+           "invisible" and positioned nothing - and nothing re-ran when the page was first shown (the demo Setup tab
+           could stay stacked under its first control, only a 1 px sliver of the buttons below visible). The panel now
+           skips such passes and re-lays-out the moment it really becomes visible (OnVisibleChanged /
+           OnParentVisibleChanged - a tab page was shown or an ancestor appeared). ctlrun: 2 new checks (pass skipped
+           while hidden; laid out on the first trigger after showing), 84 total.
+  FIXED    Controls: an open SpriteMenu (drop list / context menu) now owns the mouse while open (Capture, like the
+           native menus). Clicks can no longer be lost to an activation / hit-test race (the reported "open the list,
+           move over it, click - the first click did nothing"). A click outside the rows closes the menu; for clicks on
+           other windows the message filter releases the capture first, so they still pass through. The mouse-up also
+           falls back to the cursor position when it arrives off-row, and re-opening recaptures. Sub-menus release the
+           capture while open (they navigate through the filter) and the parent recaptures when they close.
+  FIXED    demo: CA1305 - Convert.ToString of the unhandled-exception payload now uses InvariantCulture (the last build
+           warning).
+  FIXED    Controls: SpriteStackPanel enforces a hard no-overlap rule while stacking: a row's top is never above the
+           previous row's bottom + Gap (both orientations), and a child reporting a zero size is clamped to 1 px, so a
+           stale layout can never pull the rows after it on top of itself (reported: on the demo Setup tab the closed
+           "fit to window" combo ended up covering the "Run suite / Copy log / Save CSV" buttons). An OPEN drop-down
+           still overlays whatever is below it - that is what popups do; closed controls cannot overlap anymore.
+           ctlrun: 2 new checks (exact top = bottom + Gap spacing on a replica of the demo Setup column; a zero-height
+           row), 76 total. If you still see overlapping rows after updating, do a clean rebuild (delete bin/obj).
+  FIXED    Controls: SpriteStackPanel re-passes its layout (up to 3x) while child heights settle - a nested
+           AutoSize panel (a "label over a control" field) sets its own height during the parent's layout pass,
+           and the parent used to position every row after it with the stale default height (in the demo's Setup
+           tab the "fit to window" combo row landed on top of the "Copy log" / "Save CSV" buttons).
+  DEMO     combo titles wrap instead of being cut with an ellipsis ("Canvas (drawn 1:1 from the top-left of the
+           preview)" now shows whole), and the combo fields get a fixed height instead of AutoSize, so row
+           positions no longer depend on when a nested panel gets to lay out.
+  DEMO     a test's control strip that fails to build is now reported in the log ("control strip of \"...\" failed
+           to build: ...") instead of crashing the app - please send the logged exception if a strip still misbehaves.
+  FIXED    Controls: the text scale is no longer guessed from the control's own size (1 per ~80 px) - the pixel
+           font now renders at scale 1 unless TextScale is set explicitly. The guess made the demo's tall test list,
+           the combo drop-downs and the Test / Setup tab captions render 4x, and the tab strip grew at paint time
+           (the strip height follows the text) so the huge captions painted over the first row of their page.
+  FIXED    Controls + demo: switching the keyboard layout (e.g. to Russian) while a control had focus crashed the
+           app with CultureNotFoundException: WinForms' own WM_INPUTLANGCHANGE handler builds a CultureInfo, which
+           InvariantGlobalization forbids - the demo csproj had it on. SpriteControlBase now swallows the message
+           (the controls read the characters from WM_CHAR, they do not care about the layout), and the demo runs
+           with InvariantGlobalization=false as well. Typing Cyrillic in the text boxes is covered by ctlrun.
+  DEMO     demo project moved to .NET 10 (net10.0-windows, like the template).
+  DEMO     test list reorganised after the category / redundancy review (109 -> 98 tests, 16 groups): Text
+           (DrawText, SpriteFont), Editing (in-place editors, FloodFill / Selection) and Layers (the three
+           LayeredSprite tests) split out of Shapes / Effects / Blend; PNG codec + vector import -> Files;
+           DrawRotateShear -> New API (native kernels) next to DrawRotate2 (the group DRAW_WARP name retired);
+           the seven `new Sprite(src, Transform)` entries merged into one test with the transform in the Op box;
+           manual vs Effects drop shadow and glow merged into side-by-side tests; the two line comparisons merged
+           into one 3-way (DrawLine vs PreciseDots vs DrawLine2); "shapes with AlphaOver" folded into the
+           Old-vs-new transparent-layer test as a second row; "DrawScaled - fill canvas" is now the NotMask
+           benchmark on the interactive DrawScaled test; ClearAlpha renamed, DoF test renamed ("slice stack").
+  ADDED    SpriteListBox headers: SetItems(items, headers, colors) marks indices as group headers (drawn as a band,
+           bold, not selectable, skipped by the keyboard / Home / End) and gives single items a text colour
+           (e.g. greyed "unavailable"); IsHeader(i).
+  DEMO     demo/MainForm.cs: the window is built from SR2D controls only - no WinForms Label / TextBox / RichTextBox /
+           ListBox / ComboBox / CheckBox / Button / NumericUpDown / ProgressBar / TableLayoutPanel / FlowLayoutPanel
+           left (the render surface is the one plain Control). Dark theme (SpriteControlBase.DefaultBack). Test list =
+           SpriteListBox with group headers + search box; description / log / code view = SpriteTextView (the code view
+           colours the C# with CodeView.Colorize - the RichTextBox RTF path is gone; "Copy code"); right pane =
+           SpriteTabControl: "Test" shows ONLY the parameters the selected test reads (what its source mentions -
+           CodeView.ParamRefs scans its extracted C# for c.Angle / c.Scale ... - plus whatever Ctx recorded at run time,
+           or the test's own Controls list), "Setup" holds canvas / sprite / picture / SIMD / present / suite and a
+           "real font on the text panes" switch. Docking instead of TableLayout; captions shortened to fit.
+  TESTS    tests/cs/ctlrun: SpriteTextView (lines, MaxLines, wrap rows, selection / copy, scrolling, FollowTail, colour
+           runs, colorizer), SpriteStackPanel (positions, Stretch, AutoSize, scroll bar, wheel, wrap), list headers.
+           Fake.cs: LayoutEventArgs / OnLayout / Suspend-ResumeLayout / SetBounds / Width-Height setters / Right-Bottom.
+  ADDED    cs/PixelFont.Unicode.cs (new): PixelFont.Default now covers Cyrillic (Russian, Ukrainian, Belarusian, Serbian
+           except the wide Љ Њ), Greek with tonos, every Latin-1 / Latin Extended-A letter (accents composed on first use
+           from the base letter + a 2-row mark: capitals squashed to 5 rows, i/j lose the dot, cedilla/ogonek lift the
+           letter), the Latin-1 symbols (¡ ¿ « » § ¶ © ® ¢ £ ¥ € ¤ ¬ ¦ ª º ¹ ² ³ ÷ ß ð þ æ ø œ ł đ), typographic quotes /
+           dashes / bullet / № ™ ‰ ✓ and a few UI shapes (▲ ▼ ◄ ► ■ □ ● ○ ◆ ★ ☐ ☑). PixelFont.Has(ch).
+  ADDED    real-font fallback for anything the pixel font still lacks (CJK, Hebrew, Arabic, Hangul, emoji, ½ ...):
+           PixelFont.UseFallbackFont (default true), FallbackFamilies (system families tried in order, per code point the
+           first that has the glyph), FallbackFonts (your own SpriteFonts, tried first), FallbackEm, ResetFallbackFonts(),
+           FallbackLoader (SpriteFont.Installed, registered by a module initialiser in Sprite.Font.cs; PixelFont.cs /
+           Sprite.Text.cs compile without the vector-font files). Fallback glyphs are anti-aliased through the same op,
+           sit on the cell bottom, advance by their own width; surrogate pairs are one glyph.
+  ADDED    Sprite.TextPens(text, pens, scale, weight, letterSpacing, font): pen x before every character of a line
+           (mixed pixel / fallback advances). SpriteControls.Text.cs CharX / IndexAt use it, so the caret and mouse
+           hit-testing are right on text with fallback glyphs (pure pixel text keeps the one-multiply fast path).
+  CHANGED  Sprite.MeasureText: a line's width is the sum of the actual advances (identical to before for text the pixel
+           font draws itself; wider when fallback glyphs are in it). DrawText: characters without a pixel glyph draw
+           with the fallback font instead of the box when one is installed (UseFallbackFont = false restores the box).
+  FIXED    SpriteTextBox: Backspace / Delete / Ctrl+X with a selection did nothing (InsertText("") returned early);
+           now the selection is removed.
+  compat   PixelFont is now 'partial' (two files). SpriteFont implements the internal IFallbackFont interface.
+           Sprite.DrawPlaced is internal (was private). tests: fontchk PixelFontChecks, ctlrun Cyrillic / selection
+           checks; every csproj lists cs/PixelFont.Unicode.cs.
+
+2026-09-24  Wheel rework (Detailed look, SR2D edit field), numeric spinner drag / Below / WrapMouse,
+            RightButtonCommits, font-change layout fix, SpriteFont.Render + TextCache, VS hints
+--------------------------------------------------------------------------
+  CHANGED  cs/SpriteControls.Wheel.cs (rewritten): SpriteWheel.Style = WheelStyle.Detailed (new default: knurled band
+           with a ridge per step, metal hubs, lens highlight along the axis, translucent read-out plate + hairline) or
+           WheelStyle.Flat (the previous look). Edit = WheelEdit.None / Beside / DoubleClick / Click replaces the
+           WinForms TextBox: the field is a SpriteNumeric (Spinner = None) child of the wheel - same palette / font,
+           clipped by the control (WS_CLIPCHILDREN), Beside = permanently next to the drum, DoubleClick / Click = pops
+           up over the read-out (Enter applies + closes, Escape closes, click elsewhere applies; a click that becomes
+           a drag does not open; Ctrl + double click still resets). EditField / IsEditing / CommitEdit() / Nudge().
+           WrapMouse now wraps at the SCREEN edge along the drag axis (was: the control edge) - same rule as the
+           numeric; the drag path is shared with the other range controls (RightButtonCommits works).
+           compat: Editable (bool) stays as a shim for Edit = Beside; EditBoxControl now returns the SpriteNumeric
+           (Text is still the number text; set Value / call Commit() instead of poking Text). EditWidth unchanged.
+  ADDED    cs/SpriteControls.Input.cs SpriteNumeric: Spinner = SpinnerPlacement.Right (default) / Below (a "- | +"
+           row under the field, wide buttons) / None; DragToChange (default on: press a button and drag, up / right =
+           larger, PixelsPerStep px per Step, Shift = a tenth; the press still steps once and auto-repeats while
+           held; Escape during the drag restores the start value); WrapMouse (default on: the pointer is put back at
+           the opposite screen edge along the drag axis). The cursor is the I-beam over the number only - the spinner
+           shows the arrow (grab hand while dragging). SpriteTextBox: RightExtra / BottomExtra / IsExtraAt hooks,
+           FieldH, cursor toggles by IsExtraAt.
+  ADDED    cs/SpriteControls.cs SpriteRangeControl.RightButtonCommits (knob / slider / wheel / scroll bar): the right
+           button drags too and always commits on release (lift + ghost preview), the left button follows
+           CommitOnRelease - live left drag and deferred right drag on one control. DragButton / LastDragButton /
+           IsDragButton for subclasses. SpriteControlBase.WrapPointerOnScreen(client, vertical) helper,
+           RefreshFonts() / static RefreshFontsUnder(root).
+  FIXED    font change leaving stale layout (the demo's group box surface overlapping the tab strip on the "about"
+           tab after choosing a real text font; switching tabs repaired it): the tab strip height, the group-box
+           caption height and label sizes follow the font, but pages / docked children were not laid out again.
+           SpriteTabControl.OnTextFontChanged / OnTextScaleChanged re-lay the pages, SpritePanel / SpriteGroupBox
+           OnTextFontChanged runs PerformLayout, SpriteControlBase.TextScale raises OnTextScaleChanged. After
+           changing DefaultFontFamily call SpriteControlBase.RefreshFontsUnder(form) (the demo does).
+  ADDED    cs/SpriteFont.Cache.cs: SpriteFont.Render(text, size, colour) / RenderBlock(...) -> RenderedText (a
+           premultiplied Op.AlphaOver sprite + OriginX/Y / Width / Height / Ascent, DrawAt(dst, x, y, anchor) /
+           DrawBaseline) and TextCache (LRU of rendered text: Get / GetBlock / DrawString / DrawStringBlock, Limit
+           bytes + MaxEntries, Hits / Misses / Bytes / Count, Clear / Remove(font) / Dispose). The key includes the
+           font's FakeBold / FakeItalic / SubPixelPositions / Kerning / LetterSpacing. Blit lands pixel-identically
+           where DrawString draws; ~4x faster per line than live DrawString at 16 px. SpriteFont is now partial.
+  DEMO     controls strip: wheels use Edit = Beside / DoubleClick / Click (+ Style = Flat), "RightButtonCommits (all)"
+           check box; form strip: a Spinner = Below numeric; the font picker refreshes via RefreshFontsUnder.
+           SpriteFont test: own strip (FontDemo in ControlsDemo.cs) with an installed-family picker, bold / italic
+           face switches, a fine "Fake bold (em)" slider (default 0 - the Blend slider x0.001 made everything bold),
+           your own paragraph (presets: pangram, kerning, digits, lines) and a "TextCache" switch (the paragraph and
+           the size ladder are drawn from cached bitmaps under the AlphaBlend op; the stats line stays live).
+  FIXED    demo/MainForm.cs: the VS message-level hints of 2026-09-24 that were real (cached bold font, disposal,
+           redundant casts / parentheses); .editorconfig: IDE0090 / IDE0028 / IDE0300 / IDE0305 (collection
+           expressions / target-typed new - the code must stay readable in older compilers), SYSLIB1054
+           (LibraryImport - the P/Invoke table stays DllImport on purpose) and RCS1146 / RCS1003 set to silent with
+           the reason next to each.
+  TESTS    tests/cs/ctlrun: numeric spinner drag / wrap / DragToChange off / Spinner Below + None + cursor checks,
+           wheel Edit = Beside (field round trip) / DoubleClick / Click, Flat style render, wheel wrap at the screen
+           edge; tests/cs/fontchk: Render == DrawString pixel check, RenderBlock, TextCache keys (colour / size /
+           FakeBold), LRU entry and byte limits, cached blit timing; benchrun stubs: FontDemo.
+           Fake.cs: Screen.Bounds, PointToClient, LostFocus / GotFocus / KeyDown events, PerformLayout, BringToFront.
+  DOCS     README: SpriteWheel (Style / WrapMouse / Edit), RightButtonCommits, SpriteNumeric row, "Text as a bitmap"
+           section, file map.
+
+
+2026-09-23  Swallowed exceptions in the importers are reported as warnings (ImportLog)
+--------------------------------------------------------------------------
+  ADDED    cs/ImportLog.cs: ImportLog.Swallowed(exception, where) - the sink for every "catch, skip, carry on"
+           in the file-format readers. Begin/End scopes (per thread, nesting) collect the reports during an import
+           and append them to the result's Warnings as "skipped: <ExceptionType> in <where> (<message>)";
+           de-duplicated, capped at ImportLog.Limit (64) + one "... and N more" line. ImportLog.Listener sees every
+           report immediately and uncapped (debugging hook). No scope + no listener = no-op, no allocation.
+  CHANGED  all 33 importer catch blocks in Vector.Pdf / PdfText / Ps / PsImage / Svg / Fonts and SpriteFont now
+           call ImportLog.Swallowed with a short context ("PDF object 42", "PDF FlateDecode (raw deflate)",
+           "TrueType cmap subtable 3/1 of Arial", "Type 1 glyph 17", "font directory scan /usr/share/fonts", ...).
+           Behaviour is unchanged: the same exceptions are caught at the same places and the same fallback runs.
+           GlyphFont got Kind ("TrueType" / "OpenType/CFF" / "CFF" / "Type 1") for the messages.
+  ADDED    SpriteFont.Warnings: what the parser skipped while loading the font, and glyphs that fail when they
+           are first built (drawing is lazy; those go to the font's own list, not to a scope).
+  CHANGED  PsReader radix-number parse (16#FF) catches FormatException / OverflowException / ArgumentException
+           instead of everything - a malformed radix number is not a "skipped object", it is just not a number.
+  CHANGED  SpriteControlBase.DefaultFont is declared 'new' (it hides Control.DefaultFont on purpose; a CS0108
+           warning was showing up in projects that compile cs/ with warnings visible).
+  Kept     silent on purpose (environment probes, nothing to attach a warning to): clipboard get/set in
+           SpriteInput, DPI / owner queries in SpriteCursors and SpriteMenu, Assembly.Location in SR2D.cs,
+           the SVG <image> data-URI case (already reports its own warning).
+  compat   additive. VectorImage.Warnings may contain new "skipped: ..." lines for files that were already loading
+           with damaged parts; clean files produce none (vecfuzz counts them: 0 of 88 test files).
+  TESTS    fontchk: a DejaVu copy with the glyf table overwritten by noise still loads, draws, and reports
+           "skipped: IndexOutOfRangeException in TrueType glyph N of DejaVu Sans" lines capped at 64; the Listener
+           sees all 249; a clean font reports nothing. vecfuzz: prints how many clean / fuzzed loads returned a
+           "skipped:" warning and lists the clean ones (currently 0).
+  DOCS     README "Swallowed exceptions are reported (cs/ImportLog.cs)" under the analyzers section.
+
+2026-09-23  C# audit against a C# safety checklist (nulls / async / LINQ / culture / equality / dispose) + analyzers
+--------------------------------------------------------------------------
+  Checked  cs/ item by item: no null-forgiving '!' on runtime values (4 uses, all on fields that are set before use); no
+           .Result / .Wait() / async at all (rendering is synchronous by design, UI work stays on the UI thread; the
+           only cross-thread path is SpriteBox.BeginInvokeSafe); no deferred LINQ over mutable state, no multiple
+           enumeration of IEnumerable parameters (all copied to a List first); loop variables captured by lambdas are
+           copied (SpriteCombo / SpriteMenu radio groups); every struct used as a dictionary key is immutable with a
+           matching Equals / GetHashCode (Voxel); collections are never modified while iterated (AnimRunning is
+           snapshotted with ToArray, menus close on a copy); every IDisposable that owns native memory has Dispose +
+           finalizer (Sprite, VoxelGrid, VoxelSelection, Selection) and is idempotent; all user-facing numbers
+           (SpriteNumeric, SpriteWheel, menu sliders) parse and print in CurrentCulture with an invariant fallback,
+           all file data (SVG / OBJ / VOX / PS) in InvariantCulture.
+           Roslyn analyzers (latest-recommended) over cs/ + demo/: 0 warnings after the changes below; the vector /
+           font / voxel / edge runners pass unchanged, also under LANG=ru_RU.UTF-8 (decimal comma).
+  CHANGED  74 StartsWith / EndsWith / IndexOf calls in the SVG / PS / PDF / font parsers now pass StringComparison.Ordinal
+           (single-char forms use the char overload): same result for the ASCII tokens involved, no culture lookup.
+           VectorImage.ToSvg / VectorPath.ToSvgData: the interpolated Appends carry the invariant culture explicitly
+           (the numbers already went through the invariant F() helper; ints were culture-neutral - no output change).
+           Vector.Edit auto names ("path01"), the Type 1 / CFF table parsers and PostScript cvrs parse / print ints
+           invariantly. SpriteRangeControl.PageSize / WrapAround re-clamp through SetValue instead of "Value = Value".
+           VoxelGrid indexer throws ArgumentOutOfRangeException with the coordinates and grid size in the message.
+  FIXED    VoxelGrid.Merge(self, ...) leaked the temporary Clone() (native memory until the finalizer ran); now disposed
+           on exit. Selection's per-thread FloodFill / ReplaceColor scratch (a bare [ThreadStatic] pointer) was never
+           freed when a worker thread ended; it now lives in a finalizable holder.
+  ADDED    .editorconfig at the repo root with the analyzer rule set (what the code is clean on = warning; what it does
+           on purpose = off, each with the reason: CA1031 catch-all in importers, CA1307 ordinal-by-definition Contains,
+           CA5392 own DLL resolver, CA5351 MD5 as content hash, ...). demo/SR2DDemo.csproj and template/SR2DApp.csproj
+           enable EnableNETAnalyzers + AnalysisLevel latest-recommended so Visual Studio shows the same set. demo:
+           Caps.GetModuleFileNameW uses a char buffer (CA1838), invariant parses for the size combo boxes, MainForm's
+           control fields carry a CA2213 suppression (WinForms disposes children).
+  compat   Public API unchanged. Only visible behaviour change: VoxelGrid[x, y, z] exception message.
+
+2026-09-23  Native audit against a C++ safety checklist (RAII / UB / concurrency): one data race fixed
+--------------------------------------------------------------------------
+  Checked  native/ (sr2d.cpp, sr2d_kernels.inl, sr2d_fx.inl, sr2d_select.inl, sr2d_voxel.inl, sr2d_simd.h) item by
+           item: every sr2d_alloc / scratch_acquire has a matching free on every return path (incl. early-outs and
+           OOM); no new/delete, exceptions, virtuals, std containers or CRT heap (the DLL has no CRT start-up); no
+           returned references to locals; all pixel/row offsets are size_t / ptrdiff_t; signed shifts of possibly
+           negative values go through unsigned; aligned SIMD loads / stores only hit SR2D_ALIGN'd stack arrays or
+           32-byte-rounded scratch; every float->int cast is range-checked first (NaN / inf / 1e30 inputs rejected);
+           voxel cell counts are guarded against int overflow; -Wall -Wextra -Wshadow -Wconversion -Wstrict-aliasing=2
+           -Wnull-dereference -Wlogical-op: only 13 harmless -Wconversion notes (int->double / float promotions).
+           Sanitizers: make asan (ASan + UBSan, fuzz 6000, thread, blend) clean; the same with float-cast-overflow /
+           float-divide-by-zero and the leak checker enabled: clean; make tsan: clean.
+  FIXED    Dispatch table race (sr2d.cpp): the single table was (re)filled in place - by the first export call when
+           several threads raced in (the .so has no DllMain; a host can also call before/without it) and by
+           SR2D_SET_SIMD_LEVEL while other threads drew. A reader could see a half-written table (torn function
+           pointer -> crash). Now both kernel tables are filled once behind a one-time guard and the active table is
+           switched by a single atomic pointer exchange; the .so additionally initialises in a constructor.
+           ThreadSanitizer flagged the old code on the new test (data race in sr2d_fill_ops_avx2 vs CLEAR_C / DRAW_LINE2
+           / DRAW_BLUR) and is clean on the new one. Exports, ABI and pixel output unchanged (difftest 30860 checks).
+  TESTS    tests/dispatchtest.cpp (make test / make tsan): 8 threads race the first export call and flip
+           SR2D_SET_SIMD_LEVEL (SSE2 / AVX2 / auto) while the others draw; results == quiet single-threaded run,
+           level always 1 or 2.
+  DOCS     README thread-safety table row for SR2D_SET_SIMD_LEVEL, test tree, sanitizer paragraph.
+
+2026-09-23  Real fonts on the controls (optional), SVG <text> import, GDI-free image loading (BMP / GIF / TGA / JPEG)
+--------------------------------------------------------------------------
+  ADDED    SpriteControlBase.TextFont / TextFontFamily / TextFontSize (per control, designer-settable) and the app-wide
+           SpriteControlBase.DefaultFont / DefaultFontFamily / DefaultFontSize; SpriteMenu.Font / FontFamily / FontSize.
+           The 5x7 PixelFont stays the default everywhere and is untouched - a real font is opt-in, "" / null goes back.
+           TextScale multiplies the em size so layouts do not move; Bold / heading labels use the family's bold face;
+           text boxes place the caret proportionally; unknown families fall back to the pixel font (no throw).
+           cs/SpriteControls.Text.cs: ControlText (pixel-or-SpriteFont with the DrawText / MeasureText contract, CharX /
+           IndexAt / FitScale / FitText / Wrap), ControlFonts (shared per-family cache, Register). Every control file
+           now draws through T.Draw / T.Measure instead of s.DrawText / Sprite.MeasureText.
+  ADDED    SVG <text> / <tspan> / <textPath> import (cs/Vector.SvgText.cs): outlines at import time via VectorFonts.Find
+           (installed family, else the PDF importer's Arial / Liberation / DejaVu substitutes); x / y / dx / dy lists,
+           rotate, text-anchor per chunk, font-family / size / weight / style / shorthand, letter- and word-spacing,
+           underline / line-through, xml:space, CSS classes, startOffset; one shape per <text>, a tspan with its own
+           paint becomes "id/n"; Tag = VectorTextRun so TextRuns() / Text() / RemoveText() see it. Style gained the font
+           fields; IsStyleProp knows the text properties. compat: the "text is not imported" warning is gone.
+  ADDED    cs/ImageCodec.cs: managed BMP (1..32 bit, RLE, BITFIELDS, top-down, V4/V5 alpha), GIF (first frame, interlace,
+           transparency) and TGA (raw / RLE, 8..32 bit, colour map, both origins) decoders + Sniff / Decode front door;
+           Sprite.FromImage(bytes | Stream) / LoadFromImage. cs/Jpeg.cs: JpegDecoder moved out of Vector.Image.cs (so
+           Sprite-only projects get JPEG) and given libjpeg's triangle chroma upsampling (was nearest: colour fringes).
+  CHANGED  Sprite.LoadFromFile / new Sprite(file): PNG, WebP, JPEG, BMP, GIF, TGA decode in managed code (by signature),
+           GDI+ only for the rest. Same pixels and Op defaulting; JPEG chroma is now smoother (matches GDI+/libjpeg
+           within +-3). compat: a 32-bit BI_RGB BMP with a non-zero 4th byte now loads with alpha (GDI+ ignored it) -
+           pass ColorKey / set Op = Paint if such a file should stay opaque.
+  TESTS    tests/cs/fontchk: CodecChecks (20 Pillow / hand-made BMP, GIF, TGA, JPEG references from mkimg.py, pixel-exact
+           or +-3 for JPEG, Op defaulting, Transform / resize through FromImage, hostile input) and SvgTextChecks (7 <text>
+           cases incl. tspan split, anchors, textPath, per-char x, preserve, hidden, ToSvg round trip). tests/cs/ctlrun
+           Fonts(): the furniture twice (pixel font vs DejaVu Sans, fonts.rgba), auto-size, proportional caret,
+           family / object / default precedence and fall-back. benchrun stubs updated. All csproj lists carry the
+           four new files (SpriteControls.Text.cs, Vector.SvgText.cs, ImageCodec.cs, Jpeg.cs); ctlrun now compiles
+           the Vector / font stack the controls need.
+  DEMO     Controls strip (FormDemo, About page): "Text font" combo switches every SR2D control between the pixel font and
+           the installed families through SpriteControlBase.DefaultFontFamily.
+  DOCS     README: "Real fonts on the controls", "Text in SVG files", "Loading pictures without GDI+"; SVG table row.
+
+2026-09-22  Scalable-font text (SpriteFont), stroker with joins / caps / dashes, managed PNG codec
+--------------------------------------------------------------------------
+  ADDED    SpriteFont (cs/SpriteFont.cs): TrueType / OpenType (glyf + CFF) / .ttc / bare CFF / Type 1 fonts through
+           the PDF importer's font reader (cs/Vector.Fonts.cs, which gained a (data, faceIndex) ctor, kern table and
+           name table reading), rasterised by SR2D's own AA polygon filler into cached 8-bit coverage bitmaps
+           (per glyph / size / 1/4-px phase; CacheLimit 16 MB, CacheBytes, ClearCache). Load(file | bytes | Stream,
+           index), TryLoad, Installed(family, bold, italic) + SystemFamilies() (Windows Fonts dir, ~/.fonts,
+           /usr/share/fonts, ...), GlyphIndex / Advance / Outline / Layout / Measure / MeasureBlock / Wrap, kerning,
+           LetterSpacing, tab stops, FakeBold / FakeItalic, SubPixelPositions, MissingGlyph. Named SpriteFont so it
+           cannot collide with System.Drawing.Font in WinForms code.
+  ADDED    Sprite.DrawString / DrawStringBaseline / DrawStringBlock (wrap, align, anchor, line spacing) /
+           MeasureString, and the vector route DrawStringPath (colour or gradient, any Matrix3x2),
+           DrawStringOutline (StrokeStyle), TextPath (cs/Sprite.Font.cs). One FILL_MASK8 per glyph: every LineOp,
+           blend factor, lock rect and premultiplied targets behave as for AA shapes. ~1.7 M glyphs/s at 16 px.
+           The 5x7 PixelFont DrawText / MeasureText are unchanged.
+  ADDED    Stroker (cs/Sprite.Stroke.cs): StrokeStyle (width, LineCap Butt/Round/Square, LineJoin Miter/Round/Bevel,
+           miter limit, dash array + offset; presets Round / Sharp / Square / Dotted) and Sprite.StrokePolyline /
+           StrokePolygon / StrokeLine / StrokeRect (x,y,w,h and RectangleF) / StrokePath (PathBuilder or
+           VectorPath, colour or gradient) / static StrokeOutline (the outline polygons). The stroke outline is
+           filled in one non-zero pass - no double blending at overlapping segments, proper corners.
+           DrawPolyline / DrawPath keep their old per-segment behaviour.
+  ADDED    Sprite.FillPath(VectorPath, colour, op, AA, evenOdd, blend) beside the PathBuilder overload
+           (cs/Sprite.Gradient.cs).
+  ADDED    Png codec (cs/Png.cs): Png.Encode / Decode / GetInfo / IsPng, PngColor (Auto picks the smallest lossless
+           form: palette 1/2/4/8-bit, grey, grey+alpha, RGB, RGBA), PngColorType, PngInfo; adaptive filters, zlib
+           levels 0..3+. Sprite.ToPng(colour, level, lockRectOnly) / SavePng / FromPng(file | bytes | Stream) /
+           LoadFromPng. Decoder covers all colour types, bit depths 1..16, tRNS and Adam7.
+  CHANGED  Sprite.LoadFromFile / new Sprite(file) decode PNG with the managed codec (was: PngDecoder from the vector
+           importers, before that GDI+); SaveToFile(file, ImageFormat.Png, withAlpha) encodes with it (RGB or RGBA
+           as before). Same pixels, same Op defaulting; works headless / on Linux. Other formats still use GDI+.
+           compat: nothing to change; the vector importers' PngDecoder stays for embedded images.
+  FIXED    Vector.Fonts.cs: two Math.Max(short, int) ambiguities (tg / hg made int) that broke ImplicitUsings builds.
+  DEMO     Shapes group: "Stroker: caps / joins / miter limit / dashes", "SpriteFont: TrueType / OpenType text",
+           "PNG codec: ToPng -> FromPng round trip" (encode / decode timing next to the GDI+ ToBitmap round trip).
+           demo/Tests.cs + DemoFont helper (first installed family from Segoe UI, Arial, ..., DejaVu Sans).
+  TESTS    tests/cs/fontchk: 92 checks - PNG encoder colour-type selection and bit-exact round trips (5 pixel
+           sets x levels), stride / sub-rect encode, 17 Pillow-made PNG variants decoded pixel-exact
+           (tests/cs/fontchk/mkpng.py makes them), Sprite.ToPng / FromPng / SaveToFile; stroker coverage areas for
+           every cap and join (analytic expectations), miter limit, dashes, offset, single blend per pixel,
+           StrokeOutline == StrokePolyline; SpriteFont name / metrics / cmap / kerning / wrap / tabs / anchors /
+           sub-pixel phases / lock rect / block layout / fake bold + italic direction / cache / TTC faces / every
+           installed family loads and renders. tests/cs/benchrun stubs updated (TransformFrame, FormDemo) so the
+           three new demo tests run headless. All runner csprojs list the four new files.
+  DOCS     README: "Scalable-font text", "Strokes with joins, caps and dashes", "PNG without GDI+" sections.
+
+2026-09-20  SpriteBox: black edge line in SizeMode fixed; unbounded / offline pixel mapping
+--------------------------------------------------------------------------
+  FIXED    A one-pixel black (never painted) line at the right or bottom edge of the picture in any SizeMode,
+           appearing and disappearing while the form is resized. Cause: Compose() filled the background
+           strips up to floor(dest.Left) / from ceil(dest.Right), and the warp paints the pixels whose centre
+           is inside dest - with a fractional edge (a centred picture lands on .5 whenever viewport - image
+           is odd, i.e. every second size) the boundary column belonged to neither and kept the buffer's
+           initial black. Strips now overlap dest by the boundary pixel (ceil left / floor right). Replayed
+           for 4004 viewport sizes: 2002 had the hole before, 0 after; the image coverage is unchanged.
+           cs/SpriteBox.View.cs Compose().
+  ADDED    SpriteBox.ImagePixelAtUnbounded(Point | x, y): the image pixel under a client point WITHOUT the
+           null-outside rule - coordinates continue beyond the picture (negative / >= size) so a click beside
+           the image is still a usable image-space target. (ImageAt(...).Pixel gave the same; now explicit.)
+  ADDED    Offline geometry: SpriteView.For(viewport, image, mode, zoom, pan, panMode, overscroll) builds the
+           mapper the control would use, with no control and nothing painted (Hit / ToImage / ToClient /
+           PixelAt / Dest / ScaleX); SpriteView.PixelAt(client) (unbounded); SpriteView.Clone();
+           SpriteBox.Geometry(imageSize?, sizeMode?, zoom?, pan?) = this control's client size with another
+           picture / mode ("which pixel would this point hit if the image were 2048^2 in Fill?").
+  TESTS    tests/cs/ctlrun EdgeStrips(): the strip arithmetic over 572 viewport sizes must leave no unpainted
+           pixel; For / Hit / PixelAt / Clone checks.
+  DOCS     README SizeMode section.
+
+
+2026-09-20  SpriteBox.ImageAt / ImagePixelAt: FixedSurfaceSize mapping, int overloads, docs
+--------------------------------------------------------------------------
+  FIXED    ImageAt / ImagePixelAt / ToImage / ToClient / PixelRectangle ignored FixedSurfaceSize (surface
+           stretched over the client area, SizeMode None): they returned client coordinates as if the
+           surface were client-sized, so pixels were off by the stretch factor and the lower-right part
+           reported "outside" (ImagePixelAt = null). They now scale by the stretch.
+  ADDED    ImageAt(int x, int y) / ImagePixelAt(int x, int y) overloads.
+  DOCS     All mapping calls take CLIENT coordinates of the box (e.Location from the box's own mouse events,
+           or box.PointToClient(Cursor.Position)); screen coordinates or a parent's e.Location give null /
+           "outside". Comment in cs/SpriteBox.View.cs + README.
+           (The SizeMode geometry itself was re-verified headlessly: every mode, zoom 4x + pan, round trip
+           ToClient(ImageAt(p)) == p + 0.5 - tests/cs/ctlrun and an ad-hoc check.)
+
+
+2026-09-20  SpriteBox.Render in the designer's Events tab
+--------------------------------------------------------------------------
+  CHANGED  SpriteBox.Render is now a standard EventHandler<RenderEventArgs> (was Action<SpriteBox, Sprite>,
+           hidden from the designer): it shows in Properties > Events, is the control's [DefaultEvent]
+           (double-click the box on the form = handler stub), and the designer serialises the
+           subscription into MainForm.Designer.cs like Click / Paint. RenderEventArgs.Surface is the
+           back buffer (+ Width / Height shorthands). OnRender(Sprite) for subclasses is unchanged.
+           cs/SpriteBox.cs; template wired the designer way (canvas.Render += canvas_Render in
+           MainForm.Designer.cs, handler in MainForm.cs); demo/ControlsDemo.cs, README, template/README.
+  DOCS     README: Navigation = None means no magnifier / hand / wheel handling at all - the mouse
+           events are yours (asked: "disable the magnifying glass so my MouseMove does not conflict").
+  compat   handlers written as (SpriteBox box, Sprite s) must become (object? sender, RenderEventArgs e)
+           and use e.Surface; lambdas: (b, s) => s.X(...)  ->  (b, e) => e.Surface.X(...).
+
+
+2026-09-20  Controls: colour maths on packed ints (no Color.FromArgb in paint paths)
+--------------------------------------------------------------------------
+  CHANGED  The Sprite* controls computed their blends through System.Drawing.Color
+           (Mix(Color.FromArgb(a), Color.FromArgb(b), t), Argb(Color.FromArgb(x), alpha), Color.White /
+           Color.Black as mix targets). Measured: a Color round trip is a 24-byte struct + three property
+           reads each way; the int path (SR2D.ARGB + shifts) is ~20-25 % cheaper per blend (7.2 -> 5.8 ns)
+           and allocation-free either way. Since a control does a few dozen blends per paint this is a
+           tidy-up rather than a visible speed-up, but the paint code no longer converts back and forth.
+           - cs/SpriteControls.cs: Mix(int, int, float) is the primitive now (Color overloads forward to it
+             via ToArgb once); Argb(int, alpha) added; Lerp = alias of Mix(int,int); protected constants
+             White / Black (packed); palette defaults DefaultBack/Accent/Track/Thumb created once
+             (were re-created by every ShouldSerialize*/Reset*).
+           - Buttons/Input/Static/Wheel/Menu/SpriteBox.View/SpriteBox.Voxel: every
+             Color.FromArgb(...) in a paint path replaced by the int form; SR2D.ARGB(255, ...) for
+             literal colours handed to Sprite. Color.FromArgb stays only where WinForms needs a Color
+             (BackColor/ForeColor/designer properties, the GDI+ placeholder pen) and in the demo's
+             one-time property assignments (AccentColor = ..., run once at construction).
+           Pixel output identical (ctlrun raster snapshots buttons/knobs/wheels/scroll/anim/furniture/
+           cursors bit-equal before and after; voxelbox differs run-to-run anyway - threaded render).
+  compat   Mix(Color, Color, float), Mix(int, Color, float), Lerp(int, int, float) keep their signatures;
+           subclasses gain Mix(int, int, float), Mix(Color, int, float), Argb(int, int), White, Black.
+
+
+2026-09-19  Template designer fix, ImplicitUsings-proof sources, analyzer clean-up
+--------------------------------------------------------------------------
+  FIXED    Visual Studio form designer on the template (and any project using cs/): opening a form
+           with an SR2D control failed with "Unable to load DLL 'SR2D64' (0x8007007E)" and the
+           control was disabled, although the app ran. The designer hosts the controls in its own
+           process (DesignToolsServer.exe) and loads the assembly from a cache folder, so the
+           bare DllImport name was not found next to it.
+           - cs/SR2D.cs: a DllImport resolver for the SR2D assembly (registered from Native's static
+             constructor, so before the first call). Probe order: SR2D.DllPath, the SR2D_DLL
+             environment variable, the assembly's own folder (Assembly.Location), the exe folder,
+             the [AssemblyMetadata("SR2D.DllPath")] hint, four parent levels of the two folders,
+             then the default probing (PATH). Linux runners: libSR2D64.so / SR2D64.so.
+           - template/SR2DApp.csproj, demo/SR2DDemo.csproj: bake the absolute path of the DLL the
+             build used into the assembly as AssemblyMetadata "SR2D.DllPath" (the designer's rescue;
+             a shipped exe still finds the copy next to itself first).
+           - SR2D.IsAvailable (cached probe, never throws), SR2D.DllPath (read back which file
+             loaded). SpriteBox.NativeAvailable; SpriteBox and everything derived from it paint a
+             placeholder (BackColor, frame, type name) in OnPaintUnavailable() when the DLL is not
+             loadable instead of throwing from OnPaint/OnResize - the designer stays usable even
+             before the DLL is built. At run time the first drawing call still throws
+             DllNotFoundException as before.
+  FIXED    CS0104 "Timer is ambiguous" with <ImplicitUsings>enable</ImplicitUsings> (the default of a
+           new project, which imports System.Threading): SpriteBox.View.cs, SpriteBox.Voxel.cs,
+           SpriteControls.cs, SpriteControls.Input.cs, SpriteControls.Menu.cs, SpriteControls.Static.cs,
+           demo/ControlsDemo.cs, demo/MainForm.cs carry "using Timer = System.Windows.Forms.Timer;".
+           cs/ now compiles with the flag on and off (both checked). The template has ImplicitUsings
+           enabled now, like a fresh project.
+  CHANGED  cs/SpriteBox.View.cs analyzer messages resolved (IDE0090 target-typed new, IDE0031 null
+           propagation, RCS1146 conditional access, RCS1163/IDE0060 unused Compose(clip) parameter
+           removed, RCS1123 parentheses ADDED where asked (a + (b * c)) rather than suppressed,
+           CA1806 ReleaseDC result discarded explicitly, RCS1003 braces on if/else with blocks,
+           IDE0042 tuple deconstruction in Fling, CA2263 Enum.GetValues<T>()). The same rule set was
+           run over all of cs/ and demo/ (Roslynator 4.12 + .NET analyzers latest-all): CA1806 in
+           Selection.cs / Sprite.Effects.cs / Sprite.cs / VoxelGrid.IO.cs / demo MainForm.cs, CA2263 in
+           demo, RCS1194 exception constructors in Vector.Ps.cs (PsExit/PsStop/PsQuit) - all fixed.
+           No behaviour change.
+  TESTS    tests/cs/benchchk builds cs/ + demo/ twice: `dotnet build` (ImplicitUsings off) and
+           `dotnet build -p:Implicit=enable` (on).
+  DOCS     README "How SR2D64.dll is found (and the form designer)"; template/README.txt.
+  compat   nothing to change. To pin a DLL: SR2D.DllPath = @"...\SR2D64.dll" before the first call,
+           or set SR2D_DLL in the environment.
+
+
+2026-09-19  Demo: editable transform frame; layered-sprite tests rebuilt when the assets change
+--------------------------------------------------------------------------
+  FIXED    demo "LayeredSprite" / "LayeredSprite.Transform" / blend-mode layer tests: the stack was
+           built once per thread and kept referencing the asset sprites; after a change of the
+           Sprite size or test picture combo those sprites were disposed (0x0) and layers
+           "disappeared" (visible as soon as anything recomposed, e.g. "Animate layer 6"). The
+           stacks are now rebuilt whenever the Assets instance changes (Tests.Layers / BlendLayers).
+  ADDED    demo/TransformFrame.cs: an editor-style transform frame that IS the object's
+           SpriteTransform - drag inside = move, corner handle = scale about the opposite corner
+           (Shift = keep aspect), edge dot = stretch one axis, ring outside = rotate about the pivot
+           (Shift = 15 degree steps), Ctrl + corner = pull that corner alone (perspective quad; a
+           plain handle drag returns to affine), right click = reset. Handles turn with the object;
+           cursors from SpriteCursors / stock resize arrows. DemoTest.Frame = true enables it;
+           the test reads Ctx.Frame.Transform and calls Frame.Attach(w, h, ox, oy).
+  CHANGED  "LayeredSprite.Transform" test: the frame drives ls.Transform (the old passive bounding
+           box and the "perspective corner offset" mouse mode are gone); Op box = extras on top
+           (skew, mirror, layer 11 with its own transform, opacity); info lines show the transform
+           and the HitTest pixel.
+  TESTS    tests/cs/ctlrun/FrameCheck.cs (part of ctlrun): move, corner scale with anchored
+           opposite corner, Shift aspect, edge stretch (also on a rotated frame), rotate ring
+           (+90, Shift snap), Ctrl-corner perspective with the other corners fixed, back to affine,
+           inverse hit test, drawing. tests/frame_preview.png.
+
+2026-09-19  LayeredSprite.Transform: one general transform for the whole stack
+--------------------------------------------------------------------------
+  ADDED    cs/SpriteTransform.cs (new file): SpriteTransform = X / Y, Scale(X/Y), Angle (radians,
+           AngleDegrees), Pivot, an affine Matrix3x2 (Skew / Mirror helpers), an optional
+           perspective Quad, Filter, Opacity; Version bumps on every setter; fluent setters;
+           ToMatrix / Corners / Bounds / Map / Unmap / Contains (affine or homography).
+  ADDED    LayeredSprite.Transform (created on first access; HasTransform, ClearTransform): every
+           Draw / DrawScaled / DrawRotate2 / DrawQuad draws the composite through it (their own
+           geometry applies on top); Draw(target, float x, float y); DrawTransformed(target, x, y,
+           T); DrawBounds(x, y); HitTest(px, py, x, y) -> composite pixel. Not part of the
+           composite: changing the transform never recomposes (one warp per draw as before).
+           A pure Angle + Scale transform is bit-identical to DrawRotate2 of the composite;
+           Transform.Opacity == an Effects.Opacity stage.
+  ADDED    Layer.Transform (optional SpriteTransform per layer: replaces X / Y / Scale / Angle /
+           Pivot, own Filter / Opacity; tracked by Version like Effects; identity at integer X / Y
+           keeps the exact 1:1 path).
+  ADDED    Sprite.DrawTransformed(src, x, y, SpriteTransform, op, effects, blendFactor): any sprite
+           through a transform (identity = plain Draw / DrawFx).
+  DEMO     Effects group: "LayeredSprite.Transform" test (Angle / Scale sliders; Op box: skew,
+           mirror, perspective quad from the mouse, a layer with its own transform, opacity;
+           HitTest label, DrawBounds rectangle).
+  TESTS    tests/cs/layerchk: transform draw == DrawRotate2 (bit-exact), opacity == Effects stage,
+           identity == plain draw, mirror, perspective HitTest / Map round trip, DrawBounds,
+           DrawRotate2 on top of a transform, layer.Transform == X/Y/Scale/Angle placement, dirty
+           tracking of layer transforms, Sprite.DrawTransformed == DrawRotate2 / Draw, Version,
+           argument checks. layerchk all ok; benchchk / boxchk / wincheck clean.
+
+2026-09-19  WebP decoder (cs/WebP.cs): Sprite.FromWebP, new Sprite("x.webp")
+--------------------------------------------------------------------------
+  ADDED    cs/WebP.cs (new file, managed, no native code / NuGet): lossy VP8 (segments, both
+           loop filters, token partitions, fancy 4:2:0 upsampling, libwebp YUV matrix),
+           lossless VP8L (predictor / cross-colour / subtract-green / colour-indexing
+           transforms, colour cache, meta Huffman groups, packed palettes), ALPH chunk (raw and
+           lossless, all filters), VP8X container (ICC / EXIF / XMP skipped, first frame of
+           animations). Straight ARGB out. Pixel-identical to libwebp (verified on the corpus).
+           API: WebP.Decode(byte[] / Stream / file) -> (w, h, int[] argb); WebP.IsWebP;
+           WebP.GetInfo (size, alpha, lossless, animated) without decoding.
+  ADDED    Sprite.FromWebP(file / byte[] / Stream, Transform, W, H, ColorKey), Sprite.LoadFromWebP;
+           Sprite(string) / LoadFromFile sniff the RIFF/WEBP signature and take this path (GDI+
+           has no WebP codec on Windows unless a store extension is installed, and is unreliable
+           even then). Alpha pictures get Op.AlphaBlend, opaque ones Op.Paint.
+  ADDED    SVG <image> with data:image/webp URIs decodes (Vector.Svg.cs).
+  CHANGED  demo/assets_builtin: lenna.png (468 KB) -> lenna.webp q95 (88 KB), lenna_normal.png
+           (251 KB) -> lenna_normal.webp lossless (195 KB, pixel-exact). Assets.Embedded decodes
+           WebP (or PNG) through the engine's own decoders; the <exe>/assets override folder
+           accepts name.webp before name.png. The demo's TinyPng helper is gone (PngDecoder from
+           cs/Vector.Image.cs is used instead). SR2DDemo.csproj / benchchk / benchrun embed *.webp.
+  TESTS    tests/webp/ corpus (17 files: lossy q30 / q95 / grey, lossless, alpha lossy + lossless,
+           VP8X with EXIF/ICC, palettes 2 / 4 colours, 17x13 and 1x1, noise, gradient, 2-frame
+           animation) with libwebp reference decodes as *.ref.png; tests/cs/webpchk compares pixel
+           for pixel, checks the Sprite loaders and Transform path, and "fuzz N" mutates the corpus
+           (20 000 iterations: only InvalidDataException escapes).
+  DOCS     README "WebP pictures" section; speed: 512^2 lossy q95 11 ms, lossless 11 ms (managed,
+           about 1.7x libwebp C).
+
+2026-09-19  Workspace housekeeping
+--------------------------------------------------------------------------
+  CHANGED  tests/cs/*/bin, obj and the *.raw / *.rgba dumps the runners write are build
+           output, not sources: deleted (the runners recreate them). No source changes.
+
+2026-09-19  In-place editors: Sprite.Edit.cs (+ Selection, VoxelGrid, VectorImage)
+--------------------------------------------------------------------------
+  "mySprite.Rotate(degrees)" and friends: the sprite changes its own pixels instead of a
+  "new Sprite(old, Transform)" copy. All return this and chain.
+
+  ADDED    cs/Sprite.Edit.cs (new file): FlipX / FlipY / Flip(h, v) / Mirror / Rotate180 (lock
+           rect, lossless); Rotate90(n) / RotateCW / RotateCCW / Transform(Transform) (whole
+           sprite, lossless, size swaps); Rotate(degrees, Filter, Grow, Background, Pivot)
+           (any angle in place, or grown to the rotated bounds); Resize(w, h) / Scale(f) (Filter
+           Auto); Crop / CropToLockRect / Expand / Recanvas / Trim / ContentBounds; Shift /
+           Scroll; Invert / Grayscale / RotateHue / AdjustColor / Tint / Fade / Apply(Effects) /
+           Unpremultiply; Clone() / Clone(rect). Op and Premultiplied are kept; straight-alpha
+           sprites are resampled premultiplied and written back straight (no dark fringes).
+           Views refuse size changes (InvalidOperationException); GDI surfaces recreate the DIB.
+           Quarter turns are named for the screen (RotateCW = clockwise as seen).
+  ADDED    cs/Selection.cs: FlipX / FlipY / Rotate90(n) / Shift(dx, dy, wrap) in place.
+  ADDED    cs/VoxelGrid.Edit.cs: in-place RotateX / RotateY / RotateZ(quarterTurns), FlipX / Y / Z,
+           Trim, Crop, Expand, Recanvas, Resize, Scale. Selection-backed objects and hidden
+           stashes follow turns / moves (a resample keeps the material objects only). The
+           existing RotatedZ / Resized / Cropped (copies) are unchanged. VoxelGrid w / h / d /
+           cells are no longer readonly internally (public API unchanged).
+  ADDED    cs/Vector.Edit.cs: Rotate(deg, pivot, keepViewBox) / RotateCW / RotateCCW / FlipX /
+           FlipY / Mirror / Scale / Resize / Shift / Expand / Recanvas / Trim (matrix baked into
+           the shapes; flips and quarter turns keep the picture inside its view box).
+  FIXED    native/sr2d_kernels.inl unpremul_px (op 12 "copy straight", used by Sprite.Blur on
+           straight sprites, DrawFx / DrawBlur with op 12 and now Unpremultiply): the
+           premultiplied -> straight division truncated (0x10 at alpha 0x80 gave 0x1F instead of
+           0x20); it now rounds. Straight-alpha blurs are up to 1/255 brighter than before.
+  DEMO     "Original API - transforms" group: "In-place editors" test - the Op box picks an edit
+           list (flips / quarter turns, Rotate(deg) with Grow, Scroll / Shift, Expand / Trim,
+           Scale / Resize, colour ops, Apply(Effects), a lock-rect region edit, Selection
+           Rotate90 / FlipX), Count edits per frame on a working copy. SR2DDemo.csproj and the
+           test csprojs list Sprite.Edit.cs.
+  TESTS    tests/cs/edgechk: exact-value checks for every editor (round trips, region flip,
+           shift / scroll, trim / expand / crop / recanvas, resize keeps op + premul, rotate grow
+           and background, view refusals, dead sprite no-ops, Fade / Unpremultiply values,
+           Selection / VoxelGrid (in-place RotateZ == RotatedZ, object tracking) / VectorImage
+           view-box rules). make test / wincheck, benchchk, boxchk clean.
+
+2026-09-19  Editor blend modes (Photoshop / PDF): SR2D.BlendMode, Sprite.Blend.cs
+--------------------------------------------------------------------------
+  The 27 layer modes - Normal, Dissolve, Darken, Multiply, Color Burn, Linear Burn, Darker
+  Color, Lighten, Screen, Color Dodge, Linear Dodge (Add), Lighter Color, Overlay, Soft Light,
+  Hard Light, Vivid Light, Linear Light, Pin Light, Hard Mix, Difference, Exclusion, Subtract,
+  Divide, Hue, Saturation, Color, Luminosity - with the PDF 1.7 / Photoshop formulas.
+
+  Design: a mode IS an op code (32..58, above the classic ops), shared by SR2D.Op, SR2D.LineOp
+  and the new SR2D.BlendMode enum, so every existing call that takes an Op / LineOp accepts a
+  mode (Draw, MaskDraw, DrawScaled / DrawRotate2 / DrawQuad, DrawFx*, DrawBlurred, layers,
+  shapes / text / selection fills). The compositing rule is the editor one and fixed: the mode
+  acts on the colour, source alpha x opacity is the coverage ("mixed with alpha blend" built
+  in; Normal == AlphaBlend). Destination alpha: untouched on a straight destination
+  (AlphaBlend rule), PDF union / AlphaOver rule on a premultiplied one (Sprite.Premultiplied);
+  premultiplied sources are un-premultiplied before the formula. Opacity (0..1) rides in the
+  op word (bits 16..24), so layers with an opacity cost no extra pass.
+
+  ADDED    native: SR2D_BM_* codes, SR2D_OP_DST_PREMUL / SRC_PREMUL / OPACITY_SHIFT
+           (sr2d_api.h); exports BLEND_MODE(src,dst,w,h,ws,wd,op) and MASK_BLEND_MODE(...);
+           OpBlendMode<SP,DP> functor on 32-bit channel planes (one code for SSE2 and AVX2;
+           integer separable modes, float SoftLight / Hue / Saturation / Color / Luminosity,
+           xorshift Dissolve); DRAW_WARP, DRAW_FX, DRAW_BLUR, DRAW_POLY, DRAW_LINE2, FILL_MASK8
+           recognise the codes in their op argument (filtered warps sample a premultiplied
+           copy, no fringes). sr2d_simd.h: lane0, min16/max16/cmpgt16/subs_u16/adds_u16.
+  ADDED    cs/SR2D.cs: enum BlendMode; the same names in Op and LineOp; IsBlendMode / ModeOf /
+           OpacityOf / WithOpacity / BlendMode.ToOp(opacity) / ToLineOp(opacity); imports
+           BlendMode / MaskBlendMode.
+  ADDED    cs/Sprite.Blend.cs (new file): DrawBlend(src, x, y, mode, opacity) plus 1-bit mask
+           and Selection overloads, DrawBlendScaled / DrawBlendRotated / DrawBlendQuad /
+           DrawBlendFx, FillBlend(colour, mode, opacity) (lock rect or x,y,w,h).
+  ADDED    cs/Sprite.cs: Sprite.Premultiplied (true after Premultiply(), for Op.AlphaOver
+           sprites, or set by hand); internal OpWord() adds the premultiplied flags to a
+           blend-mode op. Draw / MaskDraw / Warp / DrawLine2 / DrawPolyline2 route the codes.
+  ADDED    cs/LayeredSprite.cs: Layer.BlendMode (get/set over Op); Layer.Opacity is folded
+           into a blend-mode op instead of an Effects stage; blend-mode layers take the
+           pre-render path in the parallel composer (alpha 0 = no coverage).
+  CHANGED  cs/Effects.cs FxWarp, cs/Sprite.Effects.cs DrawBlurred, cs/Vector.Render.cs: the
+           "source is premultiplied" decision now reads Sprite.Premultiplied instead of
+           Op == AlphaOver (identical for every sprite that did not set the new property).
+  CHANGED  cs/Sprite.Shear.cs DrawRotateShear: a blend-mode op takes the alpha path (the
+           padding is transparent = no coverage) instead of the mask path.
+  compat   No classic op changes code or kernel. Codes 32..58 were unused. DrawLine2's
+           0x100 skip-end bit is unaffected. Old DLL: Caps.HasBlendMode false, the demo's
+           blend-mode tests are greyed out; a mode passed to a classic export is ignored
+           (native is_blend_mode guard, no write).
+  DEMO     new group "Blend modes (Sprite.Blend.cs)": all 27 modes over a draggable checker
+           (Blend slider = opacity); one mode from the Op box with the alpha sprite over the
+           photo; the mode through DrawBlendRotated / DrawBlendFx / FillRoundRect +
+           DrawWideLine + DrawText; a LayeredSprite with Multiply / Screen / Color layers and
+           a draggable top layer whose mode / opacity come from the panel. Caps.HasBlendMode,
+           DemoTest.NeedsBlend, SR2DDemo.csproj lists Sprite.Blend.cs.
+  DEMO     Follow-up check of the audit (asked): nothing in the demo needed a change - the
+           duplicated round-rect helper was in the controls (cs/), not the demo; the SVG
+           FormatException change is covered by the demo's catch (Exception) handlers.
+  TESTS    tests/blendtest.cpp (make test): every mode vs a double reference of the formulas
+           in the four straight / premultiplied combinations at random opacities (worst 1/255,
+           tolerance 1-3 for the divide / sqrt / HSL modes), SSE2 == AVX2 bit-exact, Normal ==
+           ALPHA_B / ALPHA_OVER exactly, Dissolve density, every entry point (WARP nearest +
+           bilinear, FX, BLUR r0, POLY, LINE2, FILL_MASK8, MASK_BLEND_MODE) == BLEND_MODE on an
+           identity geometry, hostile ops ignored. tests/cs/edgechk: blend-mode section
+           (values, LineOp shapes, premultiplied destination, layers, hostile arguments).
+           tests/fuzztest.cpp also throws blend-mode op words (random premul flags / opacity)
+           at every entry point plus BLEND_MODE / MASK_BLEND_MODE; make asan runs blendtest.
+           make test / asan / wincheck / projchk, benchchk, boxchk (WinForms analyzers) clean.
+  DOCS     README "Editor blend modes" section: the design answer (op code + fixed editor
+           compositing rule), every call form, the formulas, a cost table, where the codes
+           reach in the DLL.
+
+2026-09-18  Engine audit (cs/ + native/): edge cases, fuzzing, small API gap
+------------------------------------------------------------------------
+  Full read-through of the 43 C# files and the native sources plus two new mechanical checks:
+  an edge-case runner (empty / disposed / NaN / huge arguments against every drawing entry
+  point) and a mutation fuzzer over every vector / voxel sample file (~40 000 damaged loads).
+  The demo was not touched.
+
+  FIXED    cs/Sprite.cs DrawEBM: an empty or disposed colour map made the native gather read
+           through a null buffer (access violation). Now a no-op like every other empty source.
+  FIXED    cs/Sprite.cs TileDraw: a 0x0 source threw DivideByZeroException; now a no-op.
+  FIXED    cs/Vector.cs SVG path parser: a "Z" followed by stray numbers ("z 5 5 ...", seen in
+           damaged files) looped forever (Z was treated as an implicitly repeating command with
+           no operands). Parsing stops at the garbage as for every other unparsable token.
+  FIXED    cs/Vector.Render.cs: a microscopic dash pattern on a long path (damaged file, or
+           stroke-dasharray="0.0001") produced hundreds of millions of dash pieces and ran the
+           process out of memory. Dashing is skipped (the stroke is drawn solid) when the path
+           would split into more than 200 000 pieces, or when the pattern / offset is NaN / Inf.
+  FIXED    cs/Vector.Svg.cs: malformed XML surfaced as System.Xml.XmlException; it is now a
+           FormatException like every other unreadable file (one exception type per the README).
+  FIXED    cs/Vector.Pdf.cs, cs/Vector.Ps.cs: PDF / PostScript functions with an inverted
+           Domain / Range ("[1 0]") threw ArgumentException from Math.Clamp; sampled functions
+           with Size 0 / negative / absurd, a short Encode array or a bad BitsPerSample threw
+           or indexed out of range. Inverted ranges are clamped in either order; damaged
+           sampled functions are ignored (shading falls back as for a missing function).
+  FIXED    cs/VoxelGrid.cs: Contains / Get / IsSolid / this[] on a disposed grid read through
+           the freed buffer; Contains is now false after Dispose (Get returns Voxel.Empty,
+           the indexer throws ArgumentOutOfRangeException as for any outside cell).
+  FIXED    cs/SpriteControls.Menu.cs: disposing a SpriteMenu while it was open (form closed
+           from a menu command) left the dead panel in the open-menu list and the application
+           message filter installed; the next click anywhere touched the disposed control.
+           Dispose closes first; the panel's Dispose also unhooks the owner-form events.
+  FIXED    cs/Vector.Image.cs (JPEG), cs/Vector.PsImage.cs (planar 8-bit): width x height x
+           components is computed checked - a hostile header now throws (caught and reported
+           as an image warning) instead of allocating a wrong-sized buffer.
+  CHANGED  cs/SpriteControls.cs (knob gauge), cs/Sprite.Curves.cs (FillPath sub-path counts):
+           stackalloc sizes that depend on the control size / path now go to the heap above
+           1024 elements (a 4K-sized knob or a 10 000-sub-path import no longer risks the stack).
+  ADDED    cs/Sprite.Shapes.cs: solid-colour FillRoundRect(x, y, w, h, radius, c, Op, AA,
+           BlendFactor) and DrawRoundRect(x, y, w, h, radius, c, Width, AA, Op, BlendFactor),
+           plus RectangleF overloads. Until now only the gradient FillRoundRect existed and the
+           controls carried a private copy; they now call the public ones (same picture).
+  CHANGED  native/sr2d_fx.inl: three inner "k" locals in DRAW_FX shadowed the blend-factor
+           parameter (renamed kd; no behaviour change, the parameter was only used after the
+           blocks closed), two implicit int->float conversions made explicit. Every -Wall
+           -Wextra -Wshadow build is now warning-free with g++.
+  TESTS    tests/cs/edgechk (edge-case runner, "edgechk: all passed") and tests/cs/vecfuzz
+           (mutation fuzzer: `vecfuzz <iterations> <seed>`, or `vecfuzz <file>` for one file
+           with a stack trace). The two fuzz-found inputs are kept as tests/vec/fuzz_oom1.pdf
+           and tests/vec/fuzz_invrange.ai. make test / asan / wincheck, benchchk, boxchk
+           (WinForms analyzers, net9.0-windows) all clean.
+  DOCS     Checked and found fine (no change): P/Invoke signatures vs the X-macro export list
+           (67 imports), Effects.Stage vs SR2D_FxStage layout (72 B), Selection / Sprite size
+           contracts, DRAW_ROT_AA / bilerp bounds, clipping on every kernel edge, all native
+           allocation-failure paths (return / no-op, never a partial write), SpriteBox surface
+           lifetime on resize / handle recreation, range-control capture and cursor restore.
+
+2026-09-18  Hand cursors from the vector drawing; hand only for move / rotate
+---------------------------------------------------------------------------
+  CHANGED  cs/SpriteCursors.cs: the open hand and the grabbing hand are now the traced vector
+           drawing (uploads/cursor/hand_cursor.svg -> OpenOutline / OpenFill / GrabOutline /
+           GrabFill path constants, parsed by a tiny M/L/C/Z parser; no file at run time). The
+           old procedural hands are gone.
+  CHANGED  cursor size follows the DPI (32 px at 100 %, 48 at 150 %, 64 at 200 % / 4K, 96 at
+           300 %) times the Windows "mouse pointer size" setting, instead of SM_CXCURSOR (which
+           is always 32). New: SpriteCursors.Size (force), SizeForDpi, SizeFor(control),
+           Get(kind, size), Get(kind, control) for per-monitor DPI; one HCURSOR cached per size.
+           compat: HandOpen / HandGrab / Rotate / ZoomIn / ZoomOut properties unchanged.
+  CHANGED  cursor policy: the hand is shown only where something moves with the mouse. Range
+           controls (knob, slider, wheel) keep open hand / fist; SpriteControlBase now defaults
+           to the arrow, so buttons, toggles, radios, LEDs, list boxes, tabs and the group-box
+           check no longer show a hand. VoxelBox orbit and the demo camera orbit show the
+           rotate arrow (was SizeAll).
+  TESTS    ctlrun: size-per-DPI table, hand picture checks at 32 / 64 px, hot spots, cursor
+           policy per control class; sheet at tests/vec/out_cursors.png.
+  DOCS     README "Cursors WinForms does not have" rewritten.
+
+2026-09-18  Application template + change log
+---------------------------------------------
+  ADDED    template/ - an empty WinForms app for .NET 10 (net10.0-windows, x64) wired to SR2D:
+           SR2DApp.csproj compiles cs\*.cs into the app (no references, no packages) and copies
+           SR2D64.dll from native\bin\x64 (or a copy beside the csproj) next to the exe.
+           Program.cs (64-bit guard, ApplicationConfiguration.Initialize), MainForm.cs (Render
+           handler + event handlers), MainForm.Designer.cs (designer-compatible layout: SpriteBox
+           canvas, SpritePanel with SpriteLabel / SpriteKnob / SpriteSlider / SpriteToggle /
+           SpriteButton), README.txt (getting started, moving it out of the repo).
+  ADDED    CHANGELOG.txt (this file); README file tree + "Starting your own app" section.
+  TESTS    template compiled as a real WinForms app together with cs/*.cs: 0 warnings.
+           tests/cs/projchk.py (part of make wincheck) now also checks the template is complete
+           (net10.0-windows, x64, cs wildcard) and reminds when the newest cs file has no
+           CHANGELOG entry.
+
+2026-09-18  Standard controls ("form furniture")
+------------------------------------------------
+  ADDED    cs/SpriteControls.Static.cs: SpriteLabel (Style Plain / Heading / Muted / Readout /
+           Badge, TextAlign, AutoSize, WordWrap, Ellipsis, Bold, LineGap), SpriteSeparator,
+           SpriteLed (Round / Square / Bar, Blink, Clickable), SpritePanel (Sunken / Raised /
+           Outline / Flat, CornerRadius), SpriteGroupBox (caption in the rim, CaptionAlign,
+           ShowCheck: unchecking disables the children), SpriteTabControl / SpriteTabPage
+           (AddPage, Side Top / Bottom, TabWidth, Stretch, keys + wheel).
+  ADDED    cs/SpriteControls.Input.cs: SpriteTextBox (caret, selection, clipboard, word jumps,
+           Placeholder, PasswordChar, ReadOnly, MaxLength, Committed on Enter / focus loss,
+           Escape reverts), SpriteNumeric (spin buttons with auto-repeat, Step / Shift = tenth,
+           Decimals, Unit, clamping), SpriteCombo (SpriteMenu drop-down; keys / wheel change
+           without opening), SpriteListBox (SpriteScrollBar, SelectionMode None / One / Multi,
+           CheckBoxes, ShowLines, ItemHeight, ItemActivated).
+  CHANGED  SpriteControlBase (cs/SpriteControls.cs): a SpriteControl whose BackColor was never
+           set adopts the face colour of a SpriteControl container it is put into and follows
+           it (AdoptBackColor / ChildBackColor / PushBackColor, BackColorIsExplicit).
+           compat: controls on ordinary WinForms parents are unaffected; set BackColor to opt out.
+  ADDED    SpriteControlBase helpers: TextLineHeight, WrapText, PaintCheckBox, PaintChevron,
+           OwnFocusRect (a control that shows the focus itself suppresses the base focus rect).
+  DEMO     Controls test "SpriteLabel / GroupBox / Tabs / TextBox / Numeric / Combo / ListBox /
+           LED" (demo/ControlsDemo.cs FormDemo, demo/Tests.cs): a settings form on the strip
+           driving the canvas.
+  TESTS    tests/cs/ctlrun Furniture(): typing, selection, clipboard, numeric steps / parsing,
+           combo keys, list Shift / Ctrl / checks / Ctrl+A, group box check, tabs; renders
+           tests/vec/out_furniture.png. Fake WinForms layer extended (KeyPress, Padding,
+           Clipboard, ControlAdded / Removed, DisplayRectangle).
+  DOCS     README "Form furniture" section + file tree.
+
+[earlier 12]  Vector object naming + visible area
+-----------------------------------------------
+  ADDED    VectorImage.Objects(nameThem) -> VectorObjectInfo list (Index, Name, Kind, Group,
+           Bounds, Hidden); NameByKind() gives unnamed shapes autoRect01 / autoEllipse01 /
+           autoPath01 / autoOpenPath01 / autoText01 / autoBitmap01; KindOf(shape); BoundsOf(name).
+  ADDED    VisibleArea (RectangleF?, image units): SetVisibleArea(x,y,w,h[,crop]) /
+           (RectangleF) / (name, crop, margin), ClearVisibleArea(), CropToVisibleArea()
+           (ViewBox = window, Width / Height follow, coordinates unchanged). Render-level:
+           lock-rect narrowing when axis-aligned, clip mask when rotated; Bounds(), HitTest and
+           VectorSprite honour it; SVG round trip via data-visible-area.
+  ADDED    importer names: AI "(name) Ln" layers -> Group, AI "%_/XMLUID : (id)" -> Id,
+           PDF "/OC ... BDC" optional-content groups -> Group.
+  DEMO     vector object strip: "Name unnamed", "Window = obj", "Crop", "Clear window"; Undo
+           restores ViewBox / Width / Height / VisibleArea.
+  TESTS    vecrun VECOBJECTS=1 (tests/vec/ai/names_xmluid.ai, tiger.svg -> out_window.png).
+
+[earlier 11]  Vector import: text and pictures
+--------------------------------------------
+  ADDED    PDF text (cs/Vector.PdfText.cs, Vector.Fonts.cs, Vector.FontData.cs): Tj / TJ / ' / "
+           with the 14 standard fonts, Standard / WinAnsi / MacRoman / Symbol encodings,
+           Differences, embedded Type1 / CFF / TrueType outlines where present, text as paths.
+  ADDED    pictures inside vector files (VectorImagePaint, cs/Vector.Image.cs, Vector.PsImage.cs):
+           PDF image XObjects (Flate / DCT / RunLength / ASCIIHex / ASCII85, SMask), PostScript
+           image / colorimage / imagemask; drawn through the vector transform.
+  ADDED    PDF-based .ai (CS6 / CorelDRAW export): art read from /AIPrivateData (bare AI ops).
+
+[earlier 10]  Vector import: SVG / EPS / PS / AI / PDF -> VectorImage
+------------------------------------------------------------------
+  ADDED    cs/Vector.cs (model: shapes, paths, groups, gradients, clips, opacity, names),
+           Vector.Render.cs (rasteriser onto a Sprite: AA, even-odd, strokes with joins / caps /
+           dashes, gradients, HitTest), Vector.Svg.cs, Vector.Ps.cs (PostScript interpreter for
+           EPS / AI prologs), Vector.Ai.cs (Illustrator operators, all versions incl. compressed
+           private data), Vector.Pdf.cs (content streams, XObjects, OCG).
+  ADDED    Vector.Edit.cs: Recolor / SwapColors / Palette, by-name SetFill / SetStroke / Hide /
+           Show / Remove, Merge, Shuffle, order; hidden shapes round-trip.
+  ADDED    Vector.Cache.cs: VectorSprite / img.Cached - cached raster reused per frame until
+           zoom / angle / content changes (tiger 240 shapes: 12.3 ms direct -> 0.92 ms cached).
+  ADDED    Sprite.Gradient.cs: gradient-paint overloads of FillRect / RoundRect / Ellipse /
+           Circle / Polygon / Path / StrokePath; SpriteGradient.Linear / Radial / RadialFocus /
+           Angle with Stops / Spread / WithMatrix.
+  DEMO     Vector test group: load files, recolour, object strip, zoom / rotate, cache toggle.
+  TESTS    tests/cs/vecrun (VECDUMP / VECPAGE / VECCACHE / VECRECOLOR / VECTEXT), tests/vec samples.
+
+[earlier 09]  SpriteBox size modes / viewport
+-------------------------------------------
+  ADDED    cs/SpriteBox.View.cs + cs/SpriteView.cs: SizeMode None / CenterImage / StretchImage /
+           Zoom / Fill / FitWidth / FitHeight x Zoom multiplier x Pan; only visible pixels are
+           resampled; composed screen cached; magnifier / hand navigation (scrubby zoom, Space =
+           hand, inertia, Overscroll), wheel (Shift sideways, Ctrl zooms), right-click view menu,
+           SR2D scroll bars, ImageAt(clientPoint), ViewChanged.
+  ADDED    cs/SpriteControls.Scroll.cs SpriteScrollBar.
+  ADDED    cs/SpriteControls.Menu.cs SpriteMenu: SR2D-drawn popup (commands, checks, radios,
+           sub-menus, inline sliders, keyboard, outside-click filter); replaces ContextMenuStrip.
+  ADDED    cs/SpriteCursors.cs: open hand / grabbing hand / rotate / zoom in / zoom out cursors.
+  FIXED    view layout hang: bar-visibility decision is one fixed-point function shared by
+           layout and sync.
+
+[earlier 08]  Deferred commit + SpriteWheel + animations
+------------------------------------------------------
+  ADDED    SpriteRangeControl.CommitOnRelease, ValuePreview, HasPendingValue, PendingValue
+           (thumb lifts while dragging, ghost marks the committed value, Escape cancels).
+  ADDED    cs/SpriteControls.Wheel.cs SpriteWheel: drum picker (Orientation, WrapMouse,
+           WrapAround, Labels, Reversed, Pitch, PixelsPerStep, Editable text box, Nudge).
+  ADDED    SpriteControlBase.Animated / AnimateTo / StepAnimations: switch slides, rocker tips,
+           tick draws, radio dot grows (Animated = false snaps).
+  ADDED    SpriteKnob Pointer = Infinite (jog wheel), KnobGauge Rings / Spiral.
+
+[earlier 07]  Button family
+-------------------------
+  ADDED    cs/SpriteControls.Buttons.cs: SpriteClickable base, SpriteButton (Rounded / Pill /
+           Square / Round, Accented), SpriteToggle (Switch / Ellipse / Rocker / CheckBox),
+           SpriteRadio (GroupName), SpriteProgress (Horizontal / Vertical / Ring, Segments,
+           Marquee).
+  DEMO     Controls test "SpriteButton / SpriteToggle / SpriteRadio / SpriteProgress".
+
+[earlier 06]  Value controls + text
+---------------------------------
+  ADDED    cs/SpriteControls.cs: SpriteControlBase (palette, hover, text scale, body look),
+           SpriteRangeControl, SpriteKnob (Angular / Endless, Arc / Circle / None gauge, Turns),
+           SpriteSlider (H / V, Bipolar, Ticks); wheel / keys / double click = reset.
+  ADDED    cs/Sprite.Text.cs + cs/PixelFont.cs: Sprite.DrawText (scale, weight, spacing, anchors,
+           line breaks, any LineOp), MeasureText, built-in 5x7 font, custom PixelFont.
+  DEMO     Controls test group; strips above the canvas (DemoTest.ControlStrip / StripHeight);
+           "Code (F2)" shows the running test's source.
+
+[earlier 05]  Voxels
+------------------
+  ADDED    native VOXEL_FACES / VOXEL_LIGHT / VOXEL_RENDER / VOXEL_FLOOD; cs/VoxelGrid.cs
+           (grid, camera presets + free camera, lighting tiers up to smooth / AO, emit
+           strength + colour, material byte), VoxelGrid.Edit.cs (selections, solids, noise),
+           VoxelGrid.Projections.cs (sprites -> voxels), VoxelGrid.Objects.cs (merge, named
+           objects), VoxelGrid.IO.cs (MagicaVoxel .vox, Wavefront .obj).
+  ADDED    cs/SpriteBox.Voxel.cs VoxelBox viewport (orbit / pan / zoom, preview while dragging,
+           VoxelClick / VoxelHover, settings menu).
+  DEMO     Voxel test group (terrain, house, lights strip with knobs).
+  TESTS    tests/voxtest, tests/cs/voxchk.
+
+[earlier 04]  Flood fill, selections, layered sprites, depth of field
+-------------------------------------------------------------------
+  ADDED    native FLOOD_MASK / FILL_MASK8 / LERP_MASK8; cs/Selection.cs (mask as an object:
+           grow / shrink / feather / invert / combine, Apply(sel, draw)).
+  ADDED    cs/LayeredSprite.cs: stack of sprites with own effects / placement / op each,
+           re-composes only what changed; depth-of-field stacks.
+
+[earlier 03]  Effects pipeline
+----------------------------
+  ADDED    native DRAW_FX (sr2d_fx.inl); cs/Effects.cs chain: Blur, Wave, Ripple, Value noise,
+           Turbulence, DistortMap (height / bump), Color (brightness / contrast / saturation /
+           gamma / hue / opacity / tint / invert), Shadow / ShadowAt, Glow, Outline, Dilate,
+           Erode; per-stage Enable; effects before or after rescale / warp; Sprite.DrawFx*.
+  ADDED    native DRAW_BLUR; Sprite.Blur / ToBlurred / DrawBlurred / DrawBlurredAt.
+  ADDED    DrawScaled area-average (shrinking) and bicubic filters.
+
+[earlier 02]  Alpha, shapes, curves, rectangles, pixel access
+-----------------------------------------------------------
+  ADDED    Op.AlphaOver + Sprite.Premultiply() (ALPHA_OVER, MASK_ALPHA_OVER, PREMUL_ALPHA):
+           correct compositing of transparent sprites over a zeroed surface.
+           compat: AlphaBlend unchanged (still black over a zeroed surface, as the original).
+  ADDED    cs/Sprite.Shapes.cs (DRAW_POLY): polylines / polygons with width, rect, ellipse,
+           circle, arrow, bracket - AA + blend ops. cs/Sprite.Curves.cs: splines through
+           points, Beziers, arcs, PathBuilder (DrawPath / FillPath / DrawPath2 dashes).
+  ADDED    cs/Sprite.Rect.cs: (x, y, width, height) overloads of every left / top / right /
+           bottom method, Bounds, LockRect, CreateView(Rectangle).
+           compat: the original L/R/T/B signatures are untouched.
+  ADDED    direct pixel access without unsafe (Pixels span, this[x, y]).
+  ADDED    DrawLine2 / DrawPolyline2 (DRAW_LINE2): sub-pixel, widths, dashes, phase.
+           DrawLine(..., PreciseDots: true) opts the old call into the new rasteriser.
+           compat: DrawLine defaults to the original behaviour bit for bit.
+  ADDED    DrawRotateShear (lossless three-shear rotation, cs/Sprite.Shear.cs).
+
+[earlier 01]  Native refactor + free transform + threads
+------------------------------------------------------
+  CHANGED  native library rewritten: all kernels once as templates (sr2d_kernels.inl),
+           instantiated for SSE2 and AVX2, runtime CPUID dispatch; X-macro export list
+           (sr2d_api.h); every original export kept, bit-exact (difftest / fuzztest against the
+           reference build); quirks preserved on purpose. Built with clang-cl, FMA off.
+  ADDED    DRAW_WARP free transform (any 2x3 matrix, nearest / bilinear / bicubic), DrawRotate
+           optionally through the warp (DrawRotate2), DrawParallel (thread-safe drawing rules
+           in README "Threads").
+  ADDED    cs/SR2D.cs + cs/Sprite.cs: same public API as the original wrapper, blittable
+           P/Invoke, no per-call allocation; new methods alongside.
+  ADDED    demo/ (SR2DDemo, formerly "bench"): every feature as a test, FPS / ms per op,
+           "Run suite" CSV; build_release.bat.
+  TESTS    tests/ (make test: difftest, warptest, linetest, polytest, blurtest, areatest,
+           cubictest, fringetest, fxtest, fuzztest, threadtest, floodtest, voxtest;
+           make wincheck: Windows SDK macro clash check + projchk).

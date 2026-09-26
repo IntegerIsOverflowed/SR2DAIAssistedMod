@@ -1,0 +1,97 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0-windows</TargetFramework>   <!-- .NET 10 like the template -->
+    <UseWindowsForms>true</UseWindowsForms>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <EnableNETAnalyzers>true</EnableNETAnalyzers>         <!-- rules tuned in ..\.editorconfig (audit of 2026-09-23) -->
+    <AnalysisLevel>latest-recommended</AnalysisLevel>
+    <PlatformTarget>x64</PlatformTarget>
+    <Platforms>x64</Platforms>
+    <RootNamespace>Sr2d64CSport</RootNamespace>
+    <AssemblyName>SR2DDemo</AssemblyName>
+    <TieredPGO>true</TieredPGO>
+    <!-- false: with it on, WinForms' WM_INPUTLANGCHANGE handler (keyboard layout change, e.g. to Russian)
+         throws CultureNotFoundException in InputLanguage.LanguageTag and killed the app while typing Cyrillic -->
+    <InvariantGlobalization>false</InvariantGlobalization>
+    <EnableWindowsTargeting>true</EnableWindowsTargeting>
+  </PropertyGroup>
+  <ItemGroup>
+    <!-- the refactored wrapper (same assembly, so the internal classes are visible) -->
+    <Compile Include="..\cs\SR2D.cs" Link="cs\SR2D.cs" />
+    <Compile Include="..\cs\Sprite.cs" Link="cs\Sprite.cs" />
+    <Compile Include="..\cs\Png.cs" Link="cs\Png.cs" />
+    <Compile Include="..\cs\Jpeg.cs" Link="cs\Jpeg.cs" />
+    <Compile Include="..\cs\ImageCodec.cs" Link="cs\ImageCodec.cs" />
+    <Compile Include="..\cs\Sprite.Shapes.cs" Link="cs\Sprite.Shapes.cs" />
+    <Compile Include="..\cs\Sprite.Stroke.cs" Link="cs\Sprite.Stroke.cs" />
+    <Compile Include="..\cs\Sprite.Blend.cs" Link="cs\Sprite.Blend.cs" />
+    <Compile Include="..\cs\Sprite.Edit.cs" Link="cs\Sprite.Edit.cs" />
+    <Compile Include="..\cs\WebP.cs" Link="cs\WebP.cs" />
+    <Compile Include="..\cs\SpriteTransform.cs" Link="cs\SpriteTransform.cs" />
+    <Compile Include="..\cs\Sprite.Rect.cs" Link="cs\Sprite.Rect.cs" />
+    <Compile Include="..\cs\Sprite.Curves.cs" Link="cs\Sprite.Curves.cs" />
+    <Compile Include="..\cs\Sprite.Effects.cs" Link="cs\Sprite.Effects.cs" />
+    <Compile Include="..\cs\Effects.cs" Link="cs\Effects.cs" />
+    <Compile Include="..\cs\LayeredSprite.cs" Link="cs\LayeredSprite.cs" />
+    <Compile Include="..\cs\Selection.cs" Link="cs\Selection.cs" />
+    <Compile Include="..\cs\VoxelGrid.cs" Link="cs\VoxelGrid.cs" />
+    <Compile Include="..\cs\VoxelGrid.Edit.cs" Link="cs\VoxelGrid.Edit.cs" />
+    <Compile Include="..\cs\VoxelGrid.Objects.cs" Link="cs\VoxelGrid.Objects.cs" />
+    <Compile Include="..\cs\VoxelGrid.IO.cs" Link="cs\VoxelGrid.IO.cs" />
+    <Compile Include="..\cs\VoxelGrid.Projections.cs" Link="cs\VoxelGrid.Projections.cs" />
+    <Compile Include="..\cs\SpriteBox.cs" Link="cs\SpriteBox.cs" />
+    <Compile Include="..\cs\SpriteBox.View.cs" Link="cs\SpriteBox.View.cs" />
+    <Compile Include="..\cs\SpriteBox.Voxel.cs" Link="cs\SpriteBox.Voxel.cs" />
+    <Compile Include="..\cs\SpriteView.cs" Link="cs\SpriteView.cs" />
+    <Compile Include="..\cs\SpriteControls.Scroll.cs" Link="cs\SpriteControls.Scroll.cs" />
+    <Compile Include="..\cs\SpriteControls.cs" Link="cs\SpriteControls.cs" />
+    <Compile Include="..\cs\SpriteControls.Text.cs" Link="cs\SpriteControls.Text.cs" />
+    <Compile Include="..\cs\SpriteControls.Buttons.cs" Link="cs\SpriteControls.Buttons.cs" />
+    <Compile Include="..\cs\SpriteControls.Wheel.cs" Link="cs\SpriteControls.Wheel.cs" />
+    <Compile Include="..\cs\SpriteControls.Menu.cs" Link="cs\SpriteControls.Menu.cs" />
+    <Compile Include="..\cs\SpriteControls.Static.cs" Link="cs\SpriteControls.Static.cs" />
+    <Compile Include="..\cs\SpriteControls.TextView.cs" Link="cs\SpriteControls.TextView.cs" />
+    <Compile Include="..\cs\SpriteControls.Input.cs" Link="cs\SpriteControls.Input.cs" />
+    <Compile Include="..\cs\SpriteCursors.cs" Link="cs\SpriteCursors.cs" />
+    <Compile Include="..\cs\PixelFont.cs" Link="cs\PixelFont.cs" />
+    <Compile Include="..\cs\PixelFont.Unicode.cs" Link="cs\PixelFont.Unicode.cs" />
+    <Compile Include="..\cs\Sprite.Text.cs" Link="cs\Sprite.Text.cs" />
+    <Compile Include="..\cs\Sprite.Font.cs" Link="cs\Sprite.Font.cs" />
+    <Compile Include="..\cs\Sprite.Shear.cs" Link="cs\Sprite.Shear.cs" />
+    <Compile Include="..\cs\Vector.cs" Link="cs\Vector.cs" />
+    <Compile Include="..\cs\Vector.Render.cs" Link="cs\Vector.Render.cs" />
+    <Compile Include="..\cs\Vector.Svg.cs" Link="cs\Vector.Svg.cs" />
+    <Compile Include="..\cs\Vector.SvgText.cs" Link="cs\Vector.SvgText.cs" />
+    <Compile Include="..\cs\Vector.Ps.cs" Link="cs\Vector.Ps.cs" />
+    <Compile Include="..\cs\Vector.Ai.cs" Link="cs\Vector.Ai.cs" />
+    <Compile Include="..\cs\Vector.PsImage.cs" Link="cs\Vector.PsImage.cs" />
+    <Compile Include="..\cs\Vector.Pdf.cs" Link="cs\Vector.Pdf.cs" />
+    <Compile Include="..\cs\Vector.PdfText.cs" Link="cs\Vector.PdfText.cs" />
+    <Compile Include="..\cs\Vector.Fonts.cs" Link="cs\Vector.Fonts.cs" />
+    <Compile Include="..\cs\ImportLog.cs" Link="cs\ImportLog.cs" />
+    <Compile Include="..\cs\SpriteFont.cs" Link="cs\SpriteFont.cs" />
+    <Compile Include="..\cs\SpriteFont.Cache.cs" Link="cs\SpriteFont.Cache.cs" />
+    <Compile Include="..\cs\Vector.FontData.cs" Link="cs\Vector.FontData.cs" />
+    <Compile Include="..\cs\Vector.Image.cs" Link="cs\Vector.Image.cs" />
+    <Compile Include="..\cs\Vector.Cache.cs" Link="cs\Vector.Cache.cs" />
+    <Compile Include="..\cs\Vector.Edit.cs" Link="cs\Vector.Edit.cs" />
+    <Compile Include="..\cs\Sprite.Gradient.cs" Link="cs\Sprite.Gradient.cs" />
+  </ItemGroup>
+  <ItemGroup>
+    <!-- built-in pictures (Lenna + normal map); the procedural bricks need no files -->
+    <EmbeddedResource Include="assets_builtin\*.webp" />
+    <!-- the demo shows its own source per test ("Code" button): Tests.cs / ControlsDemo.cs ride along inside the exe -->
+    <EmbeddedResource Include="Tests.cs" LogicalName="src/Tests.cs" />
+    <EmbeddedResource Include="ControlsDemo.cs" LogicalName="src/ControlsDemo.cs" />
+  </ItemGroup>
+  <ItemGroup>
+    <!-- drop SR2D64.dll next to the .csproj (or into bin\...) ; swap it freely to compare builds -->
+    <None Include="SR2D64.dll" Condition="Exists('SR2D64.dll')" CopyToOutputDirectory="PreserveNewest" />
+    <!-- design-time hint for the WinForms designer (its host process does not run from bin\...): where the DLL is -->
+    <AssemblyMetadata Include="SR2D.DllPath" Value="$(MSBuildProjectDirectory)\SR2D64.dll" Condition="Exists('SR2D64.dll')" />
+    <AssemblyMetadata Include="SR2D.DllPath" Value="$([System.IO.Path]::GetFullPath('$(MSBuildProjectDirectory)\..\native\bin\x64\SR2D64.dll'))" Condition="!Exists('SR2D64.dll') and Exists('$(MSBuildProjectDirectory)\..\native\bin\x64\SR2D64.dll')" />
+  </ItemGroup>
+</Project>

@@ -1,0 +1,33 @@
+%!PS-Adobe-3.0
+%%BoundingBox: 0 0 200 200
+%AI5_BeginLayer
+1 1 1 1 0 0 1 0 79 128 255 0 50 0 Lb
+(Backdrop) Ln
+u
+1 0 0 0 k
+10 10 m 90 10 L 90 90 L 10 90 L 10 10 L
+f
+%_/ArtDictionary :
+%_/XMLUID : (redbox) ; (AI10_ArtUID) ,
+%_;
+0 1 0 0 k
+110 10 m 190 10 L 190 90 L 110 90 L 110 10 L
+f
+U
+%_/ArtDictionary :
+%_/XMLUID : (pair) ; (AI10_ArtUID) ,
+%_;
+LB
+%AI5_EndLayer--
+%AI5_BeginLayer
+1 1 1 1 0 0 1 0 79 128 255 0 50 0 Lb
+(Top) Ln
+0 0 1 0 k
+50 110 m 150 110 L 150 190 L 50 190 L 50 110 L
+f
+%_/ArtDictionary :
+%_/XMLUID : (yellow_1_) ; (AI10_ArtUID) ,
+%_;
+LB
+%AI5_EndLayer--
+%%EOF

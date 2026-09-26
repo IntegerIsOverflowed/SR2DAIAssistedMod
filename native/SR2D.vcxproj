@@ -1,0 +1,109 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project DefaultTargets="Build" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup Label="ProjectConfigurations">
+    <ProjectConfiguration Include="Release|Win32">
+      <Configuration>Release</Configuration>
+      <Platform>Win32</Platform>
+    </ProjectConfiguration>
+    <ProjectConfiguration Include="Release|x64">
+      <Configuration>Release</Configuration>
+      <Platform>x64</Platform>
+    </ProjectConfiguration>
+  </ItemGroup>
+  <PropertyGroup Label="Globals">
+    <ProjectGuid>{B8BC965C-E33F-4AD9-BDC9-97CD32A109F6}</ProjectGuid>
+    <RootNamespace>SR2D</RootNamespace>
+    <WindowsTargetPlatformVersion>10.0</WindowsTargetPlatformVersion>
+    <!-- default platform when none is given (msbuild SR2D.vcxproj from a shell): x64 -->
+    <Platform Condition="'$(Platform)'==''">x64</Platform>
+    <Configuration Condition="'$(Configuration)'==''">Release</Configuration>
+  </PropertyGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
+  <PropertyGroup Label="Configuration">
+    <ConfigurationType>DynamicLibrary</ConfigurationType>
+    <!-- ClangCL = LLVM clang-cl (Visual Studio component "C++ Clang tools for Windows"); it schedules the
+         intrinsics a bit better than MSVC. To build with MSVC instead pass /p:PlatformToolset=v145 (or v143)
+         - both toolsets pass the same bit-exact test-suite (tests/, GCC + clang). -->
+    <PlatformToolset>ClangCL</PlatformToolset>
+    <UseOfMfc>false</UseOfMfc>
+    <CharacterSet>MultiByte</CharacterSet>
+    <!-- /GL + /LTCG are MSVC-only (clang-cl ignores /GL and link then has nothing to LTCG) -->
+    <WholeProgramOptimization Condition="'$(PlatformToolset)'!='ClangCL'">true</WholeProgramOptimization>
+    <WholeProgramOptimization Condition="'$(PlatformToolset)'=='ClangCL'">false</WholeProgramOptimization>
+  </PropertyGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.props" />
+  <ImportGroup Label="PropertySheets">
+    <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
+  </ImportGroup>
+  <PropertyGroup>
+    <LinkIncremental>false</LinkIncremental>
+    <OutDir>$(SolutionDir)bin\$(Platform)\</OutDir>
+    <IntDir>$(SolutionDir)obj\$(Platform)\</IntDir>
+    <!-- x64 build is what the C# side loads (SR2D64.dll); x86 keeps the old name -->
+    <TargetName Condition="'$(Platform)'=='x64'">SR2D64</TargetName>
+    <TargetName Condition="'$(Platform)'=='Win32'">SR2D</TargetName>
+  </PropertyGroup>
+  <ItemDefinitionGroup>
+    <ClCompile>
+      <Optimization>MaxSpeed</Optimization>
+      <InlineFunctionExpansion>AnySuitable</InlineFunctionExpansion>
+      <IntrinsicFunctions>true</IntrinsicFunctions>
+      <FavorSizeOrSpeed>Speed</FavorSizeOrSpeed>
+      <OmitFramePointers>true</OmitFramePointers>
+      <WholeProgramOptimization Condition="'$(PlatformToolset)'!='ClangCL'">true</WholeProgramOptimization>
+      <PreprocessorDefinitions>WIN32;NDEBUG;_WINDOWS;_USRDLL;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <StringPooling>true</StringPooling>
+      <RuntimeLibrary>MultiThreaded</RuntimeLibrary>
+      <FunctionLevelLinking>true</FunctionLevelLinking>
+      <BufferSecurityCheck>false</BufferSecurityCheck>
+      <ExceptionHandling>false</ExceptionHandling>
+      <RuntimeTypeInfo>false</RuntimeTypeInfo>
+      <LanguageStandard>stdcpp17</LanguageStandard>
+      <WarningLevel>Level3</WarningLevel>
+      <SuppressStartupBanner>true</SuppressStartupBanner>
+      <ControlFlowGuard>false</ControlFlowGuard>
+      <SDLCheck>false</SDLCheck>
+      <FloatingPointModel>Precise</FloatingPointModel>
+      <!-- SSE2 baseline for every TU (x64 default; explicit for Win32) -->
+      <EnableEnhancedInstructionSet Condition="'$(Platform)'=='Win32'">StreamingSIMDExtensions2</EnableEnhancedInstructionSet>
+      <!-- clang-cl: /arch:AVX2 also turns on FMA and contracts a*b+c by default; the AVX2 TU
+           disables contraction with '#pragma clang fp contract(off)' so SSE2 and AVX2 kernels
+           stay bit-identical. -fno-builtin is NOT needed for the DLL (only the test build of the
+           original sources needs it, see tests/Makefile). -->
+      <AdditionalOptions Condition="'$(PlatformToolset)'=='ClangCL'">-Wno-unused-command-line-argument %(AdditionalOptions)</AdditionalOptions>
+    </ClCompile>
+    <Link>
+      <SuppressStartupBanner>true</SuppressStartupBanner>
+      <ModuleDefinitionFile>SR2D.def</ModuleDefinitionFile>
+      <RandomizedBaseAddress>true</RandomizedBaseAddress>
+      <DataExecutionPrevention>true</DataExecutionPrevention>
+      <LinkTimeCodeGeneration Condition="'$(PlatformToolset)'!='ClangCL'">UseLinkTimeCodeGeneration</LinkTimeCodeGeneration>
+      <OptimizeReferences>true</OptimizeReferences>
+      <EnableCOMDATFolding>true</EnableCOMDATFolding>
+      <EntryPointSymbol>DllMain</EntryPointSymbol>
+      <IgnoreAllDefaultLibraries>false</IgnoreAllDefaultLibraries>
+      <AdditionalDependencies>kernel32.lib;vcruntime.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <TargetMachine Condition="'$(Platform)'=='Win32'">MachineX86</TargetMachine>
+      <TargetMachine Condition="'$(Platform)'=='x64'">MachineX64</TargetMachine>
+    </Link>
+  </ItemDefinitionGroup>
+  <ItemGroup>
+    <ClCompile Include="sr2d.cpp" />
+    <ClCompile Include="sr2d_kernels_sse2.cpp" />
+    <ClCompile Include="sr2d_kernels_avx2.cpp">
+      <!-- only this TU may contain VEX/AVX2 instructions; it is reached solely through the dispatch table -->
+      <EnableEnhancedInstructionSet>AdvancedVectorExtensions2</EnableEnhancedInstructionSet>
+    </ClCompile>
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="sr2d_api.h" />
+    <ClInclude Include="sr2d_ops.h" />
+    <ClInclude Include="sr2d_simd.h" />
+    <None Include="sr2d_kernels.inl" />
+    <None Include="sr2d_fx.inl" />
+    <None Include="sr2d_select.inl" />
+    <None Include="sr2d_voxel.inl" />
+    <None Include="SR2D.def" />
+  </ItemGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
+</Project>

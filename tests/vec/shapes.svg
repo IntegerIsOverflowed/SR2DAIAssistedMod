@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" viewBox="0 0 300 200" width="300" height="200">
+ <defs>
+  <linearGradient id="lg" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#ff0000"/><stop offset="0.5" stop-color="#ffff00"/><stop offset="1" stop-color="#0000ff" stop-opacity="0.5"/></linearGradient>
+  <radialGradient id="rg" cx="0.5" cy="0.5" r="0.5" fx="0.35" fy="0.35"><stop offset="0" stop-color="white"/><stop offset="1" stop-color="#204080"/></radialGradient>
+  <clipPath id="cp"><circle cx="230" cy="60" r="35"/></clipPath>
+  <style>.thick{stroke-width:6;stroke:#333;fill:none;stroke-linecap:round;stroke-linejoin:round}</style>
+  <symbol id="star" viewBox="0 0 20 20"><polygon points="10,1 12.5,7.5 19,7.5 14,11.5 16,18 10,14 4,18 6,11.5 1,7.5 7.5,7.5" fill="gold" stroke="#a80" stroke-width="1"/></symbol>
+ </defs>
+ <rect x="10" y="10" width="120" height="60" rx="12" fill="url(#lg)" stroke="black" stroke-width="2"/>
+ <circle cx="180" cy="40" r="30" fill="url(#rg)"/>
+ <g clip-path="url(#cp)"><rect x="190" y="20" width="90" height="90" fill="#3a5" /><line x1="190" y1="20" x2="280" y2="110" stroke="white" stroke-width="8"/></g>
+ <path d="M20 120 C 40 80, 80 160, 100 120 S 160 80, 180 120 Q 200 160 220 120 T 260 120" class="thick"/>
+ <path d="M30 180 a 20 20 0 1 1 40 0 a 20 20 0 1 1 -40 0 z M50 165 l 10 10 h -20 z" fill="#c33" fill-rule="evenodd" stroke="#600" stroke-dasharray="6 3" stroke-width="2"/>
+ <g transform="translate(150 150) rotate(20) skewX(10)"><rect x="-40" y="-15" width="80" height="30" fill="#48f" opacity="0.7" stroke="navy" stroke-width="3" stroke-linejoin="miter"/></g>
+ <use xlink:href="#star" x="240" y="130" width="50" height="50"/>
+ <polyline points="10,90 30,100 50,90 70,100 90,90" fill="none" stroke="#0a0" stroke-width="3" stroke-linejoin="bevel"/>
+ <ellipse cx="270" cy="180" rx="25" ry="12" fill="none" stroke="purple" stroke-width="2" transform="rotate(-30 270 180)"/>
+ <text x="150" y="190" font-size="12">not imported</text>
+</svg>
