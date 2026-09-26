@@ -1,0 +1,5 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- headless visual check of Sprite.Curves.cs. Linux: `make so` in tests/, copy build/libSR2D64.so next to curvetest.dll, run `dotnet curvetest.dll out.raw`, then `python3 topng.py out.raw 900 700 out.png`. Windows: SR2D64.dll next to the exe. -->
+  <PropertyGroup><OutputType>Exe</OutputType><TargetFramework>net9.0</TargetFramework><Nullable>enable</Nullable><AllowUnsafeBlocks>true</AllowUnsafeBlocks><ImplicitUsings>disable</ImplicitUsings><NoWarn>CA1416;CS8981</NoWarn><RootNamespace>Sr2d64CSport</RootNamespace></PropertyGroup>
+  <ItemGroup><Compile Include="../../cs/SR2D.cs" /><Compile Include="../../cs/Sprite.cs" /><Compile Include="../../cs/Sprite.Shapes.cs" /><Compile Include="../../cs/Sprite.Rect.cs" /><Compile Include="../../cs/Sprite.Curves.cs" /><Compile Include="../../cs/Sprite.Effects.cs" /><PackageReference Include="System.Drawing.Common" Version="9.0.0" /></ItemGroup>
+</Project>

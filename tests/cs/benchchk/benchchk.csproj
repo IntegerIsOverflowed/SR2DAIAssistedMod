@@ -1,0 +1,26 @@
+<!-- headless compile check of cs/ + demo/ (no output used); keeps the check reproducible when /tmp is wiped.
+     Builds twice: ImplicitUsings off (the demo) and on (the default of a new project / the template) -
+       dotnet build                        (off)
+       dotnet build -p:Implicit=enable     (on)   - catches CS0104 "Timer is ambiguous" and the like -->
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Library</OutputType>
+    <TargetFramework>net9.0-windows</TargetFramework>
+    <UseWindowsForms>true</UseWindowsForms>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <Nullable>enable</Nullable>
+    <Implicit Condition="'$(Implicit)' == ''">disable</Implicit>
+    <ImplicitUsings>$(Implicit)</ImplicitUsings>
+    <EnableWindowsTargeting>true</EnableWindowsTargeting>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+    <BaseOutputPath>/home/user/.cache/benchchk/$(Implicit)/bin/</BaseOutputPath>
+    <BaseIntermediateOutputPath>/home/user/.cache/benchchk/$(Implicit)/obj/</BaseIntermediateOutputPath>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="../../../cs/*.cs" />
+    <Compile Include="../../../demo/*.cs" />
+    <EmbeddedResource Include="../../../demo/assets_builtin/*.webp" />
+    <EmbeddedResource Include="../../../demo/Tests.cs" LogicalName="src/Tests.cs" />
+    <EmbeddedResource Include="../../../demo/ControlsDemo.cs" LogicalName="src/ControlsDemo.cs" />
+  </ItemGroup>
+</Project>

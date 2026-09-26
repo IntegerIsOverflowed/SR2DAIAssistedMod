@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup>
+    <Filter Include="Source Files"><UniqueIdentifier>{63806b04-6698-4587-8e09-607e2ed9c899}</UniqueIdentifier></Filter>
+    <Filter Include="Header Files"><UniqueIdentifier>{3d0e95e2-296e-4b4e-b0c8-ada43ffe8662}</UniqueIdentifier></Filter>
+  </ItemGroup>
+  <ItemGroup>
+    <ClCompile Include="sr2d.cpp"><Filter>Source Files</Filter></ClCompile>
+    <ClCompile Include="sr2d_kernels_sse2.cpp"><Filter>Source Files</Filter></ClCompile>
+    <ClCompile Include="sr2d_kernels_avx2.cpp"><Filter>Source Files</Filter></ClCompile>
+    <None Include="sr2d_kernels.inl"><Filter>Source Files</Filter></None>
+    <None Include="SR2D.def"><Filter>Source Files</Filter></None>
+    <ClInclude Include="sr2d_api.h"><Filter>Header Files</Filter></ClInclude>
+    <ClInclude Include="sr2d_ops.h"><Filter>Header Files</Filter></ClInclude>
+    <ClInclude Include="sr2d_simd.h"><Filter>Header Files</Filter></ClInclude>
+  </ItemGroup>
+</Project>

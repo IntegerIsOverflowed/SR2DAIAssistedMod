@@ -1,0 +1,20 @@
+<!-- headless runner for bench tests (Tests.cs bodies without the WinForms shell): dotnet run -c Release [testname prefix] -->
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net9.0</TargetFramework>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+    <BaseOutputPath>/home/user/.cache/benchrun/bin/</BaseOutputPath>
+    <BaseIntermediateOutputPath>/home/user/.cache/benchrun/obj/</BaseIntermediateOutputPath>
+    <NoWarn>CA1416;WFO1000</NoWarn>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="../../../cs/*.cs" Exclude="../../../cs/SpriteBox*.cs;../../../cs/SpriteControls*.cs;../../../cs/SpriteCursors.cs" />
+    <Compile Include="../../../demo/Assets.cs;../../../demo/Tests.cs;../../../demo/Caps.cs" />
+    <Compile Include="Stubs.cs;Program.cs" />
+    <EmbeddedResource Include="../../../demo/assets_builtin/*.webp" /><PackageReference Include="System.Drawing.Common" Version="9.0.0" />
+  </ItemGroup>
+</Project>
