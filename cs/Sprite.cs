@@ -616,6 +616,10 @@ namespace Sr2d64CSport
             }
         }
 
+        /// <summary>Descriptive alias of <see cref="Blend(Sprite, int, int, int)"/>: a straight crossfade of <paramref name="Src"/> over
+        /// this sprite by <paramref name="BlendFactor"/> (0..256). Exists so call sites never read like the unrelated
+        /// <see cref="SR2D.Op.Blend"/> draw mode - "Crossfade" says what actually happens.</summary>
+        public void Crossfade(Sprite Src, int Sx, int Sy, int BlendFactor) => Blend(Src, Sx, Sy, BlendFactor);
         public void Blend(Sprite Src, int Sx, int Sy, int BlendFactor)
         {
             if (!Clip2(Sx, Sx + Src.meWidth, Sy, Sy + Src.meHeight, Src.meWidth, Src.pBuf, out Clip k)) return;

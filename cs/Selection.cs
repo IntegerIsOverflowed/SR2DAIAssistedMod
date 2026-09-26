@@ -18,6 +18,15 @@ using System.Runtime.InteropServices;
 
 namespace Sr2d64CSport
 {
+    /// <summary>How the magic wand compares colours.</summary>
+    internal enum SelectMetric
+    {
+        /// <summary>Max channel difference (Chebyshev, like GIMP / Paint.NET) - the native fast path.</summary>
+        Rgb,
+        /// <summary>Weighted RGB distance (0.30 / 0.59 / 0.11) - compares like the eye (managed path).</summary>
+        Perceptual,
+    }
+
     /// <summary>How a new shape combines with the current selection.</summary>
     internal enum SelectMode { Replace, Add, Subtract, Intersect, Xor }
 
@@ -83,13 +92,137 @@ namespace Sr2d64CSport
         /// Returns the number of pixels the wand found (before combining).
         /// </summary>
         public int Wand(Sprite Src, int x, int y, int Tolerance = 0, SelectMode Mode = SelectMode.Replace,
-                        bool Contiguous = true, bool Diagonal = false, bool Soft = false, bool IgnoreAlpha = false)
-            => WandCore(Src, x, y, 0, Tolerance, Mode, Contiguous, Diagonal, Soft, IgnoreAlpha, false);
+                        bool Contiguous = true, bool Diagonal = false, bool Soft = false, bool IgnoreAlpha = false,
+                        SelectMetric Metric = SelectMetric.Rgb)
+            => Metric == SelectMetric.Rgb
+               ? WandCore(Src, x, y, 0, Tolerance, Mode, Contiguous, Diagonal, Soft, IgnoreAlpha, false)
+               : WandCoreWeighted(Src, x, y, 0, Tolerance, Mode, Contiguous, Diagonal, Soft, IgnoreAlpha, false);
 
         /// <summary>Selects by colour (all pixels within Tolerance of <paramref name="Color"/>, ARGB), optionally only the region connected to (x, y).</summary>
         public int ByColor(Sprite Src, int Color, int Tolerance = 0, SelectMode Mode = SelectMode.Replace, bool IgnoreAlpha = false,
-                           bool Contiguous = false, int x = 0, int y = 0, bool Diagonal = false, bool Soft = false)
-            => WandCore(Src, x, y, Color, Tolerance, Mode, Contiguous, Diagonal, Soft, IgnoreAlpha, true);
+                           bool Contiguous = false, int x = 0, int y = 0, bool Diagonal = false, bool Soft = false,
+                           SelectMetric Metric = SelectMetric.Rgb)
+            => Metric == SelectMetric.Rgb
+               ? WandCore(Src, x, y, Color, Tolerance, Mode, Contiguous, Diagonal, Soft, IgnoreAlpha, true)
+               : WandCoreWeighted(Src, x, y, Color, Tolerance, Mode, Contiguous, Diagonal, Soft, IgnoreAlpha, true);
+
+        /// <summary>
+        /// Managed twin of the native wand with a PERCEPTUAL distance: sqrt(0.30 dR^2 + 0.59 dG^2 + 0.11 dB^2 (+ 0.30 dA^2))
+        /// &lt;= Tolerance - greys and skin tones compare like the eye sees them, where the max-channel (Chebyshev) metric
+        /// overweights blue. Same flags and SelectMode handling as <see cref="Wand"/> (Diagonal is accepted for
+        /// signature compatibility; the weighted flood is 4-connected); scanline flood in managed code -
+        /// fine for editor-scale images, not per-frame work.
+        /// </summary>
+        int WandCoreWeighted(Sprite Src, int x, int y, int refColor, int tol, SelectMode mode, bool contiguous, bool diagonal, bool soft, bool ignoreAlpha, bool useRef)
+        {
+            Check(Src);
+            var r = Src.LockRect;
+            if (!r.Contains(x, y)) return 0;
+            int* px = (int*)Src.PixelPtr;
+            int W = Src.Width, H = Src.Height;
+            uint seed = useRef ? (uint)refColor : (uint)px[y * W + x];
+            float sr = (seed >>> 16) & 255, sg = (seed >>> 8) & 255, sb = seed & 255, sa = (seed >>> 24) & 255;
+            float wr = 0.30f, wg = 0.59f, wb = 0.11f, wa = 0.30f;
+            float tol2 = tol * (float)tol;
+            bool Match(int p)
+            {
+                uint c = (uint)p;
+                float dr = ((c >>> 16) & 255) - sr, dg = ((c >>> 8) & 255) - sg, db = (c & 255) - sb;
+                float d = wr * dr * dr + wg * dg * dg + wb * db * db;
+                if (!ignoreAlpha) { float da = ((c >>> 24) & 255) - sa; d += wa * da * da; }
+                return d <= tol2;
+            }
+            float CovOf(int p)
+            {
+                if (!soft) return 255;
+                uint c = (uint)p;
+                float dr = ((c >>> 16) & 255) - sr, dg = ((c >>> 8) & 255) - sg, db = (c & 255) - sb;
+                float d2 = wr * dr * dr + wg * dg * dg + wb * db * db;
+                if (!ignoreAlpha) { float da = ((c >>> 24) & 255) - sa; d2 += wa * da * da; }
+                float d = MathF.Sqrt(d2);
+                return Math.Clamp(255 * (1 - (d - tol / 2f) / MathF.Max(1f, tol / 2f)), 0, 255);
+            }
+
+            var fill = mode == SelectMode.Replace ? this : new Selection(W, H);
+            if (mode == SelectMode.Replace) fill.Clear();   // Replace replaces (the native path does the same): the old mask must not guard the flood
+            byte* m = fill.p;
+            int found = 0;
+            int bx0 = W, by0 = H, bx1 = 0, by1 = 0;
+            void Bump(int x0, int y0, int x1, int y1) { if (x0 < bx0) bx0 = x0; if (y0 < by0) by0 = y0; if (x1 > bx1) bx1 = x1; if (y1 > by1) by1 = y1; }
+            if (!contiguous)
+            {
+                for (int i = 0; i < W * H; i++)
+                {
+                    if (m[i] != 0 || !Match(px[i])) continue;
+                    m[i] = (byte)CovOf(px[i]); found++;
+                    Bump(i % W, i / W, i % W + 1, i / W + 1);
+                }
+            }
+            else
+            {
+                var seen = new bool[W * H];
+                var stack = new System.Collections.Generic.Stack<(int x0, int x1, int yv)>();
+                void ScanRow(int yv, int from, int to)
+                {
+                    for (int i = from; i < to; i++)
+                    {
+                        int j = yv * W + i;
+                        if (seen[j] || !Match(px[j])) continue;
+                        int l = i;
+                        while (l > r.Left && !seen[yv * W + l - 1] && Match(px[yv * W + l - 1])) l--;
+                        int rr = i;
+                        while (rr < r.Right - 1 && !seen[yv * W + rr + 1] && Match(px[yv * W + rr + 1])) rr++;
+                        for (int q = l; q <= rr; q++) { seen[yv * W + q] = true; m[yv * W + q] = (byte)CovOf(px[yv * W + q]); }
+                        found += rr - l + 1;
+                        Bump(l, yv, rr + 1, yv + 1);
+                        stack.Push((l, rr, yv));
+                        i = rr;
+                    }
+                }
+                ScanRow(y, x, x + 1);        // the run-extension inside ScanRow covers left AND right of the seed
+                while (stack.Count > 0)
+                {
+                    var (x0, x1, yv) = stack.Pop();
+                    if (yv - 1 >= r.Top) ScanRow(yv - 1, x0, x1 + 1);
+                    if (yv + 1 < r.Bottom) ScanRow(yv + 1, x0, x1 + 1);
+                }
+            }
+            if (bx1 <= bx0) return 0;                     // nothing matched
+            fill.bl = bx0; fill.bt = by0; fill.br = bx1; fill.bb = by1; fill.Version++;
+            if (mode != SelectMode.Replace) Combine(fill, mode);
+            else { bl = fill.bl; bt = fill.bt; br = fill.br; bb = fill.bb; Version++; }
+            return found;
+        }
+
+        /// <summary>Quick-mask EXPORT: the selection coverage becomes the sprite's ALPHA of <paramref name="colour"/> composited
+        /// over <paramref name="background"/> - paint on it with any verb (opaque brush = select, erase = deselect, a soft brush =
+        /// a soft edge), then hand it back with <see cref="FromSprite"/>. <paramref name="Dst"/> must be this selection's size.</summary>
+        public void ToSprite(Sprite Dst, int colour = unchecked((int)0xFF3366FF), int background = unchecked((int)0x00000000))
+        {
+            Check(Dst);
+            byte* mk = p; int* q = (int*)Dst.PixelPtr;
+            int cr = (colour >>> 16) & 255, cg = (colour >>> 8) & 255, cb = colour & 255;
+            int br = (background >>> 16) & 255, bg = (background >>> 8) & 255, bb = background & 255, ba = (background >>> 24) & 255;
+            for (int i = 0; i < w * h; i++)
+            {
+                float a = mk[i] / 255f;
+                int alpha = (int)MathF.Round(255 * a + ba * (1 - a));
+                q[i] = unchecked((alpha << 24)
+                     | ((int)MathF.Round(cr * a + br * (1 - a)) << 16)
+                     | ((int)MathF.Round(cg * a + bg * (1 - a)) << 8)
+                     | (int)MathF.Round(cb * a + bb * (1 - a)));
+            }
+        }
+
+        /// <summary>Quick-mask IMPORT: the sprite's ALPHA becomes the selection coverage (paint with any verb, then read the mask
+        /// back). <paramref name="Mask"/> must be this selection's size.</summary>
+        public void FromSprite(Sprite Mask)
+        {
+            Check(Mask);
+            byte* mk = p; int* q = (int*)Mask.PixelPtr;
+            for (int i = 0; i < w * h; i++) mk[i] = (byte)((q[i] >>> 24) & 255);
+            Invalidate();                                 // bounds + Version
+        }
 
         int WandCore(Sprite Src, int x, int y, int refColor, int tol, SelectMode mode, bool contiguous, bool diagonal, bool soft, bool ignoreAlpha, bool useRef)
         {

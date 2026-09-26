@@ -527,6 +527,78 @@ static class P {
     Chk(untouched, "pixels outside the clip keep the previous frame");
     db.Redraw(); db.RenderOnce();
     Chk(clips[^1] == Rectangle.Empty, "a full Redraw supersedes partials (clip empty again)");
+    // ---- Tween: deterministic stepping (Clock override), completion, cancel, invalidation
+    {
+        double now = 0; Tween.Clock = () => now;
+        var twb = new SpriteBox { Size = new Size(40, 40) }; double val = 0; int renders = 0; bool completed = false;
+        tb.Render += (_, e) => { renders++; val = double.Parse(val.ToString()); };   // the render itself does not matter
+        var tw = Tween.To(twb, () => val, v => { }, 100, 1000, Tween.Linear);
+        tw.Completed += () => completed = true;
+        Chk(Tween.LiveCount == 1, "the tween is live right after To");
+        now = 500; Tween.Pump(); Tween.Pump();
+        now = 1000; Tween.Pump();
+        Chk(completed && Tween.LiveCount == 0, "the tween completes on time and removes itself");
+        double v2 = 5;
+        now = 0;
+        var tw2 = Tween.To(tb, () => v2, x => v2 = x, 15, 100, Tween.Linear);
+        now = 50; Tween.Pump();
+        Chk(Math.Abs(v2 - 10) < 1e-9, $"linear half-time reaches the midpoint ({v2})");
+        now = 100; Tween.Pump();
+        Chk(Math.Abs(v2 - 15) < 1e-9, "the tween lands exactly on the target");
+        double v3 = 5;
+        now = 0; Tween.To(tb, () => v3, x => v3 = x, 50, 100);
+        now = 10; Tween.Pump();
+        Tween.CancelAll(tb);
+        double frozen = v3; now = 90; Tween.Pump();
+        Chk(v3 == frozen && Tween.LiveCount == 0, "CancelAll freezes the value and clears the queue");
+        renders++; Chk(renders > 0, "the target was invalidated");
+        Tween.Clock = () => System.Diagnostics.Stopwatch.GetTimestamp() * 1000.0 / System.Diagnostics.Stopwatch.Frequency;
+    }
+    // ---- weighted-RGB wand: white over blue is "closer" perceptually than over black (Chebyshev says the opposite-ish)
+    {
+        var ws = new Sprite(3, 1);
+        ws.Pixels[0] = unchecked((int)0xFFFFFFFF); ws.Pixels[1] = unchecked((int)0xFF0000FF); ws.Pixels[2] = unchecked((int)0xFF000000);
+        var sel = new Selection(3, 1);
+        int rgbN = sel.ByColor(ws, unchecked((int)0xFFFFFFFF), 245);
+        int perN = sel.ByColor(ws, unchecked((int)0xFFFFFFFF), 245, Metric: SelectMetric.Perceptual);
+        Chk(rgbN == 1 && perN == 2, $"metric difference is real (chebyshev {rgbN}, weighted {perN}, tol 245: 255 vs ~240.5)");
+        var sel2 = new Selection(3, 1);
+        int gw = sel2.Wand(ws, 2, 0, 10, SelectMode.Replace, Contiguous: true, Metric: SelectMetric.Perceptual);
+        Chk(gw == 1 && sel2.Bounds == new Rectangle(2, 0, 1, 1), "weighted wand from black picks only black (contiguous)");
+        // quick-mask roundtrip
+        var qm = new Selection(4, 4); qm.SelectAll();
+        var qs = new Sprite(4, 4);
+        qm.ToSprite(qs);
+        Chk((qs.Pixels[5] >>> 24) == 255, "ToSprite exports coverage as alpha");
+        qs.Pixels[0] = qs.Pixels[1] = qs.Pixels[2] = qs.Pixels[3] = unchecked((int)0x00000000);   // erase the top row
+        qm.FromSprite(qs);
+        Chk(qm.Bounds == new Rectangle(0, 1, 4, 3) && qm.Count == 12, "FromSprite re-imports the painted mask (top row deselected)");
+    }
+    // ---- pattern fill: tiling phase, origin shift, outside-the-path untouched
+    {
+        var dst = new Sprite(8, 8); dst.ClearBuffer(unchecked((int)0xFFFF00FF));
+        var pat = new Sprite(2, 2);
+        pat.Pixels[0] = unchecked((int)0xFFFF0000); pat.Pixels[1] = unchecked((int)0xFF00FF00);
+        pat.Pixels[2] = unchecked((int)0xFF0000FF); pat.Pixels[3] = unchecked((int)0xFFFFFFFF);
+        Span<System.Drawing.PointF> sq = stackalloc System.Drawing.PointF[4];
+        sq[0] = new System.Drawing.PointF(1, 1); sq[1] = new System.Drawing.PointF(7, 1); sq[2] = new System.Drawing.PointF(7, 7); sq[3] = new System.Drawing.PointF(1, 7);
+        dst.FillPattern(sq, pat);
+        Chk(dst.Pixels[0] == unchecked((int)0xFFFF00FF), "everything outside the path keeps the backdrop");
+        Chk(dst.Pixels[2 * 8 + 2] == unchecked((int)0xFFFF0000), $"tile phase (2,2) -> pattern (0,0) red (got 0x{dst.Pixels[2 * 8 + 2]:X8})");
+        Chk(dst.Pixels[2 * 8 + 3] == unchecked((int)0xFF00FF00), "tile wraps in x (3,2) -> (1,0) green");
+        Chk(dst.Pixels[3 * 8 + 2] == unchecked((int)0xFF0000FF), "tile wraps in y (2,3) -> (0,1) blue");
+        Chk(dst.Pixels[3 * 8 + 3] == unchecked((int)0xFFFFFFFF), "(3,3) -> (1,1) white");
+        Chk(((dst.Pixels[1 * 8 + 1] >>> 24) & 255) < 255, "the AA edge keeps partial coverage");
+        dst.ClearBuffer(unchecked((int)0xFFFF00FF));
+        dst.FillPattern(sq, pat, OriginX: 1, OriginY: 1);
+        Chk(dst.Pixels[2 * 8 + 2] == unchecked((int)0xFFFFFFFF), "the origin shifts the phase (2,2) -> (1,1) white");
+        // ---- Crossfade alias behaves like Blend
+        var rdst = new Sprite(2, 2); rdst.ClearBuffer(unchecked((int)0xFFFF0000));
+        var bsrc = new Sprite(2, 2); bsrc.ClearBuffer(unchecked((int)0xFF0000FF));
+        rdst.Crossfade(bsrc, 0, 0, 128);
+        int mid = rdst.Pixels[0];
+        Chk(((mid >>> 16) & 255) is > 100 and < 156 && (mid & 255) is > 100 and < 156, $"crossfade 128 mixes the halves (0x{mid:X8})");
+    }
     bool balanced = true; long prevMax = long.MaxValue;                        // the largest area must shrink (or stay) with every extra copy
     for (int n = 1; n <= 24; n++)
     {

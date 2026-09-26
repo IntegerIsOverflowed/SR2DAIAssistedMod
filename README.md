@@ -3302,3 +3302,92 @@ blended towards black and the layer never becomes opaque: that is the dark halo 
 (Porter–Duff source-over, `dst = src + dst·(1−a)` for all four channels), which
 accumulates alpha correctly — the left half is *not* the premultiplied one, it is the
 one that goes wrong.
+
+## Cookbook
+
+Ten recipes for the things people actually ask. All of them are also demo tests ("Code (F2)" shows them in context).
+
+### 1. Draw with the mouse (a line tool)
+
+```csharp
+Sprite? stroke; Point last;
+canvas.MouseDown += (_, e) => { last = e.Location; };
+canvas.MouseMove += (_, e) => { if (e.Button == MouseButtons.Left) canvas.Surface.DrawLine(last.X, last.Y, e.X, e.Y, color, op: SR2D.LineOp.AlphaBlend); last = e.Location; box.Invalidate(); };
+```
+`box.Surface` is the persistent back buffer — draw into it whenever you like, `Invalidate()` presents it. (The demo's DrawLine test keeps a list of strokes instead and redraws them per frame — same result, different model.)
+
+### 2. A drag-and-drop sprite (grab anywhere)
+
+```csharp
+bool drag; Point grab;
+canvas.MouseDown += (_, e) => { var r = new Rectangle(x, y, spr.Width, spr.Height); if (r.Contains(e.Location)) { drag = true; grab = (Point)e.Location - new Size(x, y); } };
+canvas.MouseMove += (_, e) => { if (drag) { x = e.X - grab.X; y = e.Y - grab.Y; box.RedrawNow(); } };
+canvas.MouseUp   += (_, e) => drag = false;
+box.Cursor = SpriteCursors.HandOpen;      // SVG hand, DPI-scaled
+```
+
+### 3. Zoomable image viewer with scroll bars
+
+```csharp
+var box = new SpriteBox { SizeMode = SpriteSizeMode.Zoom, ScrollBars = true, Dock = DockStyle.Fill };
+box.ImageSize = new Size(img.Width, img.Height);
+box.Render += (_, e) => { img.Draw(e.Surface, 0, 0); };       // ImageSize pixels; the view clips/zooms for you
+```
+Wheel scrolls, Ctrl+wheel zooms, drag with the middle button or Space, and only the visible pixels are ever resampled.
+
+### 4. A game loop (render while idle)
+
+```csharp
+bool running = true;
+Application.Idle += (_, _) => { while (running && !Win32.QueueEmpty()) { Update(1f / 60f); box.RedrawNow(); } };
+```
+`RedrawNow()` renders and presents synchronously — no repaint message round-trip. The demo adds coalescing so a 1000 Hz mouse cannot starve the loop (see MainForm).
+
+### 5. Save what is on screen (no GDI+)
+
+```csharp
+File.WriteAllBytes(path, Png.Encode(box.Surface.Pixels, box.Surface.Width, box.Surface.Height));
+var webp = WebP.Decode(File.ReadAllBytes("in.webp"));          // decode-only by design
+```
+
+### 6. Undo for in-place edits
+
+```csharp
+var history = new EditHistory();
+void PaintAt(Point p) { history.Record(box.Surface, new Rectangle(p.X - 8, p.Y - 8, 16, 16)); box.Surface.FillCircle(p.X, p.Y, 8, color); box.Redraw(p.X - 9, ...) /* or Redraw() */; }
+ctrlZ += (_, _) => { if (history.Undo(box.Surface)) box.Redraw(); };
+```
+Only the recorded rectangle is stored; the cap drops the oldest steps, not the sprite.
+
+### 7. Redraw only what changed
+
+```csharp
+box.Redraw(new Rectangle(x0, y0, w, h));      // several calls union
+box.Render += (_, e) => { DrawScene(e.Surface); /* skip work outside e.ClipRectangle */ };
+```
+`e.ClipRectangle` is `Rectangle.Empty` for a full pass. Whatever the handler draws, only the clip is guaranteed to show the new picture.
+
+### 8. Animate a value (tween)
+
+```csharp
+double hue = 0;
+Tween.To(box, () => hue, v => hue = v, 360, 800, Tween.EaseOut);   // invalidates the box every step
+```
+The shared 60 Hz pump drives all tweens; `Tween.Pump()` exists for headless/tests.
+
+### 9. Fill a shape with an image (pattern brush)
+
+```csharp
+Span<PointF> poly = [ new(10, 10), new(200, 14), new(190, 190), new(14, 180) ];
+canvas.FillPattern(poly, tileSprite, OriginX: 10, OriginY: 10, Angle: 0, Op: SR2D.LineOp.AlphaBlend);
+```
+Tiling wraps by the pattern size; `Tile: false` fills only where the single image lands.
+
+### 10. Magic wand with an eye-friendly tolerance + quick mask
+
+```csharp
+selection.Wand(img, mx, my, 24, Metric: SelectMetric.Perceptual);   // weighted RGB, compares like the eye
+selection.ToSprite(maskSprite);                                     // paint the mask (opaque = select)
+// ... brush verbs on maskSprite ...
+selection.FromSprite(maskSprite);                                   // read it back, bounds recomputed
+```

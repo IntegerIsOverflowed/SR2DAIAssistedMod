@@ -73,6 +73,8 @@
     <Compile Include="..\cs\Vector.Fonts.cs" Link="cs\Vector.Fonts.cs" />
     <Compile Include="..\cs\ImportLog.cs" Link="cs\ImportLog.cs" />
     <Compile Include="..\cs\EditHistory.cs" Link="cs\EditHistory.cs" />
+    <Compile Include="..\cs\Tween.cs" Link="cs\Tween.cs" />
+    <Compile Include="..\cs\Sprite.Pattern.cs" Link="cs\Sprite.Pattern.cs" />
     <Compile Include="..\cs\SpriteFont.cs" Link="cs\SpriteFont.cs" />
     <Compile Include="..\cs\SpriteFont.Cache.cs" Link="cs\SpriteFont.Cache.cs" />
     <Compile Include="..\cs\Vector.FontData.cs" Link="cs\Vector.FontData.cs" />
@@ -84,6 +86,8 @@
   <ItemGroup>
     <!-- built-in pictures (Lenna + normal map); the procedural bricks need no files -->
     <EmbeddedResource Include="assets_builtin\*.webp" />
+    <!-- designer toolbox icons (32-bit BMPs; LogicalName is namespace-qualified, which is where ToolboxBitmap looks first) -->
+    <EmbeddedResource Include="..\cs\icons\*.bmp" LogicalName="Sr2d64CSport.%(Filename).bmp" />
     <!-- the demo shows its own source per test ("Code" button): Tests.cs / ControlsDemo.cs ride along inside the exe -->
     <EmbeddedResource Include="Tests.cs" LogicalName="src/Tests.cs" />
     <EmbeddedResource Include="ControlsDemo.cs" LogicalName="src/ControlsDemo.cs" />

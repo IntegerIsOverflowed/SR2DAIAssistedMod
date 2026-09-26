@@ -46,6 +46,7 @@ namespace Sr2d64CSport
     /// (or after <see cref="PreviewSettleMs"/> of no movement). The exposed camera (<see cref="Camera"/>) is rebuilt from
     /// the settings each frame; <see cref="CameraChanged"/> lets you tweak it (light direction, shade tables) before use.
     /// </summary>
+    [ToolboxBitmap(typeof(VoxelBox), "VoxelBox.bmp")]
     internal class VoxelBox : SpriteBox
     {
         VoxelGrid? _grid; bool _ownsGrid;

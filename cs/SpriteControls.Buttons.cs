@@ -92,6 +92,7 @@ namespace Sr2d64CSport
     /// Pressing sinks the face and lights the rim in the accent colour; <see cref="Accented"/> makes it a primary button
     /// (accent-coloured face). Raises <see cref="Control.Click"/> on release inside (or Space / Enter).
     /// </summary>
+    [ToolboxBitmap(typeof(SpriteButton), "SpriteButton.bmp")]
     internal sealed class SpriteButton : SpriteClickable
     {
         protected override AccessibleRole DefaultAccessibleRole => AccessibleRole.PushButton;
@@ -160,6 +161,7 @@ namespace Sr2d64CSport
     /// Click / Space flips <see cref="Checked"/> and raises <see cref="CheckedChanged"/>. The switch part keeps the height
     /// of the control; the caption uses the rest of the width.
     /// </summary>
+    [ToolboxBitmap(typeof(SpriteToggle), "SpriteToggle.bmp")]
     internal sealed class SpriteToggle : SpriteClickable
     {
         protected override AccessibleRole DefaultAccessibleRole => AccessibleRole.CheckButton;
@@ -297,6 +299,7 @@ namespace Sr2d64CSport
     /// right. Radios with the same parent and the same <see cref="GroupName"/> are exclusive (like WinForms, the parent is
     /// the group; the name lets several groups share a panel).
     /// </summary>
+    [ToolboxBitmap(typeof(SpriteRadio), "SpriteRadio.bmp")]
     internal sealed class SpriteRadio : SpriteClickable
     {
         protected override AccessibleRole DefaultAccessibleRole => AccessibleRole.RadioButton;
@@ -369,6 +372,7 @@ namespace Sr2d64CSport
     /// an indeterminate segment (call <see cref="Tick"/> from a timer or set <see cref="Phase"/>). Segments can be
     /// drawn with <see cref="Segments"/> (LED-style bar).
     /// </summary>
+    [ToolboxBitmap(typeof(SpriteProgress), "SpriteProgress.bmp")]
     internal sealed class SpriteProgress : SpriteControlBase
     {
         protected override AccessibleRole DefaultAccessibleRole => AccessibleRole.ProgressBar;

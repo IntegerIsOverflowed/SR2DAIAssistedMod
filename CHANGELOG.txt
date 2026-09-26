@@ -23,6 +23,27 @@ Conventions
            the invalidation is narrowed to the clip as well, so the blit side saves too; RenderOnce(Rectangle) runs a
            partial render synchronously for headless tests. ctlrun: 4 new checks (clip flow, union + clamp, outside
            pixels keep the previous frame, full-redraw supersede).
+  ADDED    cs/Tween.cs: a small public tween engine - Tween.To(target, getter, setter, to, ms, easing) animates a value
+           and invalidates the target every step (SpriteBox gets a full Redraw, others Invalidate). One shared 60 Hz
+           pump, wall-clock paced (slow frames skip ahead, the duration stays exact), easings Linear / Smooth /
+           EaseIn / EaseOut / Back, Completed event, Cancel / CancelAll, a per-target+getter auto-cancel so a new
+           tween never fights an old one. Tests override Tween.Clock and pump deterministically. ctlrun: 6 checks.
+  ADDED    cs/Sprite.Pattern.cs: image-brush fills - FillPattern(path, pattern, origin, scale, angle, tile, op,
+           blendFactor, AA). The path is filled once into a scratch sprite (anti-aliased coverage in its alpha), the
+           pattern is sampled through the inverse transform (wrap-tiling or single placement), coverage multiplies the
+           pattern alpha, Set / AlphaBlend / Blend ops per pixel. Closes the SVG <pattern> / PDF pattern gap for
+           editor-scale paths. ctlrun: 7 checks (tile phase + wrap in both axes, origin shift, AA edges, backdrop).
+  ADDED    cs/Selection.cs: perceptual magic wand (SelectMetric.Perceptual - weighted RGB distance 0.30/0.59/0.11
+           where the native max-channel metric overweights blue) and quick-mask round trips - ToSprite exports the
+           coverage as an alpha mask you can paint with any verb, FromSprite reads it back (bounds recomputed).
+           Found on the way and fixed: the weighted path cleared on Replace like the native one. ctlrun: 4 checks.
+  ADDED    designer icons: 22 hand-drawn 16x16 32-bit BMPs (cs/icons/) embedded as namespace-qualified resources and
+           wired via [ToolboxBitmap] on every Sprite control - the toolbox no longer shows the generic gear (the
+           template and the demo csprojs embed them with a wildcard).
+  ADDED    Sprite.Crossfade(src, x, y, factor): a descriptive alias of Blend(src, x, y, factor), so call sites never
+           read like the unrelated Op.Blend draw mode (the standing naming trap).
+  ADDED    README "Cookbook": ten recipes - mouse drawing, drag a sprite, zoomable viewer, game loop, saving without
+           GDI+, undo, partial redraw, tweening, pattern fill, wand + quick mask.
   ADDED    new capability, nothing existing changes
   CHANGED  existing behaviour or API changed (a compat note says how to keep the old behaviour)
   FIXED    a bug

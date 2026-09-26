@@ -20,6 +20,7 @@ namespace Sr2d64CSport
     /// a <see cref="WheelEdit.Click"/> without movement; Enter or clicking elsewhere applies, Escape hides it. With the
     /// pop-up modes the double-click reset of the base class moves to Ctrl + double click.</para>
     /// </summary>
+    [ToolboxBitmap(typeof(SpriteWheel), "SpriteWheel.bmp")]
     internal sealed class SpriteWheel : SpriteRangeControl
     {
         protected override AccessibleRole DefaultAccessibleRole => AccessibleRole.Slider;
