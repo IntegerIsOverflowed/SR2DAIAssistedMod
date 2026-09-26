@@ -17,6 +17,7 @@ namespace Sr2d64CSport
     /// <see cref="PasswordChar"/>, <see cref="ReadOnly"/>, <see cref="MaxLength"/>. Enter raises <see cref="Committed"/>
     /// (and Escape restores the text from the last commit) so a form can react to "done" like a NumericUpDown.
     /// </summary>
+    [ToolboxBitmap(typeof(SpriteTextBox), "SpriteTextBox.bmp")]
     internal class SpriteTextBox : SpriteControlBase
     {
         protected override AccessibleRole DefaultAccessibleRole => AccessibleRole.Text;
@@ -250,6 +251,7 @@ namespace Sr2d64CSport
     /// <see cref="Decimals"/> formatting. <see cref="ValueChanged"/> fires when the committed number changes (Enter, focus
     /// loss, a button, a key or the wheel); typing alone does not change <see cref="Value"/> yet.
     /// </summary>
+    [ToolboxBitmap(typeof(SpriteNumeric), "SpriteNumeric.bmp")]
     internal sealed class SpriteNumeric : SpriteTextBox
     {
         protected override AccessibleRole DefaultAccessibleRole => AccessibleRole.Slider;
@@ -450,6 +452,7 @@ namespace Sr2d64CSport
     /// A drop-down list: the field shows the selected item and a chevron, clicking (or Space / Enter / Alt+Down) opens an
     /// SR2D <see cref="SpriteMenu"/> with the <see cref="Items"/>; Up / Down and the wheel change the selection directly.
     /// </summary>
+    [ToolboxBitmap(typeof(SpriteCombo), "SpriteCombo.bmp")]
     internal sealed class SpriteCombo : SpriteControlBase
     {
         protected override AccessibleRole DefaultAccessibleRole => AccessibleRole.ComboBox;
@@ -577,6 +580,7 @@ namespace Sr2d64CSport
     /// and optional check boxes (<see cref="CheckBoxes"/>, independent of the selection). Double click (or Enter) raises
     /// <see cref="ItemActivated"/>.
     /// </summary>
+    [ToolboxBitmap(typeof(SpriteListBox), "SpriteListBox.bmp")]
     internal sealed class SpriteListBox : SpriteControlBase
     {
         protected override AccessibleRole DefaultAccessibleRole => AccessibleRole.List;

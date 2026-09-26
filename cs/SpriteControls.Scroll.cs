@@ -13,6 +13,7 @@ namespace Sr2d64CSport
     /// <see cref="SpriteBox"/> uses two of them when <see cref="SpriteBox.ScrollBars"/> is on; on its own it is an
     /// ordinary control. It does not take the focus when clicked (the view it scrolls keeps it).
     /// </summary>
+    [ToolboxBitmap(typeof(SpriteScrollBar), "SpriteScrollBar.bmp")]
     internal sealed class SpriteScrollBar : SpriteRangeControl
     {
         protected override AccessibleRole DefaultAccessibleRole => AccessibleRole.ScrollBar;

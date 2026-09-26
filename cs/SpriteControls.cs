@@ -581,6 +581,7 @@ namespace Sr2d64CSport
     /// calls (anti-aliased) on a <see cref="SpriteBox"/> surface. Three independent choices: <see cref="DragMode"/> (how the
     /// mouse turns it), <see cref="Gauge"/> (how the value is shown) and <see cref="Pointer"/> (whether the pointer stops at the ends).
     /// </summary>
+    [ToolboxBitmap(typeof(SpriteKnob), "SpriteKnob.bmp")]
     internal sealed class SpriteKnob : SpriteRangeControl
     {
         protected override AccessibleRole DefaultAccessibleRole => AccessibleRole.Slider;
@@ -852,6 +853,7 @@ namespace Sr2d64CSport
     /// Straight slider (horizontal or vertical): rounded track, accent fill, round thumb, optional ticks, caption and
     /// value text. Same interaction model as <see cref="SpriteKnob"/>: the thumb is always exactly under the pointer.
     /// </summary>
+    [ToolboxBitmap(typeof(SpriteSlider), "SpriteSlider.bmp")]
     internal class SpriteSlider : SpriteRangeControl
     {
         protected override AccessibleRole DefaultAccessibleRole => AccessibleRole.Slider;

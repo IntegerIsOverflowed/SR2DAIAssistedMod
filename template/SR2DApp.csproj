@@ -37,6 +37,7 @@
   <ItemGroup>
     <!-- the whole SR2D C# side, linked in (shown under "cs" in the solution explorer) -->
     <Compile Include="$(Sr2dCs)\*.cs" Link="cs\%(Filename)%(Extension)" />
+    <EmbeddedResource Include="$(Sr2dCs)\icons\*.bmp" LogicalName="Sr2d64CSport.%(Filename).bmp" Visible="false" />
   </ItemGroup>
 
   <ItemGroup>

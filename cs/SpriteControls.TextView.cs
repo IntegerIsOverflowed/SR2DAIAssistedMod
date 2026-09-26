@@ -28,6 +28,7 @@ namespace Sr2d64CSport
     /// arrows / PgUp / PgDn / Home / End scroll. <see cref="LineNumbers"/> adds a gutter. The text is drawn with the
     /// pixel font (monospace) unless a TextFont / TextFontFamily is set.
     /// </summary>
+    [ToolboxBitmap(typeof(SpriteTextView), "SpriteTextView.bmp")]
     internal sealed class SpriteTextView : SpriteControlBase
     {
         protected override AccessibleRole DefaultAccessibleRole => AccessibleRole.Text;

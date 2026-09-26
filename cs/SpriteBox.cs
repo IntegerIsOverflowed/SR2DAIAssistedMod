@@ -48,6 +48,7 @@ namespace Sr2d64CSport
     }
 
     [DefaultEvent(nameof(Render))]
+    [ToolboxBitmap(typeof(SpriteBox), "SpriteBox.bmp")]
     internal partial class SpriteBox : Control
     {
         private Sprite? _surface;

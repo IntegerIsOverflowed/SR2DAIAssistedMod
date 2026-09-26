@@ -33,6 +33,7 @@ namespace Sr2d64CSport
     /// Static text in the pixel font: any <see cref="ContentAlignment"/>, optional word wrap, AutoSize like a WinForms Label
     /// (it grows with the text; turn it off for a fixed box), five styles (<see cref="LabelStyle"/>). It is not selectable.
     /// </summary>
+    [ToolboxBitmap(typeof(SpriteLabel), "SpriteLabel.bmp")]
     internal sealed class SpriteLabel : SpriteControlBase
     {
         protected override AccessibleRole DefaultAccessibleRole => AccessibleRole.StaticText;
@@ -129,6 +130,7 @@ namespace Sr2d64CSport
     }
 
     /// <summary>A thin rule (horizontal or vertical) with an optional centred caption: "── or ──".</summary>
+    [ToolboxBitmap(typeof(SpriteSeparator), "SpriteSeparator.bmp")]
     internal sealed class SpriteSeparator : SpriteControlBase
     {
         Orientation _orient = Orientation.Horizontal;
@@ -165,6 +167,7 @@ namespace Sr2d64CSport
     /// soft halo), off is the same colour dimmed; <see cref="Blink"/> flashes it on a timer. Clicking does nothing unless
     /// <see cref="Clickable"/> - then it toggles and raises <see cref="OnChanged"/>, which makes it a very small toggle.
     /// </summary>
+    [ToolboxBitmap(typeof(SpriteLed), "SpriteLed.bmp")]
     internal sealed class SpriteLed : SpriteControlBase
     {
         bool _on, _clickable, _phase = true; int _blink; Color _led = DefaultLed; LedShape _shape; Timer? _timer;
@@ -265,6 +268,7 @@ namespace Sr2d64CSport
     /// face colour unless their BackColor was set explicitly.
     /// </summary>
     [Designer("System.Windows.Forms.Design.ParentControlDesigner, System.Design", typeof(IDesigner))]
+    [ToolboxBitmap(typeof(SpritePanel), "SpritePanel.bmp")]
     internal class SpritePanel : SpriteControlBase
     {
         protected override AccessibleRole DefaultAccessibleRole => AccessibleRole.Client;
@@ -331,6 +335,7 @@ namespace Sr2d64CSport
     /// (<see cref="ShowCheck"/>): unchecking disables every control inside - the usual "enable this section" idiom.
     /// </summary>
     [Designer("System.Windows.Forms.Design.ParentControlDesigner, System.Design", typeof(IDesigner))]
+    [ToolboxBitmap(typeof(SpriteGroupBox), "SpriteGroupBox.bmp")]
     internal sealed class SpriteGroupBox : SpritePanel
     {
         protected override AccessibleRole DefaultAccessibleRole => AccessibleRole.Grouping;
@@ -422,6 +427,7 @@ namespace Sr2d64CSport
     /// adds one, the strip shows their Text, <see cref="SelectedIndex"/> switches. Left / Right keys change the page when the
     /// strip has the focus; the wheel over the strip does too. The rest of the client area is the page (Dock = Fill inside it).
     /// </summary>
+    [ToolboxBitmap(typeof(SpriteTabControl), "SpriteTabControl.bmp")]
     internal sealed class SpriteTabControl : SpriteControlBase
     {
         protected override AccessibleRole DefaultAccessibleRole => AccessibleRole.PageTabList;
@@ -583,6 +589,7 @@ namespace Sr2d64CSport
     /// scroll bar and follows the wheel.
     /// </summary>
     [Designer("System.Windows.Forms.Design.ParentControlDesigner, System.Design", typeof(IDesigner))]
+    [ToolboxBitmap(typeof(SpriteStackPanel), "SpriteStackPanel.bmp")]
     internal sealed class SpriteStackPanel : SpritePanel
     {
         Orientation _orient = Orientation.Vertical; int _gap = 6; bool _stretch = true, _wrap, _autoSize, _inLayout;
