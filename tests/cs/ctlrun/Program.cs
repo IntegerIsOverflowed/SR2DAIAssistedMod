@@ -897,9 +897,92 @@ static class P {
     Console.WriteLine($"  outside click: swallowed={swallowed} open={m.IsOpen} sub open={sub.IsOpen} filters left={Application.Filters.Count}");
     Save(c, "/home/user/.cache/ctlrun/voxelbox.rgba");
   }
+  static void DiffuseEdges() {
+    // Diffuse border contract: a pick that leaves the picture folds back onto the outermost real pixel
+    // (reflect-101) - no wrap-around, and the transparent work ring around the picture is never picked.
+    // The old kernel clamped: border pixels could pick themselves (bright edges stuck / circulated along
+    // the border) and picked the ring (black holes crept into opaque pictures).
+    int[] init = { 211,2,19,19,19,2,19,2, 211,19,63,63,2,63,19,19, 19,19,19,63,120,63,63,19, 63,120,177,120,177,177,120,63,
+                   120,177,120,177,221,177,221,221, 177,221,221,177,244,221,177,211, 211,221,244,253,253,244,244,221, 211,253,211,244,244,244,244,253 };
+    var vals = new System.Collections.Generic.HashSet<int>(init);
+    bool bleed = false, foreign = false;
+    for (int seed = 1; seed <= 64; seed++) {
+      var s = new Sprite(8, 8); for (int i = 0; i < 64; i++) s.Pixels[i] = unchecked((int)(0xFF000000u | (uint)init[i]));
+      var e = new Effects(); e.Diffuse(1, 1, seed); s.DrawFx(s, 0, 0, e);
+      for (int i = 0; i < 64; i++) { if ((uint)s.Pixels[i] >> 24 != 255) bleed = true; if (!vals.Contains((int)((uint)s.Pixels[i] & 0xFF))) foreign = true; }
+    }
+    Chk(!bleed, "diffuse: no transparent-ring bleed at the borders (64 seeds, the 8x8 gradient)");
+    Chk(!foreign, "diffuse: output values are always relocated input values");
+    bool wrap = false;
+    for (int seed = 1; seed <= 64; seed++) {
+      var s = new Sprite(8, 8); s.ClearBuffer(unchecked((int)0xFF000000));
+      for (int x = 0; x < 8; x++) s.Pixels[7 * 8 + x] = unchecked((int)0xFFFFFFFFu);            // bottom row white
+      var e = new Effects(); e.Diffuse(1, 1, seed); s.DrawFx(s, 0, 0, e);
+      for (int i = 0; i < 16; i++) if ((uint)s.Pixels[i] == 0xFFFFFFFFu) wrap = true;           // rows 0-1 stay dark
+      var s2 = new Sprite(8, 8); s2.ClearBuffer(unchecked((int)0xFF000000));
+      for (int y = 0; y < 8; y++) s2.Pixels[y * 8 + 7] = unchecked((int)0xFFFFFFFFu);           // right column white
+      var e2 = new Effects(); e2.Diffuse(1, 1, seed); s2.DrawFx(s2, 0, 0, e2);
+      for (int y = 0; y < 8; y++) { if ((uint)s2.Pixels[y * 8] == 0xFFFFFFFFu) wrap = true; if ((uint)s2.Pixels[y * 8 + 1] == 0xFFFFFFFFu) wrap = true; }
+    }
+    Chk(!wrap, "diffuse: no wrap-around - a stripe at one edge never reaches the opposite edge");
+    int diluted = 0;
+    for (int seed = 1; seed <= 64; seed++) {
+      var s = new Sprite(8, 8); s.ClearBuffer(unchecked((int)0xFF000000));
+      for (int x = 0; x < 8; x++) s.Pixels[x] = unchecked((int)0xFFFFFFFFu);                    // only the top row white
+      var e = new Effects(); e.Diffuse(1, 1, seed); s.DrawFx(s, 0, 0, e);
+      for (int x = 0; x < 8; x++) if ((uint)s.Pixels[x] == 0xFF000000u) { diluted++; break; }
+    }
+    Chk(diluted >= 48, $"diffuse: a bright top row dilutes like Photoshop ({diluted}/64 seeds get a dark pixel up there; the old edge clamp kept it 64/64)");
+    int stick = 0;
+    for (int seed = 1; seed <= 256; seed++) {
+      var s = new Sprite(16, 16); s.ClearBuffer(unchecked((int)0xFF000000)); s.Pixels[0] = unchecked((int)0xFFFFFFFFu);
+      var e = new Effects(); e.Diffuse(1, 1, seed); s.DrawFx(s, 0, 0, e);
+      if ((uint)s.Pixels[0] == 0xFFFFFFFFu) stick++;
+    }
+    Chk(stick >= 12 && stick <= 44, $"diffuse: an isolated bright corner keeps its value ~1 seed in 9 ({stick}/256; border pixels have no extra self-pick bias)");
+    int stickW = 0;
+    for (int seed = 1; seed <= 128; seed++) {
+      var s = new Sprite(128, 128); s.ClearBuffer(unchecked((int)0xFF000000)); s.Pixels[0] = unchecked((int)0xFFFFFFFFu);
+      var e = new Effects(); e.Diffuse(1, 1, seed); s.DrawFx(s, 0, 0, e);
+      if ((uint)s.Pixels[0] == 0xFFFFFFFFu) stickW++;
+    }
+    Chk(stickW >= 6 && stickW <= 24, $"diffuse: same at a 128x128 corner (wide-picture fold formula): {stickW}/128");
+    bool flat = true;
+    { var s = new Sprite(16, 16); s.ClearBuffer(unchecked((int)0xFF808080));
+      var e = new Effects(); e.Diffuse(3, 2, 7); s.DrawFx(s, 0, 0, e);
+      for (int i = 0; i < 256; i++) if (s.Pixels[i] != unchecked((int)0xFF808080)) flat = false; }
+    { var s = new Sprite(128, 128); s.ClearBuffer(unchecked((int)0xFF808080));
+      var e = new Effects(); e.Diffuse(3, 2, 7); s.DrawFx(s, 0, 0, e);
+      for (int i = 0; i < 128 * 128; i++) if (s.Pixels[i] != unchecked((int)0xFF808080)) flat = false; }
+    Chk(flat, "diffuse: a flat opaque picture is unchanged (narrow LUT + wide formula fold, 2 passes)");
+    bool one = true;
+    for (int seed = 1; seed <= 32; seed++) {
+      var s = new Sprite(1, 8); for (int y = 0; y < 8; y++) s.Pixels[y] = unchecked((int)(0xFF000000u | (uint)(30 + y * 30)));
+      var e = new Effects(); e.Diffuse(2, 1, seed); s.DrawFx(s, 0, 0, e);
+      for (int y = 0; y < 8; y++) if ((uint)s.Pixels[y] >> 24 != 255) one = false;
+    }
+    Chk(one, "diffuse: a 1 px wide picture folds cleanly (no crash, alpha intact)");
+    bool ring = true;
+    { var src = new Sprite(8, 8); for (int i = 0; i < 64; i++) src.Pixels[i] = unchecked((int)(0xFF000000u | (uint)init[i]));
+      var dst = new Sprite(32, 32); dst.ClearBuffer(unchecked((int)0xFF010203));
+      var e = new Effects(); e.Diffuse(2, 2, 543); dst.DrawFx(src, 12, 12, e, SR2D.Op.AlphaBlend);
+      for (int y = 0; y < 32; y++) for (int x = 0; x < 32; x++)
+        if (x < 12 || x >= 20 || y < 12 || y >= 20) { if (dst.Pixels[y * 32 + x] != unchecked((int)0xFF010203)) ring = false; } }
+    Chk(ring, "diffuse: the transparent ring is restored - a draw onto a larger canvas touches only the source rect");
+    { var a = new Sprite(8, 8); for (int i = 0; i < 64; i++) a.Pixels[i] = unchecked((int)(0xFF000000u | (uint)init[i]));
+      var e = new Effects(); e.Diffuse(); e.DiffuseSeed(543); a.DrawFx(a, 0, 0, e);
+      var was = SR2D.SetSimdLevel(SR2D.SimdLevel.Sse2);
+      var b = new Sprite(8, 8); for (int i = 0; i < 64; i++) b.Pixels[i] = unchecked((int)(0xFF000000u | (uint)init[i]));
+      var e2 = new Effects(); e2.Diffuse(); e2.DiffuseSeed(543); b.DrawFx(b, 0, 0, e2);
+      SR2D.SetSimdLevel(was);
+      bool same = true; for (int i = 0; i < 64; i++) if (a.Pixels[i] != b.Pixels[i]) same = false;
+      Chk(same, "diffuse: SSE2 and AVX2 kernels produce identical output"); }
+    Console.WriteLine("  (diffuse edges: borders fold, no wrap, no ring bleed)");
+  }
   static int Main() {
     if (FrameCheck.Run() != 0) return 1;
     EdgeStrips();
+    DiffuseEdges();
     CursorSheet();
     var canvas = new Sprite(1100, 620); canvas.ClearBuffer(unchecked((int)0xFF202428));
     int col = 0;

@@ -8,6 +8,16 @@ Entries from 2026-09-18 on are dated. The "[earlier NN]" entries reconstruct the
 before the log existed, in order (higher number = more recent), without dates.
 
 Conventions
+  ADDED    new capability, nothing existing changes
+  CHANGED  existing behaviour or API changed (a compat note says how to keep the old behaviour)
+  FIXED    a bug
+  DEMO     the demo app / strips
+  TESTS    headless checks (tests/)
+  DOCS     README / comments only
+
+
+2026-09-27  Edit history (undo / redo), SpriteBox dirty-rect redraw
+---------------------------------------------------------------------------
   ADDED    cs/EditHistory.cs: rect-based undo/redo for in-place edits. EditHistory.Record(sprite, rect) (or the
            VoxelGrid box overload) snapshots the affected pixels BEFORE a verb mutates them; Undo pastes them back,
            Redo re-applies the newer state (captured on the first undo). Only the affected rectangle is stored
@@ -23,6 +33,11 @@ Conventions
            the invalidation is narrowed to the clip as well, so the blit side saves too; RenderOnce(Rectangle) runs a
            partial render synchronously for headless tests. ctlrun: 4 new checks (clip flow, union + clamp, outside
            pixels keep the previous frame, full-redraw supersede).
+
+
+2026-09-27  Tween engine, fill patterns, perceptual wand + quick mask, Crossfade alias, toolbox icons, README
+            cookbook
+---------------------------------------------------------------------------
   ADDED    cs/Tween.cs: a small public tween engine - Tween.To(target, getter, setter, to, ms, easing) animates a value
            and invalidates the target every step (SpriteBox gets a full Redraw, others Invalidate). One shared 60 Hz
            pump, wall-clock paced (slow frames skip ahead, the duration stays exact), easings Linear / Smooth /
@@ -44,12 +59,42 @@ Conventions
            read like the unrelated Op.Blend draw mode (the standing naming trap).
   ADDED    README "Cookbook": ten recipes - mouse drawing, drag a sprite, zoomable viewer, game loop, saving without
            GDI+, undo, partial redraw, tweening, pattern fill, wand + quick mask.
-  ADDED    new capability, nothing existing changes
-  CHANGED  existing behaviour or API changed (a compat note says how to keep the old behaviour)
-  FIXED    a bug
-  DEMO     the demo app / strips
-  TESTS    headless checks (tests/)
-  DOCS     README / comments only
+
+
+2026-09-27  Diffuse border fold (Photoshop edge semantics), Code (F2) crash fix, keystroke drain fix, all
+            headless runners on net10.0
+---------------------------------------------------------------------------
+  CHANGED  tests: every headless runner targets net10.0 now - one SDK for everything (the demo and the template
+           were already net10.0-windows; ctlrun 140 ok, codechk 101/0, benchchk 0/0 both modes on net10 alone).
+           While retargeting, four runners the last batches had left unbuildable were repaired: benchrun / vecrun
+           glob cs/*.cs and now also exclude Tween.cs (it drags the WinForms shell types in), benchrun's stubs
+           gained the FractalLayout.Regions geometry and the SwapDemo state that Tests.cs reads, blur gained the
+           missing Selection.cs, and curvetest swapped its rotting hand-picked file list for the same broad-glob
+           recipe (it had silently been compiling every runner's Program.cs). System.Drawing.Common bumped to
+           10.0.0 across the runners.
+  FIXED    native Effects.Diffuse: border pixels sampled the transparent work ring around the picture, and the
+           old edge clamp let them pick themselves - opaque pictures got black holes creeping in from the
+           edges while bright pixels stuck to / circulated along the borders instead of scattering away like
+           Photoshop's Diffuse. Picks that leave the picture now fold back onto the outermost real pixel
+           (reflect-101: no wrap-around, never the ring), and diffuse restores the transparent ring after the
+           passes (POST resamples and draws onto larger destinations would have seen leftover ring content).
+           Interior output is bit-identical to the old kernel; SSE2 and AVX2 agree. tests/cs/ctlrun pins the
+           border contract: no bleed, no wrap, top-row dilution, ~1/9 corner self-pick on the narrow (LUT)
+           and wide (formula) fold paths, flat stays flat, 1 px wide pictures fold cleanly.
+  FIXED    demo: pressing Code (F2) crashed with IndexOutOfRangeException on the first coloured token of any test's
+           code view. CodeView.Colorize already resolves each run's colour to the final Palette ARGB, but LoadCode
+           indexed CodeView.Palette with that ARGB again - a double lookup (Palette[0xFF569CD6]) that throws before
+           the first line ever renders. LoadCode now passes the run colour straight through; codechk pins the
+           contract (every emitted run colour must be a Palette value) for all 101 tests, and a new headless harness
+           replays For -> Colorize -> the LoadCode mapping for all 9 control-strip pipelines (the old mapping threw
+           on 6617 runs, the new one on none). While in there: the code view of a strip test also falls back to
+           src/FractalLayout.cs (now embedded), so the SwapDemo strip's source shows instead of "(source not
+           available)".
+  FIXED    demo: typing into the search box (and any text control) lost most keystrokes - only 1-2 characters got
+           through. The game loop's inline message drain removed the pending WM_KEYDOWNs and dispatched them WITHOUT
+           TranslateMessage, so no WM_CHAR was ever generated (the mouse never noticed: buttons need no translation).
+           The drain now runs the classic TranslateMessage + DispatchMessage pump; keys that arrive while frames
+           render reach the controls exactly as the main loop would deliver them.
 
 
 2026-09-25  Demo on SR2D controls (SpriteTextView / SpriteStackPanel new, list headers), pixel font: Cyrillic / Greek /
@@ -232,6 +277,7 @@ Conventions
            Sprite.DrawPlaced is internal (was private). tests: fontchk PixelFontChecks, ctlrun Cyrillic / selection
            checks; every csproj lists cs/PixelFont.Unicode.cs.
 
+
 2026-09-24  Wheel rework (Detailed look, SR2D edit field), numeric spinner drag / Below / WrapMouse,
             RightButtonCommits, font-change layout fix, SpriteFont.Render + TextCache, VS hints
 --------------------------------------------------------------------------
@@ -319,6 +365,7 @@ Conventions
            "skipped:" warning and lists the clean ones (currently 0).
   DOCS     README "Swallowed exceptions are reported (cs/ImportLog.cs)" under the analyzers section.
 
+
 2026-09-23  C# audit against a C# safety checklist (nulls / async / LINQ / culture / equality / dispose) + analyzers
 --------------------------------------------------------------------------
   Checked  cs/ item by item: no null-forgiving '!' on runtime values (4 uses, all on fields that are set before use); no
@@ -351,6 +398,7 @@ Conventions
            control fields carry a CA2213 suppression (WinForms disposes children).
   compat   Public API unchanged. Only visible behaviour change: VoxelGrid[x, y, z] exception message.
 
+
 2026-09-23  Native audit against a C++ safety checklist (RAII / UB / concurrency): one data race fixed
 --------------------------------------------------------------------------
   Checked  native/ (sr2d.cpp, sr2d_kernels.inl, sr2d_fx.inl, sr2d_select.inl, sr2d_voxel.inl, sr2d_simd.h) item by
@@ -374,6 +422,7 @@ Conventions
            SR2D_SET_SIMD_LEVEL (SSE2 / AVX2 / auto) while the others draw; results == quiet single-threaded run,
            level always 1 or 2.
   DOCS     README thread-safety table row for SR2D_SET_SIMD_LEVEL, test tree, sanitizer paragraph.
+
 
 2026-09-23  Real fonts on the controls (optional), SVG <text> import, GDI-free image loading (BMP / GIF / TGA / JPEG)
 --------------------------------------------------------------------------
@@ -409,6 +458,7 @@ Conventions
   DEMO     Controls strip (FormDemo, About page): "Text font" combo switches every SR2D control between the pixel font and
            the installed families through SpriteControlBase.DefaultFontFamily.
   DOCS     README: "Real fonts on the controls", "Text in SVG files", "Loading pictures without GDI+"; SVG table row.
+
 
 2026-09-22  Scalable-font text (SpriteFont), stroker with joins / caps / dashes, managed PNG codec
 --------------------------------------------------------------------------
@@ -454,6 +504,7 @@ Conventions
            installed family loads and renders. tests/cs/benchrun stubs updated (TransformFrame, FormDemo) so the
            three new demo tests run headless. All runner csprojs list the four new files.
   DOCS     README: "Scalable-font text", "Strokes with joins, caps and dashes", "PNG without GDI+" sections.
+
 
 2026-09-20  SpriteBox: black edge line in SizeMode fixed; unbounded / offline pixel mapping
 --------------------------------------------------------------------------

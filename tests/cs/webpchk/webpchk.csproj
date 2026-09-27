@@ -1,9 +1,9 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <!-- WebP decoder check: decodes tests/webp/*.webp with cs/WebP.cs and compares pixel for pixel with the
        libwebp reference decode stored beside each file (*.ref.png, read with the engine's PngDecoder);
-       "fuzz N" mutates the corpus and requires that only InvalidDataException ever escapes. Linux / net9.0, no DLL needed. -->
+       "fuzz N" mutates the corpus and requires that only InvalidDataException ever escapes. Linux / net10.0, no DLL needed. -->
   <PropertyGroup>
-    <OutputType>Exe</OutputType><TargetFramework>net9.0</TargetFramework><AllowUnsafeBlocks>true</AllowUnsafeBlocks><Nullable>enable</Nullable>
+    <OutputType>Exe</OutputType><TargetFramework>net10.0</TargetFramework><AllowUnsafeBlocks>true</AllowUnsafeBlocks><Nullable>enable</Nullable>
     <ImplicitUsings>disable</ImplicitUsings><EnableDefaultCompileItems>false</EnableDefaultCompileItems><NoWarn>CS0436;CS8981</NoWarn>
   </PropertyGroup>
   <ItemGroup>

@@ -159,9 +159,11 @@ namespace Sr2d64CSport
         /// Photoshop-style "Diffuse": every pixel is replaced by a randomly chosen pixel within
         /// <paramref name="Radius"/> px (1..64, square neighbourhood), <paramref name="Passes"/>
         /// times over (1..32; each pass scatters the previous result again, so 3 passes at r 1
-        /// look like Photoshop's filter applied 3 times). Edges turn into grain, flat areas stay
-        /// flat. <paramref name="Seed"/> selects the random pattern: it is deterministic per seed
-        /// (the same frame drawn twice is identical, and the pattern is anchored to the sprite /
+        /// look like Photoshop's filter applied 3 times). A pick that would leave the sprite folds back onto
+        /// the outermost real pixel (reflect-101 - no wrap-around, and the transparent surround is never
+        /// picked), so edges scatter like interior ones: a border pixel keeps its value only through the
+        /// ordinary 1/(2r+1)² self-pick. Flat areas stay flat. <paramref name="Seed"/> selects the random pattern:
+        /// it is deterministic per seed (the same frame drawn twice is identical, and the pattern is anchored to the sprite /
         /// screen pixels, so DrawParallel bands agree); increment it per frame to animate the
         /// grain. <paramref name="Mode"/>: <see cref="DiffuseMode.Normal"/>, <c>DarkenOnly</c>
         /// (keep the per-channel darker of the original and the picked pixel) or <c>LightenOnly</c>.

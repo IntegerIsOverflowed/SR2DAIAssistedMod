@@ -831,18 +831,36 @@ static SR2D_INLINE int fx_blur_passflags(const SR2D_FxStage& s)
 // Every output pixel takes the value of a pseudo-randomly chosen pixel within the Chebyshev
 // radius r: out(x, y) = in(x + dx, y + dy), dx, dy in [-r, r]. The offsets come from a
 // per-pixel integer hash (fx_mix of x, y, seed) so the pattern is deterministic, identical
-// on SSE2 / AVX2, and animates when the seed changes. Reads are clamped to the image, and the
-// rectangle was grown by r beforehand so the transparent surroundings are diffused too.
-// DARKEN / LIGHTEN keep the per-channel min / max of the original and the picked pixel.
-// No premultiplied maths: a picked pixel is a valid premultiplied pixel as it is.
-static void fx_diffuse(const int* in, int* out, int W, int H, int x0, int y0, int x1, int y1, int r, uint32_t seed, int mode, int iox, int ioy)
+// on SSE2 / AVX2, and animates when the seed changes. No wrap-around: a pick that leaves the
+// picture (px0..px1 x py0..py1 inside the work image) folds back onto the outermost real pixel
+// (reflect-101: -1 -> 1, -2 -> 2, n -> n-2), like Photoshop truncating its neighbourhood at the
+// border - border pixels keep their value only through the ordinary 1/(2r+1)^2 self-pick, and
+// the transparent surround is never picked. DARKEN / LIGHTEN keep the per-channel min / max of
+// the original and the picked pixel. No premultiplied maths: a picked pixel is a valid
+// premultiplied pixel as it is.
+static void fx_fold_lut(int* lut, int n)
+{   // reflect-101 fold of raw offsets [-64, n + 64) -> [0, n); narrow pictures only (n <= 64),
+    // wide ones use the equivalent min(|t|, 2n-2-|t|) formula directly (their |t| <= 2n-2).
+    if (n == 1) { for (int i = 0; i < 208; ++i) lut[i] = 0; return; }
+    int* L = lut + 64; const int pp = 2 * n - 2;
+    for (int i = -64; i < n + 64; ++i) { int f = i; while (f < 0 || f >= n) f = f < 0 ? -f : pp - f; L[i] = f; }
+}
+static void fx_diffuse(const int* in, int* out, int W, int H, int x0, int y0, int x1, int y1,
+                       int px0, int py0, int px1, int py1, int r, uint32_t seed, int mode, int iox, int ioy)
 {   // iox, ioy: world (sprite or screen) coordinate of work pixel (0, 0) - the pattern is hashed in world
     // coordinates so it does not depend on the clip rect / work image placement (DrawParallel bands, POST)
     SR2D_ALIGN(32) int lane_i[8] = { 0, 1, 2, 3, 4, 5, 6, 7 };
+    SR2D_ALIGN(32) int xlut[208], ylut[208];
     SR2D_ALIGN(32) int tmp[8];
+    const int nw = px1 - px0, nh = py1 - py0;
+    if (nw <= 64) fx_fold_lut(xlut, nw);
+    if (nh <= 64) fx_fold_lut(ylut, nh);
     const T lanes = V::loadu(lane_i);
     const T span = V::set1_32(2 * r + 1), vr = V::set1_32(r);
-    const T maxx = V::set1_32(W - 1), maxy = V::set1_32(H - 1), vW = V::set1_32(W);
+    const T vW = V::set1_32(W);
+    const T vpx0 = V::set1_32(px0), vpy0 = V::set1_32(py0);
+    const T xlo = V::set1_32(px0 - r), xhi = V::set1_32(px1 - 1 + r), ylo = V::set1_32(py0 - r), yhi = V::set1_32(py1 - 1 + r);
+    const T xpp = V::set1_32(2 * nw - 2), ypp = V::set1_32(2 * nh - 2);
     const T kx = V::set1_32((int)0x9E3779B1u), ky = V::set1_32((int)0x85EBCA77u), ks = V::set1_32((int)(seed * 0xC2B2AE3Du + 0x27D4EB2Fu));
     const T m16 = V::set1_32(0xffff);
     for (int y = y0; y < y1; ++y)
@@ -857,9 +875,17 @@ static void fx_diffuse(const int* in, int* out, int W, int H, int x0, int y0, in
             // two independent 16-bit halves -> offsets in [0, 2r] via (h16 * span) >> 16 (no modulo bias to speak of)
             T dx = V::sub32(V::template srli32<16>(V::mullo32(V::and_(h, m16), span)), vr);
             T dy = V::sub32(V::template srli32<16>(V::mullo32(V::template srli32<16>(h), span)), vr);
-            T sx = V::min32(V::max32(V::add32(vx, dx), V::zero()), maxx);
-            T sy = V::min32(V::max32(V::add32(V::set1_32(y), dy), V::zero()), maxy);
-            T pick = gather32(irow, V::add32(V::mullo32(sy, vW), sx));
+            // fold out-of-picture picks back onto the outermost real pixel (no wrap, no clamp-to-border self bias);
+            // the min/max pre-clamp is a no-op for real picks and only keeps hash noise lanes in LUT / formula range
+            T tx = V::min32(V::max32(V::add32(vx, dx), xlo), xhi);
+            tx = V::sub32(tx, vpx0);
+            T ax = V::max32(tx, V::sub32(V::zero(), tx));   // |tx| (an AND with the sign mask is NOT abs: -1 & 0x7FFFFFFF = 0x7FFFFFFF)
+            T sx = nw <= 64 ? gather32(xlut + 64, tx) : V::min32(ax, V::sub32(xpp, ax));
+            T ty = V::min32(V::max32(V::add32(V::set1_32(y), dy), ylo), yhi);
+            ty = V::sub32(ty, vpy0);
+            T ay = V::max32(ty, V::sub32(V::zero(), ty));
+            T sy = nh <= 64 ? gather32(ylut + 64, ty) : V::min32(ay, V::sub32(ypp, ay));
+            T pick = gather32(irow, V::add32(V::mullo32(V::add32(sy, vpy0), vW), V::add32(sx, vpx0)));
             if (mode)
             {
                 T cur = V::loadu(in + (size_t)y * W + x);           // over-read past x1 stays inside the row's slack (W >= x1)
@@ -1129,8 +1155,19 @@ static int DRAW_FX(int* src, int sw, int sh, int* dst, int dw, int clipL, int cl
             const int mode = (s.flags & SR2D_FXF_DIFFUSE_DARKEN) ? 1 : (s.flags & SR2D_FXF_DIFFUSE_LIGHTEN) ? 2 : 0;
             for (int pss = 0; pss < passes; ++pss)
             {
-                fx_diffuse(cur, oth, W, H, ax0, ay0, ax1, ay1, r, (uint32_t)s.i[2] * 0x9E3779B9u + (uint32_t)pss * 0x632BE5ABu, mode, iox, ioy);
+                fx_diffuse(cur, oth, W, H, ax0, ay0, ax1, ay1, lx0, ly0, lx1, ly1, r, (uint32_t)s.i[2] * 0x9E3779B9u + (uint32_t)pss * 0x632BE5ABu, mode, iox, ioy);
                 int* t = cur; cur = oth; oth = t;
+            }
+            // the ring around the picture is context, never content: picks fold back into the picture now,
+            // so restore the transparent surround exactly as it was loaded - later stages and the final
+            // resample (POST quads reach into the ring, DrawFx onto a larger destination composites it) must
+            // keep seeing 0 outside the picture
+            for (int y = 0; y < ly0; ++y) memset(cur + (size_t)y * W, 0, (size_t)W * sizeof(int));
+            for (int y = ly1; y < H; ++y) memset(cur + (size_t)y * W, 0, (size_t)W * sizeof(int));
+            for (int y = ly0; y < ly1; ++y)
+            {
+                if (lx0 > 0) memset(cur + (size_t)y * W, 0, (size_t)lx0 * sizeof(int));
+                if (lx1 < W) memset(cur + (size_t)y * W + lx1, 0, (size_t)(W - lx1) * sizeof(int));
             }
             break;
         }
