@@ -1,9 +1,10 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <!-- headless check of Sprite.Effects.cs (DrawBlurred / Blur / ToBlurred). Linux: `make so` in tests/, copy build/libSR2D64.so next to blurtest.dll, `dotnet blurtest.dll out.raw`, `python3 ../topng.py out.raw 800 500 out.png`. -->
-  <PropertyGroup><OutputType>Exe</OutputType><TargetFramework>net9.0</TargetFramework><AllowUnsafeBlocks>true</AllowUnsafeBlocks><Nullable>enable</Nullable><ImplicitUsings>disable</ImplicitUsings><RootNamespace>Sr2d64CSport</RootNamespace></PropertyGroup>
+  <PropertyGroup><OutputType>Exe</OutputType><TargetFramework>net10.0</TargetFramework><AllowUnsafeBlocks>true</AllowUnsafeBlocks><Nullable>enable</Nullable><ImplicitUsings>disable</ImplicitUsings><RootNamespace>Sr2d64CSport</RootNamespace></PropertyGroup>
   <ItemGroup><Compile Include="../../../cs/SR2D.cs" /><Compile Include="../../../cs/Sprite.cs" /><Compile Include="../../../cs/Png.cs;../../../cs/Jpeg.cs;../../../cs/ImageCodec.cs" /><Compile Include="../../../cs/Sprite.Stroke.cs" /><Compile Include="../../../cs/Sprite.Shapes.cs" />
     <Compile Include="../../../cs/Sprite.Blend.cs" />
+    <Compile Include="../../../cs/Selection.cs" />
     <Compile Include="../../../cs/Sprite.Edit.cs" />
     <Compile Include="../../../cs/WebP.cs" />
-    <Compile Include="../../../cs/SpriteTransform.cs" /><Compile Include="../../../cs/Sprite.Rect.cs" /><Compile Include="../../../cs/Sprite.Curves.cs" /><Compile Include="../../../cs/Sprite.Effects.cs" /><Compile Include="../../../cs/PixelFont.cs" /><Compile Include="../../../cs/PixelFont.Unicode.cs" /><Compile Include="../../../cs/Sprite.Text.cs" /><Compile Include="../../../cs/Effects.cs" /><PackageReference Include="System.Drawing.Common" Version="9.0.0" /></ItemGroup>
+    <Compile Include="../../../cs/SpriteTransform.cs" /><Compile Include="../../../cs/Sprite.Rect.cs" /><Compile Include="../../../cs/Sprite.Curves.cs" /><Compile Include="../../../cs/Sprite.Effects.cs" /><Compile Include="../../../cs/PixelFont.cs" /><Compile Include="../../../cs/PixelFont.Unicode.cs" /><Compile Include="../../../cs/Sprite.Text.cs" /><Compile Include="../../../cs/Effects.cs" /><PackageReference Include="System.Drawing.Common" Version="10.0.0" /></ItemGroup>
 </Project>

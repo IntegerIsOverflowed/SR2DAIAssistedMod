@@ -44,6 +44,14 @@ Conventions
            read like the unrelated Op.Blend draw mode (the standing naming trap).
   ADDED    README "Cookbook": ten recipes - mouse drawing, drag a sprite, zoomable viewer, game loop, saving without
            GDI+, undo, partial redraw, tweening, pattern fill, wand + quick mask.
+  CHANGED  tests: every headless runner targets net10.0 now - one SDK for everything (the demo and the template
+           were already net10.0-windows; ctlrun 140 ok, codechk 101/0, benchchk 0/0 both modes on net10 alone).
+           While retargeting, four runners the last batches had left unbuildable were repaired: benchrun / vecrun
+           glob cs/*.cs and now also exclude Tween.cs (it drags the WinForms shell types in), benchrun's stubs
+           gained the FractalLayout.Regions geometry and the SwapDemo state that Tests.cs reads, blur gained the
+           missing Selection.cs, and curvetest swapped its rotting hand-picked file list for the same broad-glob
+           recipe (it had silently been compiling every runner's Program.cs). System.Drawing.Common bumped to
+           10.0.0 across the runners.
   FIXED    native Effects.Diffuse: border pixels sampled the transparent work ring around the picture, and the
            old edge clamp let them pick themselves - opaque pictures got black holes creeping in from the
            edges while bright pixels stuck to / circulated along the borders instead of scattering away like
@@ -53,6 +61,15 @@ Conventions
            Interior output is bit-identical to the old kernel; SSE2 and AVX2 agree. tests/cs/ctlrun pins the
            border contract: no bleed, no wrap, top-row dilution, ~1/9 corner self-pick on the narrow (LUT)
            and wide (formula) fold paths, flat stays flat, 1 px wide pictures fold cleanly.
+  FIXED    demo: pressing Code (F2) crashed with IndexOutOfRangeException on the first coloured token of any test's
+           code view. CodeView.Colorize already resolves each run's colour to the final Palette ARGB, but LoadCode
+           indexed CodeView.Palette with that ARGB again - a double lookup (Palette[0xFF569CD6]) that throws before
+           the first line ever renders. LoadCode now passes the run colour straight through; codechk pins the
+           contract (every emitted run colour must be a Palette value) for all 101 tests, and a new headless harness
+           replays For -> Colorize -> the LoadCode mapping for all 9 control-strip pipelines (the old mapping threw
+           on 6617 runs, the new one on none). While in there: the code view of a strip test also falls back to
+           src/FractalLayout.cs (now embedded), so the SwapDemo strip's source shows instead of "(source not
+           available)".
   FIXED    demo: typing into the search box (and any text control) lost most keystrokes - only 1-2 characters got
            through. The game loop's inline message drain removed the pending WM_KEYDOWNs and dispatched them WITHOUT
            TranslateMessage, so no WM_CHAR was ever generated (the mouse never noticed: buttons need no translation).
