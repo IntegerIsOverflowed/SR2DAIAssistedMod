@@ -53,15 +53,6 @@ Conventions
            Interior output is bit-identical to the old kernel; SSE2 and AVX2 agree. tests/cs/ctlrun pins the
            border contract: no bleed, no wrap, top-row dilution, ~1/9 corner self-pick on the narrow (LUT)
            and wide (formula) fold paths, flat stays flat, 1 px wide pictures fold cleanly.
-  FIXED    demo: pressing Code (F2) crashed with IndexOutOfRangeException on the first coloured token of any test's
-           code view. CodeView.Colorize already resolves each run's colour to the final Palette ARGB, but LoadCode
-           indexed CodeView.Palette with that ARGB again - a double lookup (Palette[0xFF569CD6]) that throws before
-           the first line ever renders. LoadCode now passes the run colour straight through; codechk pins the
-           contract (every emitted run colour must be a Palette value) for all 101 tests, and a new headless harness
-           replays For -> Colorize -> the LoadCode mapping for all 9 control-strip pipelines (the old mapping threw
-           on 6617 runs, the new one on none). While in there: the code view of a strip test also falls back to
-           src/FractalLayout.cs (now embedded), so the SwapDemo strip's source shows instead of "(source not
-           available)".
   FIXED    demo: typing into the search box (and any text control) lost most keystrokes - only 1-2 characters got
            through. The game loop's inline message drain removed the pending WM_KEYDOWNs and dispatched them WITHOUT
            TranslateMessage, so no WM_CHAR was ever generated (the mouse never noticed: buttons need no translation).
