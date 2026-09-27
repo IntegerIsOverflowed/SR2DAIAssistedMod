@@ -159,6 +159,7 @@ namespace Sr2d64CSport
         [StructLayout(LayoutKind.Sequential)] struct NativeMessage { public IntPtr Handle; public uint Message; public IntPtr WParam; public IntPtr LParam; public uint Time; public Point Location; }
         [DllImport("user32")] static extern int PeekMessage(out NativeMessage msg, IntPtr hWnd, uint filterMin, uint filterMax, uint flags);
         [DllImport("user32")] static extern IntPtr DispatchMessage(ref NativeMessage msg);
+        [DllImport("user32")] static extern bool TranslateMessage(ref NativeMessage msg);   // WM_KEYDOWN -> WM_CHAR: without it every key the inline drain touches is silently lost
         const uint PM_REMOVE = 1;
         [DllImport("user32")] static extern IntPtr GetDC(IntPtr hWnd);
         [DllImport("user32")] static extern int ReleaseDC(IntPtr hWnd, IntPtr hDC);
@@ -199,7 +200,11 @@ namespace Sr2d64CSport
                         Frame();
                         if (PeekMessage(out _, IntPtr.Zero, 0, 0x01FF, 0) != 0 || PeekMessage(out _, IntPtr.Zero, 0x0201, 0x7FFFFFFF, 0) != 0) break;
                     }
-                    while (PeekMessage(out var nm, IntPtr.Zero, 0, 0, PM_REMOVE) != 0) DispatchMessage(ref nm);   // only moves left: coalesce + dispatch here, keep rendering
+                    // only moves left: coalesce + dispatch here, keep rendering. TranslateMessage is NOT optional:
+                    // the drain also sees the keydowns that arrived during the last Frame(), and without it no WM_CHAR
+                    // is generated - the search box (and every text control) lost most keystrokes (a character slipped
+                    // through only when it happened to be pumped by the main loop)
+                    while (PeekMessage(out var nm, IntPtr.Zero, 0, 0, PM_REMOVE) != 0) { TranslateMessage(ref nm); DispatchMessage(ref nm); }
                 }
             };;
         }

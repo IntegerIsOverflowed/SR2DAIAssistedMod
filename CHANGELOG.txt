@@ -44,6 +44,11 @@ Conventions
            read like the unrelated Op.Blend draw mode (the standing naming trap).
   ADDED    README "Cookbook": ten recipes - mouse drawing, drag a sprite, zoomable viewer, game loop, saving without
            GDI+, undo, partial redraw, tweening, pattern fill, wand + quick mask.
+  FIXED    demo: typing into the search box (and any text control) lost most keystrokes - only 1-2 characters got
+           through. The game loop's inline message drain removed the pending WM_KEYDOWNs and dispatched them WITHOUT
+           TranslateMessage, so no WM_CHAR was ever generated (the mouse never noticed: buttons need no translation).
+           The drain now runs the classic TranslateMessage + DispatchMessage pump; keys that arrive while frames
+           render reach the controls exactly as the main loop would deliver them.
   ADDED    new capability, nothing existing changes
   CHANGED  existing behaviour or API changed (a compat note says how to keep the old behaviour)
   FIXED    a bug
