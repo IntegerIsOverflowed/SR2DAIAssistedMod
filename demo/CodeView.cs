@@ -80,7 +80,8 @@ namespace Sr2d64CSport
                 var m = t.ControlStrip.Method; string type = m.DeclaringType?.Name ?? "", meth = m.Name;
                 var csrc = Source("ControlsDemo.cs");
                 string? code = csrc != null ? ExtractMethod(csrc, type, meth) : null;
-                sb.Append("\n// ---- control strip: ").Append(type).Append('.').Append(meth).Append("() (demo/ControlsDemo.cs) - builds the SR2D controls above the canvas ----\n");
+                if (code == null) { var fsrc = Source("FractalLayout.cs"); if (fsrc != null) code = ExtractMethod(fsrc, type, meth); }   // SwapDemo.Build lives in FractalLayout.cs
+                sb.Append("\n// ---- control strip: ").Append(type).Append('.').Append(meth).Append("() - builds the SR2D controls above the canvas ----\n");
                 sb.Append(code != null ? Dedent(code) : "// (source not available)").Append('\n');
             }
             return sb.ToString();

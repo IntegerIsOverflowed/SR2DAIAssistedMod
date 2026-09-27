@@ -2,7 +2,7 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
     <OutputType>Exe</OutputType>
-    <TargetFramework>net9.0</TargetFramework>
+    <TargetFramework>net10.0</TargetFramework>
     <Nullable>enable</Nullable>
     <ImplicitUsings>disable</ImplicitUsings>
     <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
@@ -13,5 +13,6 @@
     <Compile Include="../../../demo/CodeView.cs;Stubs.cs;Program.cs" />
     <EmbeddedResource Include="../../../demo/Tests.cs" LogicalName="src/Tests.cs" />
     <EmbeddedResource Include="../../../demo/ControlsDemo.cs" LogicalName="src/ControlsDemo.cs" />
+    <EmbeddedResource Include="../../../demo/FractalLayout.cs" LogicalName="src/FractalLayout.cs" />
   </ItemGroup>
 </Project>

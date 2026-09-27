@@ -873,7 +873,7 @@ namespace Sr2d64CSport
             {
                 var r = runs[i]; if (r == null) continue;
                 var tr = new TextRun[r.Length];
-                for (int k = 0; k < r.Length; k++) tr[k] = new TextRun(r[k].start, r[k].len, CodeView.Palette[r[k].color]);
+                for (int k = 0; k < r.Length; k++) tr[k] = new TextRun(r[k].start, r[k].len, r[k].color);   // Colorize already resolved Palette[cls] to the final ARGB
                 textRuns[i] = tr;
             }
             codeBox.SetLines(lines, textRuns);

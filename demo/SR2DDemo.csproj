@@ -91,6 +91,7 @@
     <!-- the demo shows its own source per test ("Code" button): Tests.cs / ControlsDemo.cs ride along inside the exe -->
     <EmbeddedResource Include="Tests.cs" LogicalName="src/Tests.cs" />
     <EmbeddedResource Include="ControlsDemo.cs" LogicalName="src/ControlsDemo.cs" />
+    <EmbeddedResource Include="FractalLayout.cs" LogicalName="src/FractalLayout.cs" />
   </ItemGroup>
   <ItemGroup>
     <!-- drop SR2D64.dll next to the .csproj (or into bin\...) ; swap it freely to compare builds -->
