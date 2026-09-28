@@ -13,11 +13,13 @@ namespace Sr2d64CSport
     ///   * draw ONLY inside the SpriteBox.Render handler (it hands you the back buffer, already the client size),
     ///   * when a value changes, call canvas.Redraw() - the box repaints once, on the next paint message
     ///     (RedrawNow() if you need the picture updated before the call returns, e.g. while dragging),
-    ///   * keep the sprites you draw in fields; load / build them once.
+    ///   * keep the sprites you draw in fields; load / build them once,
+    ///   * and release those fields in Dispose (MainForm.Designer.cs) when the form goes away.
     /// </summary>
     public partial class MainForm : Form
     {
         Sprite? _sprite;                 // the picture we spin around (built procedurally here; new Sprite("file.png") loads one)
+                                         // IDisposable fields like this one: release them in Dispose (MainForm.Designer.cs) - CA2213 watches there
         readonly Stopwatch _clock = Stopwatch.StartNew();
 
         public MainForm()
@@ -69,12 +71,6 @@ namespace Sr2d64CSport
         {
             angleKnob.Value = 30; sizeSlider.Value = 160; smoothToggle.Checked = true;
             canvas.Redraw();
-        }
-
-        protected override void OnFormClosed(FormClosedEventArgs e)
-        {
-            _sprite?.Dispose();
-            base.OnFormClosed(e);
         }
     }
 }
