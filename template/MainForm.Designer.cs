@@ -8,7 +8,13 @@ namespace Sr2d64CSport
         /// <summary>Clean up any resources being used.</summary>
         protected override void Dispose(bool disposing)
         {
-            if (disposing && (components != null)) components.Dispose();
+            if (disposing)
+            {
+                // every IDisposable field this form declares is released here (the analyzers check exactly this
+                // path, CA2213) - the WinForms designer preserves this method when it regenerates the file
+                _sprite?.Dispose();
+                if (components != null) components.Dispose();
+            }
             base.Dispose(disposing);
         }
 

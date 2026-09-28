@@ -61,8 +61,8 @@ Conventions
            GDI+, undo, partial redraw, tweening, pattern fill, wand + quick mask.
 
 
-2026-09-27  Diffuse border fold (Photoshop edge semantics), Code (F2) crash fix, keystroke drain fix, all
-            headless runners on net10.0
+2026-09-27  Diffuse border fold (Photoshop edge semantics), Code (F2) crash + keystroke drain fixes, template
+            Dispose pattern, all headless runners on net10.0
 ---------------------------------------------------------------------------
   CHANGED  tests: every headless runner targets net10.0 now - one SDK for everything (the demo and the template
            were already net10.0-windows; ctlrun 140 ok, codechk 101/0, benchchk 0/0 both modes on net10 alone).
@@ -90,6 +90,11 @@ Conventions
            on 6617 runs, the new one on none). While in there: the code view of a strip test also falls back to
            src/FractalLayout.cs (now embedded), so the SwapDemo strip's source shows instead of "(source not
            available)".
+  FIXED    template/SR2DApp: the starter form released its sprite in an OnFormClosed override - a path CA2213
+           (enabled by this repo's .editorconfig) does not recognize, so declaring your own Sprite / Bitmap field
+           flagged the form. Disposable fields are now released in Dispose(bool) (MainForm.Designer.cs; the
+           designer preserves that method), the redundant OnFormClosed override is gone, and the starter comments
+           the pattern so a fresh copy starts warning-free.
   FIXED    demo: typing into the search box (and any text control) lost most keystrokes - only 1-2 characters got
            through. The game loop's inline message drain removed the pending WM_KEYDOWNs and dispatched them WITHOUT
            TranslateMessage, so no WM_CHAR was ever generated (the mouse never noticed: buttons need no translation).
