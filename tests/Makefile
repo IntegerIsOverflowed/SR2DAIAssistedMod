@@ -60,6 +60,8 @@ $(BUILD)/floodtest: floodtest.cpp $(NEWOBJ)
 	$(CXX) $(CXXFLAGS) -w $^ -o $@ -lm
 $(BUILD)/blendtest: blendtest.cpp $(NEWOBJ)
 	$(CXX) $(CXXFLAGS) -w $^ -o $@ -lm
+$(BUILD)/regchk: regchk.cpp $(NEWOBJ)
+	$(CXX) $(CXXFLAGS) -w $^ -o $@ -lm
 $(BUILD)/dispatchtest: dispatchtest.cpp $(NEWOBJ)
 	$(CXX) $(CXXFLAGS) -w $^ -o $@ -lm -lpthread
 $(BUILD)/noisesnap: noisesnap.cpp $(NEWOBJ)
@@ -77,6 +79,10 @@ asan: fuzztest.cpp
 	ASAN_OPTIONS=detect_leaks=0 ./$(BUILD)/threadtest_asan 10
 	$(CXX) -O1 -std=c++17 -w -fsanitize=address,undefined -fno-sanitize=alignment blendtest.cpp $(BUILD)/asan_sse2.o $(BUILD)/asan_avx2.o $(BUILD)/asan_sr2d.o -o $(BUILD)/blendtest_asan -lm
 	ASAN_OPTIONS=detect_leaks=0 ./$(BUILD)/blendtest_asan 20
+	$(CXX) -O1 -std=c++17 -w -fsanitize=address,undefined -fno-sanitize=alignment linetest.cpp $(BUILD)/asan_sse2.o $(BUILD)/asan_avx2.o $(BUILD)/asan_sr2d.o -o $(BUILD)/linetest_asan -lm
+	ASAN_OPTIONS=detect_leaks=0 ./$(BUILD)/linetest_asan 500
+	$(CXX) -O1 -std=c++17 -w -fsanitize=address,undefined -fno-sanitize=alignment regchk.cpp $(BUILD)/asan_sse2.o $(BUILD)/asan_avx2.o $(BUILD)/asan_sr2d.o -o $(BUILD)/regchk_asan -lm
+	ASAN_OPTIONS=detect_leaks=0 ./$(BUILD)/regchk_asan
 
 # ThreadSanitizer build of the kernels + thread test (data races in the scratch slot / kernels)
 TSANFLAGS = -O1 -std=c++17 -fsanitize=thread
@@ -100,7 +106,7 @@ wincheck:
 	@echo "wincheck: no clashes with Windows SDK macros"
 	python3 cs/projchk.py
 
-test: wincheck $(BUILD)/difftest $(BUILD)/warptest $(BUILD)/linetest $(BUILD)/polytest $(BUILD)/blurtest $(BUILD)/areatest $(BUILD)/cubictest $(BUILD)/fringetest $(BUILD)/fxtest $(BUILD)/fuzztest $(BUILD)/threadtest $(BUILD)/floodtest $(BUILD)/voxtest $(BUILD)/blendtest $(BUILD)/dispatchtest
+test: wincheck $(BUILD)/difftest $(BUILD)/warptest $(BUILD)/linetest $(BUILD)/polytest $(BUILD)/blurtest $(BUILD)/areatest $(BUILD)/cubictest $(BUILD)/fringetest $(BUILD)/fxtest $(BUILD)/fuzztest $(BUILD)/threadtest $(BUILD)/floodtest $(BUILD)/voxtest $(BUILD)/blendtest $(BUILD)/dispatchtest $(BUILD)/regchk
 	./$(BUILD)/difftest 3000
 	./$(BUILD)/warptest 600
 	./$(BUILD)/linetest 4000
@@ -114,6 +120,7 @@ test: wincheck $(BUILD)/difftest $(BUILD)/warptest $(BUILD)/linetest $(BUILD)/po
 	./$(BUILD)/threadtest 6
 	./$(BUILD)/floodtest 1500
 	./$(BUILD)/blendtest 200
+	./$(BUILD)/regchk
 	./$(BUILD)/dispatchtest 4
 	./$(BUILD)/voxtest 200 0
 bench: $(BUILD)/bench

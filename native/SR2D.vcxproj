@@ -55,14 +55,27 @@
       <StringPooling>true</StringPooling>
       <RuntimeLibrary>MultiThreaded</RuntimeLibrary>
       <FunctionLevelLinking>true</FunctionLevelLinking>
-      <BufferSecurityCheck>false</BufferSecurityCheck>
+      <!-- /GS stack canaries are back ON (the default): the kernels draw caller- and file-shaped
+           geometry, and a review found a heap OOB write class (DRAW_LINE2 degenerate segments) where a
+           canary turns silent corruption into a loud crash. Measured cost is noise (tests/opbench A/B on
+           the blit-heavy demo frame shape: within run-to-run noise; a user-side fps A/B found no
+           difference either) - keep it on. -->
+      <BufferSecurityCheck>true</BufferSecurityCheck>
+      <!-- No C++ exceptions / RTTI is DELIBERATE (no CRT startup, /ENTRY:DllMain) - do not "fix" this. -->
       <ExceptionHandling>false</ExceptionHandling>
       <RuntimeTypeInfo>false</RuntimeTypeInfo>
       <LanguageStandard>stdcpp17</LanguageStandard>
       <WarningLevel>Level3</WarningLevel>
       <SuppressStartupBanner>true</SuppressStartupBanner>
-      <ControlFlowGuard>false</ControlFlowGuard>
-      <SDLCheck>false</SDLCheck>
+      <!-- /guard:cf indirect-call checks: compatible with the custom entry point and the static CRT
+           (the dispatch tables are internal, nothing calls out through host function pointers). -->
+      <ControlFlowGuard>Guard</ControlFlowGuard>
+      <!-- /sdl: ON since 2026-09-30 (B-01 follow-up). It promotes a specific set of dangerous-code
+           warnings to ERRORS (uninitialized locals, unary minus on unsigned, buffer-overrun patterns,
+           deprecated CRT calls) and pre-initializes some stack pointers so misuse crashes loudly instead of
+           corrupting silently. It cannot change the pixel arithmetic - only what the compiler refuses to
+           accept - so the differential tests stay valid. Flip back to false if it ever blocks a hotfix. -->
+      <SDLCheck>true</SDLCheck>
       <FloatingPointModel>Precise</FloatingPointModel>
       <!-- SSE2 baseline for every TU (x64 default; explicit for Win32) -->
       <EnableEnhancedInstructionSet Condition="'$(Platform)'=='Win32'">StreamingSIMDExtensions2</EnableEnhancedInstructionSet>
@@ -72,19 +85,18 @@
            original sources needs it, see tests/Makefile). -->
       <AdditionalOptions Condition="'$(PlatformToolset)'=='ClangCL'">-Wno-unused-command-line-argument %(AdditionalOptions)</AdditionalOptions>
     </ClCompile>
+    <!-- Restored 2026-09-30: the false-alarm fps rollback earlier this day spliced this file and
+         dropped the whole Link block - the first native build after that failed with undefined
+         memcpy / memset (nothing told the linker to pull the static CRT members that define them)
+         and would have shipped a DLL without the SR2D.def export table. The explicit static CRT
+         inputs also make the link independent of whether the toolset emits /defaultlib directives
+         (the VS 18 clang-cl + /sdl combination was in the same build and remains suspected).
+         Startup stays out: the entry point is DllMain, no CRT init runs. -->
     <Link>
       <SuppressStartupBanner>true</SuppressStartupBanner>
       <ModuleDefinitionFile>SR2D.def</ModuleDefinitionFile>
+      <AdditionalDependencies>vcruntime.lib;libcmt.lib;libucrt.lib;%(AdditionalDependencies)</AdditionalDependencies>
       <RandomizedBaseAddress>true</RandomizedBaseAddress>
-      <DataExecutionPrevention>true</DataExecutionPrevention>
-      <LinkTimeCodeGeneration Condition="'$(PlatformToolset)'!='ClangCL'">UseLinkTimeCodeGeneration</LinkTimeCodeGeneration>
-      <OptimizeReferences>true</OptimizeReferences>
-      <EnableCOMDATFolding>true</EnableCOMDATFolding>
-      <EntryPointSymbol>DllMain</EntryPointSymbol>
-      <IgnoreAllDefaultLibraries>false</IgnoreAllDefaultLibraries>
-      <AdditionalDependencies>kernel32.lib;vcruntime.lib;%(AdditionalDependencies)</AdditionalDependencies>
-      <TargetMachine Condition="'$(Platform)'=='Win32'">MachineX86</TargetMachine>
-      <TargetMachine Condition="'$(Platform)'=='x64'">MachineX64</TargetMachine>
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>

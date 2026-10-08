@@ -22,7 +22,7 @@ namespace Sr2d64CSport
     // ~0.2 ms. The rotated image is built in a scratch sprite (padded, transparent outside the shape)
     // and composited with the requested Op; pixels the shape does not cover are skipped, so an Op like
     // Paint leaves the canvas around the rotated sprite untouched.
-    internal unsafe partial class Sprite
+    public unsafe partial class Sprite
     {
         // scratch slots: 0 = pre-transposed source, 1 = final image, 2 = transposed intermediate, 3 = coverage mask
         [ThreadStatic] static Sprite?[]? tShearView, tShearStore;

@@ -7,12 +7,12 @@
     <Nullable>enable</Nullable>
     <ImplicitUsings>disable</ImplicitUsings>
     <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
-    <BaseOutputPath>/home/user/.cache/vecrun/bin/</BaseOutputPath>
-    <BaseIntermediateOutputPath>/home/user/.cache/vecrun/obj/</BaseIntermediateOutputPath>
+    <BaseOutputPath Condition="Exists('/home/user/.cache')">/home/user/.cache/vecrun/bin/</BaseOutputPath>
+    <BaseIntermediateOutputPath Condition="Exists('/home/user/.cache')">/home/user/.cache/vecrun/obj/</BaseIntermediateOutputPath>
     <NoWarn>CA1416;WFO1000</NoWarn>
   </PropertyGroup>
   <ItemGroup>
-    <Compile Include="../../../cs/*.cs" Exclude="../../../cs/SpriteBox*.cs;../../../cs/SpriteControls*.cs;../../../cs/SpriteCursors.cs;../../../cs/Tween.cs" />
+    <Compile Include="../../../cs/*.cs" Exclude="../../../cs/SpriteBox*.cs;../../../cs/SpriteForm.cs;../../../cs/ChromeDesign.cs;../../../cs/SpriteControls*.cs;../../../cs/SpriteCursors.cs;../../../cs/Tween.cs" />
     <Compile Include="Program.cs" />
     <PackageReference Include="System.Drawing.Common" Version="10.0.0" />
   </ItemGroup>

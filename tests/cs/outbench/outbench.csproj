@@ -1,0 +1,29 @@
+<!-- outbench: legacy raw HDC blit vs the SpriteBox present paths (Present / WM_PAINT / SizeMode resample).
+     REAL WinForms window needed (it opens an HDC), so this is net10.0-windows + UseWindowsForms, unlike the
+     headless net10.0 test runners. Engine comes in by globbing cs/*.cs only - never demo/ (another engineer owns it).
+     Output dir trap: /d/home/user/.cache exists on this box, so the condition is TRUE and the build lands in
+     D:\home\user\.cache\outbench\bin\Release\net10.0-windows\, NOT tests/cs/outbench/bin. harness/runall.sh finds it. -->
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <AssemblyName>outbench</AssemblyName>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <UseWindowsForms>true</UseWindowsForms>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <EnableWindowsTargeting>true</EnableWindowsTargeting>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+    <StartupObject>Outbench.Program</StartupObject>
+    <NoWarn>CS0436;CS8981;CA1416;WFO1000;CS1591;NU1510;CA1310;CA1806;CA2213</NoWarn>
+    <BaseOutputPath Condition="Exists('/home/user/.cache')">/home/user/.cache/outbench/bin/</BaseOutputPath>
+    <BaseIntermediateOutputPath Condition="Exists('/home/user/.cache')">/home/user/.cache/outbench/obj/</BaseIntermediateOutputPath>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="../../../cs/*.cs" />
+    <Compile Include="Program.cs" />
+  </ItemGroup>
+  <ItemGroup>
+    <PackageReference Include="System.Drawing.Common" Version="10.0.0" />
+  </ItemGroup>
+</Project>

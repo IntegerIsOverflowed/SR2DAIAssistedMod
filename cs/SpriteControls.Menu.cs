@@ -27,10 +27,10 @@ namespace Sr2d64CSport
     // the owner keeps focus and keyboard input is forwarded through the message filter.
     // ------------------------------------------------------------------------------------------------------------------------
 
-    internal enum MenuItemKind { Command, Check, Radio, Separator, Header, SubMenu, Slider }
+    public enum MenuItemKind { Command, Check, Radio, Separator, Header, SubMenu, Slider }
 
     /// <summary>One row of a <see cref="SpriteMenu"/>. Build them with the Add* helpers on the menu.</summary>
-    internal sealed class SpriteMenuItem
+    public sealed class SpriteMenuItem
     {
         public MenuItemKind Kind;
         public string Text = "";
@@ -52,7 +52,7 @@ namespace Sr2d64CSport
     }
 
     /// <summary>An SR2D-drawn popup menu. See the file header for usage.</summary>
-    internal sealed class SpriteMenu : IDisposable
+    public sealed class SpriteMenu : IDisposable
     {
         public readonly List<SpriteMenuItem> Items = new List<SpriteMenuItem>();
         /// <summary>Minimum popup width in pixels (default 160).</summary>
@@ -89,15 +89,22 @@ namespace Sr2d64CSport
         // ------------------------------------------------------------------ showing
         /// <summary>True while this menu (or one of its sub-menus) is on screen.</summary>
         public bool IsOpen => _panel != null && _panel.Visible;
-        /// <summary>Pops the menu up at a client point of <paramref name="owner"/>.</summary>
-        public void Show(Control owner, Point clientPoint) => ShowAt(owner, owner.PointToScreen(clientPoint));
-        /// <summary>Pops the menu up at a screen point. The root menu handles outside clicks and keyboard input for the whole chain.</summary>
-        public void ShowAt(Control owner, Point screenPoint, bool asSubmenu = false)
+        /// <summary>Pops the menu up at a client point of <paramref name="owner"/>. Pass the button that opened it so an
+        /// outside click can tell a re-open from a fresh gesture - see <see cref="ShowAt"/>.</summary>
+        public void Show(Control owner, Point clientPoint, MouseButtons openButton = MouseButtons.Left) => ShowAt(owner, owner.PointToScreen(clientPoint), openButton: openButton);
+        /// <summary>Pops the menu up at a screen point. The root menu handles outside clicks and keyboard input for the whole chain.
+        /// <paramref name="openButton"/> only matters for the root: a menu opened by the LEFT button re-opens on the next left click
+        /// over its owner, so that click is swallowed and merely closes the menu; a right-click context menu is not, because the
+        /// next left click there is a real gesture (a drag on the control under it) and must reach it.</summary>
+        public void ShowAt(Control owner, Point screenPoint, bool asSubmenu = false, MouseButtons openButton = MouseButtons.Left)
         {
             Opening?.Invoke(this);
             _panel ??= new SpriteMenuPanel(this);
+            if (!asSubmenu) OpenedBy = openButton;
             _panel.Popup(owner, screenPoint, asSubmenu);
         }
+        /// <summary>The button that opened this root menu (<see cref="ShowAt"/>).</summary>
+        internal MouseButtons OpenedBy { get; private set; } = MouseButtons.Left;
         /// <summary>Closes this menu and its open sub-menus (and, when <paramref name="chain"/>, the parents too).</summary>
         public void Close(bool chain = true)
         {
@@ -115,7 +122,7 @@ namespace Sr2d64CSport
     }
 
     /// <summary>The window of one open menu level: an SR2D-painted SpriteBox in a borderless, non-activating tool window.</summary>
-    internal sealed class SpriteMenuPanel : SpriteBox
+    public sealed class SpriteMenuPanel : SpriteBox
     {
         readonly SpriteMenu _menu; MenuHost? _host; Control? _owner;
         readonly List<Rectangle> _rows = new List<Rectangle>(); int _hot = -1, _pressedSlider = -1; int _padX = 10, _rowH, _sepH, _sliderH, _ts;
@@ -210,8 +217,11 @@ namespace Sr2d64CSport
                             var opener = root.Panel?.Owner;                         // the control whose click opened the menu
                             bool onOpener = opener != null && opener.Visible && opener.RectangleToScreen(opener.ClientRectangle).Contains(p);
                             root.CloseDown();                                       // any click outside the chain closes it
-                            if (m.Msg == 0x0201 && onOpener) return true;           // a click on the opener ONLY closes: swallowing it stops the
-                        }                                                           // field from toggling open again on the very same click ("one click closes")
+                            // A left click on the opener of a left-click menu ONLY closes it: swallowing it stops the field from
+                            // toggling open again on the very same click ("one click closes"). A right-click context menu does
+                            // not get that treatment - its next left click is a real gesture on the control underneath.
+                            if (m.Msg == 0x0201 && onOpener && root.OpenedBy != MouseButtons.Right) return true;
+                        }
                         return false;   // never swallow anything else: the click goes to whatever is under the pointer
                     }
                     case 0x0100: case 0x0104:   // WM_KEYDOWN / WM_SYSKEYDOWN
@@ -429,6 +439,8 @@ namespace Sr2d64CSport
         // ------------------------------------------------------------------ keyboard (routed by the filter to the deepest open level)
         internal bool Key(Keys k)
         {
+            if ((k & Keys.Alt) != 0 || (k & Keys.Control) != 0) return false;   // Alt+F4 / Ctrl+C / shortcuts belong to the form, a menu never takes them
+            k &= Keys.KeyCode;
             switch (k)
             {
                 case Keys.Escape: case Keys.Left:
@@ -446,13 +458,13 @@ namespace Sr2d64CSport
                 case Keys.Add: case Keys.Oemplus: if (_hot >= 0 && _menu.Items[_hot].Kind == MenuItemKind.Slider) { Nudge(_hot, 1); return true; } break;
                 case Keys.Subtract: case Keys.OemMinus: if (_hot >= 0 && _menu.Items[_hot].Kind == MenuItemKind.Slider) { Nudge(_hot, -1); return true; } break;
             }
-            // first-letter navigation
+            // first-letter navigation (plain keys only - the modifiers were sent back to the form above)
             char c = (char)k; if (char.IsLetterOrDigit(c))
             {
                 int n = _menu.Items.Count;
                 for (int s = 1; s <= n; s++) { int i = ((_hot < 0 ? -1 : _hot) + s + n) % n; var it = _menu.Items[i]; if (it.Selectable && it.Text.Length > 0 && char.ToUpperInvariant(it.Text[0]) == char.ToUpperInvariant(c)) { SetHot(i, false); return true; } }
             }
-            return true;   // while a menu is open the keyboard belongs to it
+            return false;  // not a key the menu uses: let it reach the focused control / the form (Alt, F-keys, Tab, clipboard...)
         }
         void Nudge(int i, int dir) { var it = _menu.Items[i]; double step = it.Step > 0 ? it.Step : (it.Max - it.Min) / 50; it.SetValue?.Invoke(Math.Clamp((it.GetValue?.Invoke() ?? it.Min) + dir * step, it.Min, it.Max)); Redraw(); }
         internal void MoveHot(int dir)

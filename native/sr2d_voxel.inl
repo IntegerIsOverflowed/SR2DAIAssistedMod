@@ -5,7 +5,10 @@
 //   VOXEL_RENDER  grid + faces (+ light) -> pixels                   (per frame)
 //
 // Grid layout: index = (z * gh + y) * gw + x; x east, y north, z up. A voxel is a unit cube
-// [x, x+1) x [y, y+1) x [z, z+1). Alpha 0 = empty, anything else = opaque.
+// [x, x+1) x [y, y+1) x [z, z+1). Alpha 0 = empty, 1..254 = translucent, 255 = opaque. A
+// side toward a neighbour with a LOWER alpha is drawn (outside counts as 0); translucent
+// faces composite OVER what is behind them - the painter's far-to-near order makes that the
+// correct back-to-front blend, no depth buffer needed.
 //
 // Projection: orthographic, sx = m0 x + m1 y + m2 z + ox, sy = m3 x + m4 y + m5 z + oy.
 // 'view' is the direction the camera looks along in grid space; a face is visible when its
@@ -106,13 +109,24 @@ static int VOXEL_FACES(const void* voxp, int gw, int gh, int gd, uint8_t* faces)
     const int cells = (int)cellsll, slab = gw * gh;
     const int NB = N * 4;                                   // bytes per vector (16 / 32)
 
-    // pass 1: solid flags (alpha != 0 -> 0x40). Sequential 8-byte reads; the compiler vectorises the branch-free form.
+    // the alpha byte sits inside every 8-byte voxel (offset 3), so pass 2 needs a COMPACT copy of the
+    // alpha plane - one byte per cell - before it can run whole vectors over a row
+    size_t got = 0;
+    uint8_t* aplane = (uint8_t*)sr2d_scratch_acquire((size_t)cells, &got);
+    if (!aplane) return -1;
+
+    // pass 1: solid flags (alpha != 0 -> 0x40) + the compact alpha plane. Sequential 8-byte reads; the
+    // compiler vectorises the branch-free form.
     {
         const uint32_t* a = (const uint32_t*)vox;           // argb at even dwords
-        for (int i = 0; i < cells; ++i) faces[i] = (uint8_t)(((a[(size_t)i * 2] >> 24) != 0) << 6);
+        for (int i = 0; i < cells; ++i) { const uint32_t al = a[(size_t)i * 2] >> 24; faces[i] = (uint8_t)((al != 0) << 6); aplane[i] = (uint8_t)al; }
     }
 
     // pass 2: neighbours. In-place is safe: every neighbour read is masked with 0x40, the one bit no update changes.
+    // Exposure rule (transparent voxels): the side toward neighbour N is exposed when the neighbour's ALPHA is lower
+    // than the cell's own (outside the grid counts as 0). 255 vs 255 (opaque on opaque) and equal alphas (the inside
+    // of a uniform glass block) stay hidden - the same grids as before alpha existed give exactly the old bits.
+    // aplane below is the alpha plane compacted to one byte per cell, same layout as the faces bytes
     const T solid = V::set1_8(0x40), zero = V::zero();
     const T bPX = V::set1_8(1), bMX = V::set1_8(2), bPY = V::set1_8(4), bMY = V::set1_8(8), bPZ = V::set1_8(16), bMZ = V::set1_8(32);
     int exposed = 0;
@@ -120,10 +134,13 @@ static int VOXEL_FACES(const void* voxp, int gw, int gh, int gd, uint8_t* faces)
         for (int y = 0; y < gh; ++y)
         {
             uint8_t* row = faces + (size_t)(z * gh + y) * gw;
-            const uint8_t* rowYm = y > 0 ? row - gw : 0;
-            const uint8_t* rowYp = y + 1 < gh ? row + gw : 0;
-            const uint8_t* rowZm = z > 0 ? row - slab : 0;
-            const uint8_t* rowZp = z + 1 < gd ? row + slab : 0;
+            const uint8_t* arow = aplane + (size_t)(z * gh + y) * gw;
+            const uint8_t* arowYm = y > 0 ? arow - gw : 0;
+            const uint8_t* arowYp = y + 1 < gh ? arow + gw : 0;
+            const uint8_t* arowZm = z > 0 ? arow - slab : 0;
+            const uint8_t* arowZp = z + 1 < gd ? arow + slab : 0;
+            // selfA > neighbourA per lane: the saturating byte subtract is non-zero exactly then
+            #define VOX_BIT(neighA, bit) V::andnot(V::cmpeq8(V::subs_u8(selfA, neighA), zero), bit)
             // vector body: cells [x, x + NB) with 1 <= x and x + NB <= gw - 1, so the x +- 1 loads stay inside the row
             int x = 1, xv1 = 1;
             for (; x + NB <= gw - 1; x += NB)
@@ -131,12 +148,13 @@ static int VOXEL_FACES(const void* voxp, int gw, int gh, int gd, uint8_t* faces)
                 const T c = V::and_(V::loadu(row + x), solid);
                 const T cs = V::cmpeq8(c, solid);           // solid lanes = 0xff
                 if (!V::movemask8(cs)) continue;            // whole chunk empty: nothing to write
-                T bits = V::and_(V::cmpeq8(V::and_(V::loadu(row + x + 1), solid), zero), bPX);
-                bits = V::or_(bits, V::and_(V::cmpeq8(V::and_(V::loadu(row + x - 1), solid), zero), bMX));
-                bits = V::or_(bits, rowYp ? V::and_(V::cmpeq8(V::and_(V::loadu(rowYp + x), solid), zero), bPY) : bPY);
-                bits = V::or_(bits, rowYm ? V::and_(V::cmpeq8(V::and_(V::loadu(rowYm + x), solid), zero), bMY) : bMY);
-                bits = V::or_(bits, rowZp ? V::and_(V::cmpeq8(V::and_(V::loadu(rowZp + x), solid), zero), bPZ) : bPZ);
-                bits = V::or_(bits, rowZm ? V::and_(V::cmpeq8(V::and_(V::loadu(rowZm + x), solid), zero), bMZ) : bMZ);
+                const T selfA = V::loadu(arow + x);
+                T bits = VOX_BIT(V::loadu(arow + x + 1), bPX);
+                bits = V::or_(bits, VOX_BIT(V::loadu(arow + x - 1), bMX));
+                bits = V::or_(bits, arowYp ? VOX_BIT(V::loadu(arowYp + x), bPY) : bPY);
+                bits = V::or_(bits, arowYm ? VOX_BIT(V::loadu(arowYm + x), bMY) : bMY);
+                bits = V::or_(bits, arowZp ? VOX_BIT(V::loadu(arowZp + x), bPZ) : bPZ);
+                bits = V::or_(bits, arowZm ? VOX_BIT(V::loadu(arowZm + x), bMZ) : bMZ);
                 bits = V::and_(bits, cs);                   // only solid cells get bits
                 V::storeu(row + x, V::or_(c, bits));
                 exposed += popcnt32((uint32_t)V::movemask8(V::andnot(V::cmpeq8(bits, zero), cs)));
@@ -147,18 +165,21 @@ static int VOXEL_FACES(const void* voxp, int gw, int gh, int gd, uint8_t* faces)
             {
                 if (row[k] & 0x40)
                 {
+                    const uint32_t sa = arow[k];
                     int b = 0x40;
-                    if (k + 1 >= gw || !(row[k + 1] & 0x40)) b |= 1;
-                    if (k == 0 || !(row[k - 1] & 0x40)) b |= 2;
-                    if (!rowYp || !(rowYp[k] & 0x40)) b |= 4;
-                    if (!rowYm || !(rowYm[k] & 0x40)) b |= 8;
-                    if (!rowZp || !(rowZp[k] & 0x40)) b |= 16;
-                    if (!rowZm || !(rowZm[k] & 0x40)) b |= 32;
+                    if (k + 1 >= gw || sa > arow[k + 1]) b |= 1;
+                    if (k == 0 || sa > arow[k - 1]) b |= 2;
+                    if (!arowYp || sa > arowYp[k]) b |= 4;
+                    if (!arowYm || sa > arowYm[k]) b |= 8;
+                    if (!arowZp || sa > arowZp[k]) b |= 16;
+                    if (!arowZm || sa > arowZm[k]) b |= 32;
                     row[k] = (uint8_t)b;
                     exposed += (b & 63) != 0;
                 }
             }
+            #undef VOX_BIT
         }
+    sr2d_scratch_release(aplane, got);
     return exposed;
 }
 
@@ -502,6 +523,19 @@ static void vox_vertex_bright(const VoxCtx& C, int x, int y, int z, int f, int a
 // parallelogram P(a, b) = V00 + a U + b W, rasterised with the pixel-centre rule
 struct VoxQuad { float x[4], y[4]; };   // 0: (0,0) 1: (1,0) 2: (1,1) 3: (0,1)
 
+// translucent voxel face OVER the destination (straight alpha, dest alpha kept):
+// out = src * a + dst * (255 - a) per channel incl. alpha, rounded like the premultiply (t + (t >> 8)) >> 8
+static SR2D_INLINE int vox_over(int d, uint32_t s)
+{
+    const uint32_t a = s >> 24, ia = 255 - a;
+    const uint32_t dr = (uint32_t)((d >> 16) & 255) * ia, dg = (uint32_t)((d >> 8) & 255) * ia;
+    const uint32_t db = (uint32_t)(d & 255) * ia, da = (uint32_t)((uint32_t)d >> 24) * ia;
+    const uint32_t r = ((s >> 16) & 255) * a + dr + 128, g = ((s >> 8) & 255) * a + dg + 128;
+    const uint32_t b = (s & 255) * a + db + 128, o = a * 255 + da + 128;
+    return (int)(((uint32_t)((o + (o >> 8)) >> 8) << 24) | ((uint32_t)((r + (r >> 8)) >> 8) << 16)
+               | ((uint32_t)((g + (g >> 8)) >> 8) << 8) | (uint32_t)((b + (b >> 8)) >> 8));
+}
+
 static void vox_face_quad(const VoxCtx& C, int x, int y, int z, int f, VoxQuad& q)
 {
     const VoxFaceDef& F = vox_facedef(f);
@@ -547,7 +581,8 @@ static void vox_fill_face(VoxCtx& C, const VoxQuad& q, uint32_t col, int pickv)
         x0 = x0 < C.clipL ? C.clipL : x0; x1 = x1 > C.clipR ? C.clipR : x1;
         if (x0 >= x1) continue;
         int* d = C.dst + (size_t)y * C.dw;
-        for (int x = x0; x < x1; ++x) d[x] = (int)col;
+        if ((col >> 24) == 255 || (C.S->flags & SR2D_VOX_KEEP_ALPHA)) for (int x = x0; x < x1; ++x) d[x] = (int)col;
+        else for (int x = x0; x < x1; ++x) d[x] = vox_over(d[x], col);   // translucent voxel: over what is behind it (KEEP_ALPHA stamps instead)
         if (C.pick) { int* p = C.pick + (size_t)y * C.dw; for (int x = x0; x < x1; ++x) p[x] = pickv; }
     }
 }
@@ -590,7 +625,7 @@ static void vox_fill_face_smooth(VoxCtx& C, const VoxQuad& q, uint32_t col, uint
             r = r > 255 ? 255 : r; g = g > 255 ? 255 : g; b = b > 255 ? 255 : b;
             uint32_t pc = a | ((uint32_t)r << 16) | ((uint32_t)g << 8) | (uint32_t)b;
             if (fade < 1.f) pc = vox_fade_col(C, pc, fade);
-            d[x] = (int)pc;
+            d[x] = (a >> 24) == 255 || (C.S->flags & SR2D_VOX_KEEP_ALPHA) ? (int)pc : vox_over(d[x], pc);   // KEEP_ALPHA stamps the raw colour
         }
         if (C.pick) { int* p = C.pick + (size_t)y * C.dw; for (int x = x0; x < x1; ++x) p[x] = pickv; }
     }
@@ -600,7 +635,11 @@ static void vox_draw_voxel(VoxCtx& C, int x, int y, int z, int idx, int fbits)
 {
     const SR2D_VoxelScene& S = *C.S;
     const SR2D_Voxel& v = S.vox[idx];
-    const uint32_t a = (S.flags & SR2D_VOX_KEEP_ALPHA) ? (v.argb & 0xff000000u) : 0xff000000u;
+    const uint32_t va = v.argb & 0xff000000u;
+    // translucent voxels (alpha 1..254) carry their own alpha to the write sites, which composite them OVER what is
+    // behind (see vox_over); opaque ones behave exactly as before transparency existed. KEEP_ALPHA switches the write
+    // sites to a raw stamp (the alpha-tagged-sprite contract: the destination receives the voxel alpha verbatim).
+    const uint32_t a = va;
     const uint32_t own = (S.lighting >= 2) ? (S.light[idx] & SR2D_VOXL_MASK) : 0;
     const int lighting = S.lighting;
     ++C.drawn;
@@ -636,7 +675,7 @@ static void vox_draw_voxel(VoxCtx& C, int x, int y, int z, int idx, int fbits)
         const float inv = 1.f / wsum; B[0] *= inv; B[1] *= inv; B[2] *= inv;
         uint32_t pc = vox_mulcol(v.argb, B, a);
         if (C.fadeMode) pc = vox_fade_col(C, pc, vox_fade(C, x, y, z));
-        C.dst[(size_t)py * C.dw + px] = (int)pc;
+        C.dst[(size_t)py * C.dw + px] = (a >> 24) == 255 || (C.S->flags & SR2D_VOX_KEEP_ALPHA) ? (int)pc : vox_over(C.dst[(size_t)py * C.dw + px], pc);   // KEEP_ALPHA stamps the raw colour
         if (C.pick) C.pick[(size_t)py * C.dw + px] = (idx << C.pickShift) | (C.pickShift ? fbest : 0);
         return;
     }

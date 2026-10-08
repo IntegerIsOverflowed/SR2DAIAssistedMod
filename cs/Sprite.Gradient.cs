@@ -67,7 +67,7 @@ namespace Sr2d64CSport
         }
     }
 
-    internal sealed partial class Sprite
+    public sealed partial class Sprite
     {
         // ------------------------------------------------------------------ fills with a gradient paint
         /// <summary>Fills a polygon (pixel-centre coordinates like <see cref="FillPolygon(ReadOnlySpan{PointF}, int, SR2D.LineOp, bool, bool, int)"/>) with a gradient.</summary>

@@ -24,7 +24,7 @@ using System.Text;
 namespace Sr2d64CSport
 {
     /// <summary>How <see cref="VoxelGrid.FromObj(string, int, ObjOptions?)"/> fills each object.</summary>
-    internal enum ObjFill
+    public enum ObjFill
     {
         /// <summary>Closed (watertight) objects become solids, open ones (planes, shells with holes) stay surfaces.</summary>
         Auto,
@@ -35,7 +35,7 @@ namespace Sr2d64CSport
     }
 
     /// <summary>Options for the .obj voxeliser.</summary>
-    internal sealed class ObjOptions
+    public sealed class ObjOptions
     {
         public ObjFill Fill = ObjFill.Auto;
         /// <summary>Colour used when the file has no material / vertex colour.</summary>
@@ -55,9 +55,9 @@ namespace Sr2d64CSport
         /// <summary>Optional: mtl file text by name (when the .obj is given as text and cannot resolve mtllib from disk).</summary>
         public Func<string, string?>? ResolveMtl = null;
     }
-    internal enum ObjUp { Y, Z }
+    public enum ObjUp { Y, Z }
 
-    internal sealed unsafe partial class VoxelGrid
+    public sealed unsafe partial class VoxelGrid
     {
         // =============================================================== MagicaVoxel .vox
         static readonly uint[] VoxDefaultPalette = BuildDefaultPalette();
@@ -81,7 +81,7 @@ namespace Sr2d64CSport
         }
 
         /// <summary>One model of a .vox file with its placement in the scene.</summary>
-        internal sealed class VoxModel { public VoxelGrid Grid = null!; public int X, Y, Z; public string Name = ""; }
+        public sealed class VoxModel { public VoxelGrid Grid = null!; public int X, Y, Z; public string Name = ""; }
 
         /// <summary>
         /// Load a MagicaVoxel file as ONE grid: all models are placed by the file's scene graph and merged
@@ -124,7 +124,12 @@ namespace Sr2d64CSport
                     {
                         case "MAIN": pos = body + n; Chunk(next); pos = next; continue;
                         case "SIZE": sizes.Add((BitConverter.ToInt32(data, q), BitConverter.ToInt32(data, q + 4), BitConverter.ToInt32(data, q + 8))); break;
-                        case "XYZI": { int cnt = BitConverter.ToInt32(data, q); var v = new byte[cnt * 4]; Array.Copy(data, q + 4, v, 0, Math.Min(v.Length, n - 4)); voxels.Add(v); break; }
+                        case "XYZI":
+                        {   // the count is file data: it must fit the chunk that carries it (a hostile count used to allocate cnt*4 bytes unchecked)
+                            int cnt = BitConverter.ToInt32(data, q);
+                            if (cnt < 0 || (long)cnt * 4 > n - 4) throw new InvalidDataException($"corrupt .vox XYZI: {cnt} voxels do not fit a {n}-byte chunk");
+                            var v = new byte[cnt * 4]; Array.Copy(data, q + 4, v, 0, Math.Min(v.Length, n - 4)); voxels.Add(v); break;
+                        }
                         case "RGBA": for (int i = 0; i < 255 && q + i * 4 + 3 < body + n; i++) { byte r = data[q + i * 4], gg = data[q + i * 4 + 1], b = data[q + i * 4 + 2], a = data[q + i * 4 + 3]; palette[i + 1] = (uint)a << 24 | (uint)r << 16 | (uint)gg << 8 | b; } break;
                         case "MATL":
                             {
@@ -141,6 +146,7 @@ namespace Sr2d64CSport
                             {
                                 int nid = BitConverter.ToInt32(data, q); q += 4; var attr = ReadDict(data, ref q);
                                 int child = BitConverter.ToInt32(data, q); q += 4; q += 4; /* reserved */ q += 4; /* layer */ int nf = BitConverter.ToInt32(data, q); q += 4;
+                                if (nf < 0 || q + 4L * nf > data.Length) throw new InvalidDataException($"corrupt .vox nTRN: {nf} frames do not fit the chunk");
                                 int tx = 0, ty2 = 0, tz = 0, rot = 4;   // rot byte 4 = identity
                                 for (int f = 0; f < nf; f++)
                                 {
@@ -154,8 +160,8 @@ namespace Sr2d64CSport
                                 trn[nid] = (child, tx, ty2, tz, rot, attr.TryGetValue("_name", out var nm) ? nm : "");
                                 break;
                             }
-                        case "nGRP": { int nid = BitConverter.ToInt32(data, q); q += 4; ReadDict(data, ref q); int nc = BitConverter.ToInt32(data, q); q += 4; var ch = new int[Math.Max(0, nc)]; for (int i = 0; i < nc; i++) { ch[i] = BitConverter.ToInt32(data, q); q += 4; } grp[nid] = ch; break; }
-                        case "nSHP": { int nid = BitConverter.ToInt32(data, q); q += 4; ReadDict(data, ref q); int nm2 = BitConverter.ToInt32(data, q); q += 4; var ms = new int[Math.Max(0, nm2)]; for (int i = 0; i < nm2; i++) { ms[i] = BitConverter.ToInt32(data, q); q += 4; ReadDict(data, ref q); } shp[nid] = ms; break; }
+                        case "nGRP": { int nid = BitConverter.ToInt32(data, q); q += 4; ReadDict(data, ref q); int nc = BitConverter.ToInt32(data, q); q += 4; if (nc < 0 || q + 4L * nc > data.Length) throw new InvalidDataException($"corrupt .vox nGRP: {nc} children do not fit the chunk"); var ch = new int[nc]; for (int i = 0; i < nc; i++) { ch[i] = BitConverter.ToInt32(data, q); q += 4; } grp[nid] = ch; break; }
+                        case "nSHP": { int nid = BitConverter.ToInt32(data, q); q += 4; ReadDict(data, ref q); int nm2 = BitConverter.ToInt32(data, q); q += 4; if (nm2 < 0 || q + 4L * nm2 > data.Length) throw new InvalidDataException($"corrupt .vox nSHP: {nm2} models do not fit the chunk"); var ms = new int[nm2]; for (int i = 0; i < nm2; i++) { ms[i] = BitConverter.ToInt32(data, q); q += 4; ReadDict(data, ref q); } shp[nid] = ms; break; }
                         default: break;   // PACK, LAYR, rOBJ, rCAM, NOTE, IMAP ... not needed
                     }
                     pos = next;
@@ -227,11 +233,20 @@ namespace Sr2d64CSport
         static Dictionary<string, string> ReadDict(byte[] d, ref int q)
         {
             var dict = new Dictionary<string, string>();
+            if (q + 4 > d.Length) throw new InvalidDataException("corrupt .vox: truncated dictionary");
             int n = BitConverter.ToInt32(d, q); q += 4;
-            for (int i = 0; i < n && q + 4 <= d.Length; i++)
-            {
-                int kl = BitConverter.ToInt32(d, q); q += 4; string k = Encoding.UTF8.GetString(d, q, Math.Max(0, Math.Min(kl, d.Length - q))); q += kl;
-                int vl = BitConverter.ToInt32(d, q); q += 4; string v = Encoding.UTF8.GetString(d, q, Math.Max(0, Math.Min(vl, d.Length - q))); q += vl;
+            if (n < 0) throw new InvalidDataException("corrupt .vox: negative dictionary length");
+            for (int i = 0; i < n; i++)
+            {   // the length read IS the length consumed: a clamped decode with a raw advance could move the
+                // cursor backwards (an endless loop) or past the buffer (an exception out of the parser)
+                if (q + 4 > d.Length) throw new InvalidDataException("corrupt .vox: truncated dictionary");
+                int kl = BitConverter.ToInt32(d, q); q += 4;
+                if (kl < 0 || q + kl > d.Length) throw new InvalidDataException("corrupt .vox: bad dictionary key length");
+                string k = Encoding.UTF8.GetString(d, q, kl); q += kl;
+                if (q + 4 > d.Length) throw new InvalidDataException("corrupt .vox: truncated dictionary");
+                int vl = BitConverter.ToInt32(d, q); q += 4;
+                if (vl < 0 || q + vl > d.Length) throw new InvalidDataException("corrupt .vox: bad dictionary value length");
+                string v = Encoding.UTF8.GetString(d, q, vl); q += vl;
                 dict[k] = v;
             }
             return dict;

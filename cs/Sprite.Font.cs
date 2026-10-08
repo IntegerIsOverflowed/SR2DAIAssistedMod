@@ -10,7 +10,7 @@ namespace Sr2d64CSport
     // Rendering: each glyph is an 8-bit coverage bitmap from the SpriteFont's cache; it is composited with
     // FILL_MASK8 (coverage scales the LineOp like anti-aliasing coverage), so text obeys the lock
     // rectangle, every LineOp and premultiplied targets, and costs one SIMD mask fill per glyph.
-    internal unsafe partial class Sprite
+    public unsafe partial class Sprite
     {
         [ThreadStatic] private static List<SpriteFont.Placed>? tPlaced;
 
@@ -133,7 +133,7 @@ namespace Sr2d64CSport
 
     // SpriteFont as the pixel font's fallback (PixelFont.FallbackFonts / FallbackFamilies): registered automatically when this
     // file is compiled in, so Sprite.DrawText draws CJK / emoji / anything the 5x7 font lacks with an installed vector font.
-    internal sealed partial class SpriteFont
+    public sealed partial class SpriteFont
     {
         float IFallbackFont.MeasureFallback(ReadOnlySpan<char> text, float em) => Measure(text, em);
         void IFallbackFont.DrawFallback(Sprite target, float x, float baselineY, ReadOnlySpan<char> text, float em, int color, SR2D.LineOp op, int blendFactor)

@@ -26,9 +26,9 @@ namespace Sr2d64CSport
 {
     /// <summary>One voxel: colour (A = 0 -> empty), light emission 0..15, and two free data fields.</summary>
     [StructLayout(LayoutKind.Sequential, Size = 8)]
-    internal struct Voxel : IEquatable<Voxel>
+    public struct Voxel : IEquatable<Voxel>
     {
-        /// <summary>ARGB colour; alpha 0 means the cell is empty, anything else solid.</summary>
+        /// <summary>ARGB colour. Alpha 0 = empty, 255 = opaque, 1..254 = translucent (the side toward a neighbour of lower alpha is drawn and the face composites over what is behind it).</summary>
         public uint Argb;
         /// <summary>Light emission strength 0..15 (0 = none). The emitted colour is <see cref="Argb"/>.</summary>
         public byte Emit;
@@ -55,7 +55,7 @@ namespace Sr2d64CSport
     }
 
     /// <summary>Lighting tiers, cheapest first. Each tier includes the previous one.</summary>
-    internal enum VoxelLighting
+    public enum VoxelLighting
     {
         /// <summary>Stored colours as they are.</summary>
         None = 0,
@@ -68,7 +68,7 @@ namespace Sr2d64CSport
     }
 
     /// <summary>How the voxels are rasterised.</summary>
-    internal enum VoxelMode
+    public enum VoxelMode
     {
         /// <summary>Points at scale ~1 (one pixel per voxel), cubes otherwise.</summary>
         Auto = -1,
@@ -84,7 +84,7 @@ namespace Sr2d64CSport
     /// <see cref="Side"/>) for crisp pixel-art results, or <see cref="Free"/> for any yaw / pitch.
     /// Grid axes: x east, y north, z up. Screen y grows downwards.
     /// </summary>
-    internal sealed class VoxelCamera
+    public sealed class VoxelCamera
     {
         // sx = M[0] x + M[1] y + M[2] z,  sy = M[3] x + M[4] y + M[5] z  (before the offset)
         internal readonly float[] M = new float[6];
@@ -111,7 +111,7 @@ namespace Sr2d64CSport
         public int SkyColor = 0xFFFFFF;
         /// <summary>Sky light assumed just outside the grid (0..15), -1 = the grid's <see cref="VoxelGrid.SkyLight"/> (default).</summary>
         public int OutsideSky = -1;
-        /// <summary>Write the voxel alpha instead of 255 (grids used as alpha-tagged sprites).</summary>
+        /// <summary>Write the voxel alpha instead of 255 (grids used as alpha-tagged sprites): every drawn voxel colour is stamped verbatim, no compositing. Without it translucent voxels (alpha 1..254) composite over what is behind them; opaque ones are identical either way.</summary>
         public bool KeepAlpha;
         /// <summary>
         /// Depth fade (the cheapest "lighting" there is; works with every tier including None): <see cref="VoxelFade.Height"/>
@@ -291,11 +291,11 @@ namespace Sr2d64CSport
     }
 
     /// <summary>Which grid point DrawVoxels puts at the given screen position.</summary>
-    internal enum VoxelAnchor { Center, Origin, BottomCenter, TopLeftOfBounds }
+    public enum VoxelAnchor { Center, Origin, BottomCenter, TopLeftOfBounds }
 
     /// <summary>Depth-fade flags of <see cref="VoxelCamera.Fade"/> (SR2D_VOX_FADE_* in the native API).</summary>
     [Flags]
-    internal enum VoxelFade
+    public enum VoxelFade
     {
         None = 0,
         /// <summary>Darker towards the bottom of the grid (z = 0), full colour at the top slab.</summary>
@@ -310,7 +310,7 @@ namespace Sr2d64CSport
     /// A dense w x h x d block of <see cref="Voxel"/>s (x east, y north, z up) with cached visibility and lighting,
     /// drawn with <see cref="Sprite.DrawVoxels"/>. Index = (z * H + y) * W + x, like rows of pixels stacked.
     /// </summary>
-    internal sealed unsafe partial class VoxelGrid : IDisposable
+    public sealed unsafe partial class VoxelGrid : IDisposable
     {
         // native SR2D_VoxelScene (232 bytes)
         [StructLayout(LayoutKind.Sequential)]
@@ -662,7 +662,7 @@ namespace Sr2d64CSport
         ~VoxelGrid() { if (!disposed) { if (vox != null) NativeMemory.Free(vox); if (faces != null) NativeMemory.Free(faces); if (light != null) NativeMemory.Free(light); } }
     }
 
-    internal unsafe partial class Sprite
+    public unsafe partial class Sprite
     {
         /// <summary>
         /// Draw a voxel grid with the given camera, its anchor (grid centre by default) at (x, y). Respects the lock rect;

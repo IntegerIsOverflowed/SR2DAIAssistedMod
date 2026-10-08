@@ -28,22 +28,35 @@ dotnet_diagnostic.CA1814.severity = none      # multidimensional arrays where th
 dotnet_diagnostic.CA1822.severity = none      # instance methods that could be static: API shape is intentional
 dotnet_diagnostic.CA1861.severity = none      # constant arrays as arguments (one-off tables in tests / lookups)
 dotnet_diagnostic.CA1866.severity = none      # StartsWith(char) vs StartsWith(string): the string forms carry StringComparison.Ordinal explicitly
-dotnet_diagnostic.CA5392.severity = none      # DefaultDllImportSearchPaths: SR2D resolves its DLL itself (SR2D.cs resolver)
+# CA5392 (DefaultDllImportSearchPaths) is back at its default severity: cs/SR2D.cs declares the
+# attribute at assembly level, so the P/Invoke fallback probing is pinned to the application directory
+# and System32 (System32 is required - winmm is not a KnownDLL and stopped loading without it).
 dotnet_diagnostic.CA5394.severity = none      # System.Random is fine for dither / noise / dissolve
 dotnet_diagnostic.CA5351.severity = none      # MD5 is used as a content hash for the vector cache, not for security
 dotnet_diagnostic.CA1510.severity = none      # ArgumentNullException.ThrowIfNull: the explicit form compiles on older language levels too
-dotnet_diagnostic.CA1512.severity = none
+dotnet_diagnostic.CA1512.severity = none      # WrapInUsing: the explicit form reads better around unmanaged handles we release by hand
 dotnet_diagnostic.CA1513.severity = none
 dotnet_diagnostic.CA1064.severity = none      # internal exception types
 dotnet_diagnostic.CA2201.severity = none      # reserved exception types (IndexOutOfRange rethrown as InvalidData in decoders)
 dotnet_diagnostic.CA1845.severity = none      # string.Concat vs AsSpan: not on a hot path
-dotnet_diagnostic.CA1850.severity = none
+dotnet_diagnostic.CA1850.severity = none      # PreferAsSpan: the string forms sit in cold paths (importer setup), span churn hurts readability there
 dotnet_diagnostic.CA1859.severity = none      # concrete types for performance: the hot paths already use them
-dotnet_diagnostic.CA1870.severity = none
+dotnet_diagnostic.CA1870.severity = none      # UseCompiledRegex: the handful of Regexes run once per import of a rare format
 dotnet_diagnostic.CA1852.severity = none      # sealed: the SR2D classes are internal and already sealed where it matters
-dotnet_diagnostic.CA1846.severity = none
-dotnet_diagnostic.CA1823.severity = none
+dotnet_diagnostic.CA1846.severity = none      # PreferAsSpan1: same as CA1850 - cold paths, the string overloads are clearer
+dotnet_diagnostic.CA1823.severity = none      # unused fields: a few keep deliberate placeholders for format versioning (documented at the field)
 dotnet_diagnostic.CA2249.severity = none      # IndexOf >= 0 vs Contains: both ordinal, either reads fine
+dotnet_diagnostic.CA1051.severity = none      # visible instance fields: the field IS the API (Sprite's interop state, the vector
+                                               # path nodes, the voxel projection / object records, the menu descriptors) - direct
+                                               # access is the perf model and the original signatures must stay (2026-10-08)
+dotnet_diagnostic.CA1725.severity = none      # override parameter names are the house style (s / k / e), not the BCL's (surface /
+                                               # keyData / levent) - renaming buys nothing and churns every override (2026-10-08)
+dotnet_diagnostic.CA1720.severity = none      # Ptr / Pointer contain the type name: they MIRROR the native ABI's parameter names
+                                               # (the SR2D_* exports), that is the documentation (2026-10-08)
+dotnet_diagnostic.CA1708.severity = none      # PTR / Ptr (and Cells / cells) differ by case on purpose: the upper-case form is the
+                                               # raw native handle / the lower-case the managed wrapper next to it (2026-10-08)
+dotnet_diagnostic.CA2211.severity = none      # mutable statics: the engine-wide config knobs (cursor fallback, curve tolerance) are
+                                               # set once by the app at start-up by design (2026-10-08)
 dotnet_diagnostic.CA1416.severity = none      # platform compatibility: the WinForms files are Windows-only by project type
 
 # ---- IDE hints (Message level in Visual Studio's error list) -------------------------------------------------

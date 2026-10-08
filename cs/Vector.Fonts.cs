@@ -12,7 +12,7 @@ namespace Sr2d64CSport
     /// Type 1 (PFA / PFB / PDF FontFile: eexec, Type 1 charstrings, flex, seac). Glyphs come back as <see cref="VectorPath"/>s
     /// in em units (1.0 = the em, y up), so a text renderer only multiplies by the font size. Outlines are cached per glyph.
     /// </summary>
-    internal abstract class GlyphFont
+    public abstract class GlyphFont
     {
         readonly Dictionary<int, VectorPath?> cache = new Dictionary<int, VectorPath?>();
         /// <summary>Where glyph-build failures go when no import is running (SpriteFont points this at its own Warnings list); null = drop.</summary>
@@ -24,10 +24,24 @@ namespace Sr2d64CSport
         /// <summary>Number of glyphs in the program (0 when unknown).</summary>
         public int GlyphCount { get; protected set; }
         /// <summary>Glyph outline in em units, y up; null for an empty / missing glyph.</summary>
+        [ThreadStatic] static int buildDepth;   // a font object may be shared, so the budget lives per thread
         public VectorPath? Glyph(int gid)
         {
             if (cache.TryGetValue(gid, out var p)) return p;
-            try { p = Build(gid); } catch (Exception e) { ImportLog.Swallowed(e, () => Kind + " glyph " + gid + Where(), Warnings); p = null; }
+            if (buildDepth > 8)
+            {   // seac (CFF / Type 1) re-enters Glyph from inside Build: without a budget a crafted glyph that
+                // references itself recursed to a StackOverflowException, which kills the process
+                ImportLog.Swallowed(new InvalidOperationException("glyph build nested more than 8 deep (a seac chain references itself)"), () => Kind + " glyph " + gid + Where(), Warnings);
+                return null;
+            }
+            cache[gid] = null;                     // in-progress mark: a cycle (A seac -> A) resolves to null right here
+            buildDepth++;
+            try
+            {
+                p = Build(gid);
+            }
+            catch (Exception e) { ImportLog.Swallowed(e, () => Kind + " glyph " + gid + Where(), Warnings); p = null; }
+            finally { buildDepth--; }
             if (p != null && p.IsEmpty) p = null;
             cache[gid] = p; return p;
         }

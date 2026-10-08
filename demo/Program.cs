@@ -7,8 +7,11 @@ namespace Sr2d64CSport
     internal static class Program
     {
         [STAThread]
-        static void Main()
+        static void Main(string[] args)
         {
+            // --shots <dir>: render every test into <dir> as one PNG each (+ manifest.tsv) and quit - the audit tool
+            string? shots = null;
+            for (int i = 0; i + 1 < args.Length; i++) if (args[i] == "--shots" || args[i] == "-shots") shots = args[i + 1];
             if (!Environment.Is64BitProcess)
             {
                 MessageBox.Show("SR2DDemo must run as a 64-bit process (SR2D64.dll is x64).", "SR2D Demo");
@@ -23,7 +26,7 @@ namespace Sr2d64CSport
             Application.SetUnhandledExceptionMode(UnhandledExceptionMode.CatchException);
             Application.ThreadException += (_, e) => ShowCrash(e.Exception, terminating: false);          // UI thread
             AppDomain.CurrentDomain.UnhandledException += (_, e) => ShowCrash(e.ExceptionObject as Exception ?? new Exception(Convert.ToString(e.ExceptionObject, System.Globalization.CultureInfo.InvariantCulture)), terminating: true);   // background threads: log only
-            Application.Run(new MainForm());
+            Application.Run(new MainForm { ShotsDir = shots });
         }
 
         /// <summary>Appends the exception to crash.log and shows it; the report is already on the clipboard.</summary>

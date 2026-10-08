@@ -17,7 +17,7 @@ using System.Runtime.InteropServices;
 namespace Sr2d64CSport
 {
     /// <summary>A set of cells of a <see cref="VoxelGrid"/> (one byte per cell, 0 / 1).</summary>
-    internal sealed unsafe class VoxelSelection : IDisposable
+    public sealed unsafe class VoxelSelection : IDisposable
     {
         internal readonly int w, h, d; internal readonly int cells;
         internal byte* p; bool disposed;
@@ -139,7 +139,7 @@ namespace Sr2d64CSport
     }
 
     /// <summary>Parameters of the procedural fills (<see cref="VoxelGrid.FillNoise"/>, <see cref="VoxelGrid.Noise"/>).</summary>
-    internal sealed class VoxelNoise
+    public sealed class VoxelNoise
     {
         /// <summary>Feature size in voxels (period of the base octave).</summary>
         public float Scale = 16f;
@@ -201,7 +201,7 @@ namespace Sr2d64CSport
         }
     }
 
-    internal sealed unsafe partial class VoxelGrid
+    public sealed unsafe partial class VoxelGrid
     {
         // ---- selections -----------------------------------------------------------------------------
 

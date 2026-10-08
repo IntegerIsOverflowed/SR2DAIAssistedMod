@@ -37,6 +37,10 @@
     <Compile Include="..\cs\Effects.cs" Link="cs\Effects.cs" />
     <Compile Include="..\cs\LayeredSprite.cs" Link="cs\LayeredSprite.cs" />
     <Compile Include="..\cs\Selection.cs" Link="cs\Selection.cs" />
+    <Compile Include="..\cs\Animation.cs" Link="cs\Animation.cs" />
+    <Compile Include="..\cs\Curve.cs" Link="cs\Curve.cs" />
+    <Compile Include="..\cs\SpriteControls.Curve.cs" Link="cs\SpriteControls.Curve.cs" />
+    <Compile Include="..\cs\Sprite.Move.cs" Link="cs\Sprite.Move.cs" />
     <Compile Include="..\cs\VoxelGrid.cs" Link="cs\VoxelGrid.cs" />
     <Compile Include="..\cs\VoxelGrid.Edit.cs" Link="cs\VoxelGrid.Edit.cs" />
     <Compile Include="..\cs\VoxelGrid.Objects.cs" Link="cs\VoxelGrid.Objects.cs" />
@@ -53,6 +57,9 @@
     <Compile Include="..\cs\SpriteControls.Wheel.cs" Link="cs\SpriteControls.Wheel.cs" />
     <Compile Include="..\cs\SpriteControls.Menu.cs" Link="cs\SpriteControls.Menu.cs" />
     <Compile Include="..\cs\SpriteControls.Static.cs" Link="cs\SpriteControls.Static.cs" />
+    <Compile Include="..\cs\SpriteControls.Color.cs" Link="cs\SpriteControls.Color.cs" />
+    <Compile Include="..\cs\SpriteForm.cs" Link="cs\SpriteForm.cs" />
+    <Compile Include="..\cs\ChromeDesign.cs" Link="cs\ChromeDesign.cs" />
     <Compile Include="..\cs\SpriteControls.TextView.cs" Link="cs\SpriteControls.TextView.cs" />
     <Compile Include="..\cs\SpriteControls.Input.cs" Link="cs\SpriteControls.Input.cs" />
     <Compile Include="..\cs\SpriteCursors.cs" Link="cs\SpriteCursors.cs" />
@@ -75,6 +82,7 @@
     <Compile Include="..\cs\EditHistory.cs" Link="cs\EditHistory.cs" />
     <Compile Include="..\cs\Tween.cs" Link="cs\Tween.cs" />
     <Compile Include="..\cs\Sprite.Pattern.cs" Link="cs\Sprite.Pattern.cs" />
+    <Compile Include="..\cs\Sprite.Warp.cs" Link="cs\Sprite.Warp.cs" />
     <Compile Include="..\cs\SpriteFont.cs" Link="cs\SpriteFont.cs" />
     <Compile Include="..\cs\SpriteFont.Cache.cs" Link="cs\SpriteFont.Cache.cs" />
     <Compile Include="..\cs\Vector.FontData.cs" Link="cs\Vector.FontData.cs" />

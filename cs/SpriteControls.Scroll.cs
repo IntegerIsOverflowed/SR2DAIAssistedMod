@@ -14,7 +14,7 @@ namespace Sr2d64CSport
     /// ordinary control. It does not take the focus when clicked (the view it scrolls keeps it).
     /// </summary>
     [ToolboxBitmap(typeof(SpriteScrollBar), "SpriteScrollBar.bmp")]
-    internal sealed class SpriteScrollBar : SpriteRangeControl
+    public sealed class SpriteScrollBar : SpriteRangeControl
     {
         protected override AccessibleRole DefaultAccessibleRole => AccessibleRole.ScrollBar;
         Orientation _orient = Orientation.Vertical;

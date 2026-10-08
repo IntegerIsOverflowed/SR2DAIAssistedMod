@@ -18,6 +18,16 @@ namespace Sr2d64CSport
         Time = 8192,
         /// <summary>The test reads the orbit camera (<see cref="Ctx.Yaw"/> / Pitch / PanX / PanY): left drag = orbit, middle drag = pan, wheel = zoom.</summary>
         Camera = 16384,
+        /// <summary>The test reads <see cref="Ctx.Grid"/> - the grid cell size in px (grid density of the block demos).</summary>
+        Grid = 32768,
+        /// <summary>The test reads <see cref="Ctx.Speed"/> - the animation speed factor of the animated demos.</summary>
+        Speed = 65536,
+        /// <summary>The test reads <see cref="Ctx.ShowGrid"/> - the grid-lines check box of the block demos.</summary>
+        GridOn = 131072,
+        /// <summary>The test reads <see cref="Ctx.OffsetX"/> - the X offset slider (the selection-tool scenario).</summary>
+        OffsetX = 262144,
+        /// <summary>The test reads <see cref="Ctx.OffsetY"/> - the Y offset slider (the selection-tool scenario).</summary>
+        OffsetY = 524288,
     }
 
     internal sealed class Ctx
@@ -86,6 +96,21 @@ namespace Sr2d64CSport
         public float PivotXF { get { Touch(Param.Mouse); return pivotX; } set => pivotX = value; }
         public float PivotYF { get { Touch(Param.Mouse); return pivotY; } set => pivotY = value; }
         float pivotX = -1, pivotY = -1;
+
+        /// <summary>The Grid slider: grid cell size in px for the grid demos (Move / Offset scrambles).</summary>
+        public int Grid { get { Touch(Param.Grid); return grid; } set => grid = value; }
+        /// <summary>The Speed slider: animation speed factor (px/s = Speed * 8) for the animated demos.</summary>
+        public int Speed { get { Touch(Param.Speed); return speed; } set => speed = value; }
+        /// <summary>PaintByMouse tests: the pen paints on the canvas while the left button is down, at PenX / PenY.</summary>
+        public bool PenDown { get { Touch(Param.Mouse); return penDown; } set => penDown = value; }
+        public int PenX { get { Touch(Param.Mouse); return penX; } set => penX = value; }
+        public int PenY { get { Touch(Param.Mouse); return penY; } set => penY = value; }
+        /// <summary>The "Grid lines" check box of the block demos (draw the grid over the board).</summary>
+        public bool ShowGrid { get { Touch(Param.GridOn); return showGrid; } set => showGrid = value; }
+        /// <summary>The "Offset X / Y" sliders of the selection-tool scenario (px applied per change, wrapped by the selection).</summary>
+        public int OffsetX { get { Touch(Param.OffsetX); return offsetX; } set => offsetX = value; }
+        public int OffsetY { get { Touch(Param.OffsetY); return offsetY; } set => offsetY = value; }
+        int grid = 64, speed = 6, offsetX, offsetY; bool penDown, showGrid = true; int penX, penY;
 
         /// <summary>"Mouse"/light/object position on the canvas (drag with the left button).</summary>
         public int X { get { Touch(Param.Mouse); return x; } set => x = value; }
@@ -164,6 +189,8 @@ namespace Sr2d64CSport
         public bool DragAnywhere;
         /// <summary>Grabbable checker backdrop: drag anywhere with the hand cursor slides it - without the "follow the mouse" check box (the offset lives in Ctx.BackdropX/Y, not in the Mouse parameter).</summary>
         public bool GrabBackdrop;
+        /// <summary>The canvas is a drawing surface: the pen cursor shows and the LEFT button paints (Ctx.PenDown / PenX / PenY), like an image editor.</summary>
+        public bool PaintByMouse;
         /// <summary>Uses the FractalLayout placement: the Copies slider is capped to the last viewport split that stays visible.</summary>
         public bool FractalCopies;
         /// <summary>Right click on the object sets the pivot (Ctx.PivotXF / YF) without the rotate handles - for the pivot overloads of non-rotating calls (DrawScaled).</summary>
@@ -183,6 +210,12 @@ namespace Sr2d64CSport
         public DemoTest Also(Action<DemoTest> f) { f(this); return this; }
         /// <summary>Hand-written code sample for the "Code" view; null = the demo lifts this test's lambda (+ the helpers it calls) out of Tests.cs.</summary>
         public string? Code = null;
+        /// <summary>The "Sprite size" setup combo is switched to this value when the test is selected (0 = leave what the user had).</summary>
+        public int SpriteSize;
+        /// <summary>An extra control for the TEST tab's settings (e.g. the curve editor of the Curve tangent); built once on select.</summary>
+        public Func<System.Windows.Forms.Control>? SettingsControl;
+        /// <summary>When the extra settings control is visible (evaluated per frame; null = always).</summary>
+        public Func<Ctx, bool>? SettingsVisible;
 
         // fluent setup ----------------------------------------------------------------
         /// <summary>Captions: Ui(param, caption, param, caption, ...). Controls not listed are disabled for this test.</summary>
@@ -205,6 +238,9 @@ namespace Sr2d64CSport
         public string? FilePath;               // last chosen file (set by the form)
         public bool Available => !(NeedsWarp && !Caps.HasWarp) && !(NeedsLine2 && !Caps.HasLine2) && !(NeedsAlphaOver && !Caps.HasAlphaOver) && !(NeedsPoly && !Caps.HasPoly) && !(NeedsBlur && !Caps.HasBlur) && !(NeedsFx && !Caps.HasFx) && !(NeedsFlood && !Caps.HasFlood) && !(NeedsVoxel && !Caps.HasVoxel) && !(NeedsBlend && !Caps.HasBlendMode);
         public bool ClearsItself;              // test does its own background clear
+        /// <summary>Suite-only correctness check: runs once per suite pass after the timed frames, on a
+        /// deterministic frame. Returns null = pass, a string = the failure (logged, counted as FAILED).</summary>
+        public Func<Ctx, string?>? Check;
         public Param Used;                     // parameters this test has read so far (for highlighting)
         public RenderFn Run = _ => { };
         public override string ToString() => Name;
@@ -241,15 +277,19 @@ namespace Sr2d64CSport
         public static List<DemoTest> All()
         {
             var L = new List<DemoTest>();
-            DemoTest T(string g, string n, string d, RenderFn f, bool warp = false, bool clears = false, bool needsLine2 = false, bool needsOver = false, bool needsPoly = false, bool needsBlur = false, bool needsFx = false, bool needsFlood = false, bool needsVoxel = false, bool needsBlend = false)
+            DemoTest T(string g, string n, string d, RenderFn f, bool warp = false, bool clears = false, bool needsLine2 = false, bool needsOver = false, bool needsPoly = false, bool needsBlur = false, bool needsFx = false, bool needsFlood = false, bool needsVoxel = false, bool needsBlend = false, Func<Ctx, string?>? check = null)
             {
                 var t = new DemoTest { Group = g, Name = n, Desc = d, Run = f, NeedsWarp = warp, NeedsLine2 = needsLine2, NeedsAlphaOver = needsOver, NeedsPoly = needsPoly, NeedsBlur = needsBlur, NeedsFx = needsFx, NeedsFlood = needsFlood, NeedsVoxel = needsVoxel, NeedsBlend = needsBlend, ClearsItself = clears };
+                t.Check = check;
                 L.Add(t); return t;
             }
             // captions for the shared controls while a test is selected: UI(param, caption, param, caption, ...)
             static Dictionary<Param, string> UI(params object[] kv) { var d = new Dictionary<Param, string>(); for (int i = 0; i + 1 < kv.Length; i += 2) d[(Param)kv[i]] = (string)kv[i + 1]; return d; }
 
             // ======================================================= Original API
+            T(GOriginal, "Output paths: raw blit vs SpriteBox", "How much does the NEW way of getting pixels onto the window cost against the ORIGINAL one? The engine always presented by taking the control's DC with GetDC, blitting the sprite into it and calling ReleaseDC; SpriteBox is the newer output control (its own back buffer, Present() or WM_PAINT, plus stretch / zoom). The strip above the canvas shows the SAME scene four ways side by side, each with its own stopwatch, and each pane writes its per-frame draw + blit milliseconds into its own picture: 1 = a stock PictureBox driven the original way (GetDC -> Sprite.PaintToDevice(HandleRef) -> ReleaseDC), 2 = a SpriteBox driven by RedrawNow() (the Render event paints its Surface, then Present() blits it: the game-loop route, no message round trip), 3 = a SpriteBox driven the way a WinForms app drives it (Redraw() -> the WM_PAINT message -> the Render event -> the blit; its 'blit' figure is the paint total minus the draw), 4 = a SpriteBox in SizeMode Zoom at 200 % with the bilinear filter, i.e. the same surface resampled on every present. The ratios (box.RedrawNow / box.WM_PAINT / box zoom2 against the raw blit) are in the info panel and on the strip. 'Copies' sets how many Sprite.Draw calls the scene makes, 'GDI DIB buffers' switches every buffer between a DIB section (one BitBlt per present) and a plain buffer (SetDIBitsToDevice) - the same switch for all four panes, so they stay comparable. The button opens a borderless FULLSCREEN plain Form that runs ONE route alone, unthrottled, with the real frame rate on screen (Tab cycles the route, Left / Right change Copies, G switches the buffers, a click or Esc closes it and the bench resumes - while it is open this window renders nothing).",
+                c => OutputDemo.Canvas(c))
+                .Also(t => { t.ControlStrip = OutputDemo.Build; t.StripHeight = OutputDemo.StripHeight; t.ClearsItself = true; });
             T(GOriginal, "Draw (Op selector)", "Sprite.Draw with the selected Op: Count copies laid out as a centred block with a small gap between them (the block grows until it fills the canvas). Uses the alpha sprite for AlphaBlend / AlphaTest, otherwise the colour sprite. The backdrop is a dark alpha checker so the ops that mix with the background (Add / Mul / Max / Min / AlphaBlend) show what they do; DRAG the checkered backdrop with the hand cursor (the sprites stay) to slide a lighter or darker cell under a sprite.",
                 c => { Checker(c, c.BackdropX, c.BackdropY); SpacedGrid(c, c.S / 8, (x, y) => c.Canvas.Draw(SrcFor(c, c.Op), x, y, c.Op)); })
                 .Ui(Param.Count, "Copies (centred block, filling the canvas)", Param.Op, "Blend op").Also(t => t.GrabBackdrop = true);
@@ -311,13 +351,13 @@ namespace Sr2d64CSport
             T(GOriginal, "Blend (factor slider)", "Sprite.Blend - crossfade of the colour sprite over the background by BlendFactor (0 = background, 255 = sprite). Count copies CASCADE over each other (each one a step down-right, the stack centred) so every copy blends over the previous ones and the overlap shows the factor accumulating; the alpha checker behind them can be DRAGGED with the hand cursor to see the mix against a light and a dark cell.",
                 c => { Checker(c, c.BackdropX, c.BackdropY); Cascade(c, (x, y) => c.Canvas.Blend(c.A.Color, x, y, c.Blend)); })
                 .Ui(Param.Blend, "Blend factor (0 = background .. 255 = sprite)", Param.Count, "Copies (cascading over each other)").With(Param.Count, 10).Also(t => t.GrabBackdrop = true);
-            T(GOriginal, "MulAddS2X", "Per-channel multiply/add: Mul from Brightness slider, Add from Blend slider.",
+            T(GOriginal, "MulAddS2X", "Per-channel multiply/add: Mul from Brightness slider, Add from Blend slider. Both are neutral at the middle of their travel (Mul x1.00, Add +0), so the start values are off-neutral - otherwise this test is a plain copy and looks exactly like Sprite.Draw.",
                 c =>
                 {
                     int m = (int)Math.Clamp(c.Brite * 128, 0, 255); int mul = SR2D.ARGB((byte)m, (byte)m, (byte)m, (byte)m);
                     int add = SR2D.ARGB((byte)c.Blend, (byte)c.Blend, (byte)c.Blend, (byte)c.Blend);
                     SpacedGrid(c, 0, (x, y) => c.Canvas.MulAddS2X(c.A.Color, x, y, mul, add));   // centred, no mouse (drag the hand cursor instead)
-                });
+                }).With(Param.Brite, 55).With(Param.Blend, 175);
             var fMulAddN = new RegionCache();
             T(GOriginal, "MulAddS2X <new>", "Per-channel multiply/add (Mul from Brightness, Add from Blend) with the fractal copy placement of 'Draw (Op selector) <new>': the copies partition the viewport, every region drawn from its own prescaled + precropped sprite - one MulAddS2X per copy per frame, no per-frame scaling. Count = 1 fills the whole viewport with one big image.",
                 c =>
@@ -328,7 +368,7 @@ namespace Sr2d64CSport
                     fMulAddN.Ensure(((long)Math.Max(1, c.Count) << 48) ^ ((long)c.W << 32) ^ (uint)c.H ^ ((long)System.Runtime.CompilerServices.RuntimeHelpers.GetHashCode(c.A) << 56), regs, i => Prescaled(c.A.Color, regs[i]));
                     for (int i = 0; i < regs.Count; i++) c.Canvas.MulAddS2X(fMulAddN.Sprites[i], regs[i].X, regs[i].Y, mul, add);
                 })
-                .Ui(Param.Count, "Copies (fractal partition of the viewport; capped where the next tile would be too small)", Param.Brite, "Mul (0..255 per channel)", Param.Blend, "Add (0..255 per channel)").Also(t => t.FractalCopies = true);
+                .Ui(Param.Count, "Copies (fractal partition of the viewport; capped where the next tile would be too small)", Param.Brite, "Mul (Brightness x 128 per channel; 100 = x1.00, no change)", Param.Blend, "Add (0..255 per channel; 128 = +0, no change)").With(Param.Brite, 55).With(Param.Blend, 175).Also(t => t.FractalCopies = true);
             T(GOriginal, "MoveByte (channel swap)", "Copies channels: red->blue, green->red, blue->green of the colour sprite onto the canvas.",
                 c => SpacedGrid(c, 0, (x, y) =>                                       // centred, no mouse (drag the hand cursor instead)
                 {
@@ -353,9 +393,13 @@ namespace Sr2d64CSport
                 })
                 .Ui(Param.Count, "Copies (fractal partition, random swaps from the 2nd on; capped where the next tile would be too small)")
                 .Also(t => { t.ControlStrip = SwapDemo.Build; t.StripHeight = SwapDemo.StripHeight; t.FractalCopies = true; });
-            T(GOriginal, "MoveBit (mask -> colour)", "ORs 0x00C000 (green) into the canvas wherever the selected mask bit is set.",
-                c => Grid(c, (x, y) => c.Canvas.MoveBit(c.A.Mask, x, y, c.MaskBits, 0x00C000)));
-            T(GOriginal, "ClearBuffer / ClearRect", "Fills the whole canvas then Count random rectangles.", c =>
+            T(GOriginal, "MoveBit (mask -> colour)", "MoveBit(mask, x, y, bit, colour) ORs a colour into the canvas wherever ONE mask bit is set, so it is called once per layer with its own colour: blue circle (bit 0), amber diamond (bit 1), green stripes (bit 2), purple checker (bit 3). Where two layers overlap the colours OR together - that is the operation, not a bug. 'Bits' picks which layers take part; with a single bit you see exactly that layer's shape.",
+                c =>
+                {
+                    int[] layerCol = { 0x2060C0, 0xC0A020, 0x20A060, 0x8040C0 };
+                    Grid(c, (x, y) => { for (int b = 0; b < 4; b++) if ((c.MaskBits & (1 << b)) != 0) c.Canvas.MoveBit(c.A.Mask, x, y, 1 << b, layerCol[b]); });
+                }, clears: true).Ui(Param.MaskBits, "Mask bits (layers) to move:", Param.Count, "Sprites per side").With(Param.MaskBits, 15);
+            T(GOriginal, "ClearBuffer / ClearRect", "Fills the whole canvas then Count*8 random rectangles (ClearRect takes an x/y range, so the rectangles are Count*8 - the Count slider is the work per frame).", c =>
             {
                 c.Canvas.ClearBuffer(SR2D.ARGB(255, 20, 30, 50));
                 var r = new Random(7);
@@ -365,16 +409,16 @@ namespace Sr2d64CSport
                     c.Canvas.ClearRect(x, x + r.Next(c.S), y, y + r.Next(c.S), r.Next() | unchecked((int)0xFF000000));
                 }
             }, clears: true);
-            T(GOriginal, "DrawLine (dot step / xor)", "Fan of Count*64 clipped lines from the mouse position; DotStep and XOR from the panel.", c =>
+            T(GOriginal, "DrawLine (dot step / xor)", "Fan of Count*64 clipped lines from the mouse position; DotStep and XOR from the panel. DotStep 0 = a solid line; 1..8 lights one pixel every DotStep+1 steps along the MAJOR axis (the original rasteriser - that is why diagonals look sparser than horizontals; 'DrawLine2' dashes are measured along the line instead), so the slider starts above 0 - at 0 every line is solid and the dot stepping has nothing to show.", c =>
             {
                 int n = c.Count * 64;
                 for (int i = 0; i < n; i++)
                 {
                     float a = i * MathF.PI * 2 / n + c.Time * 0.2f;
                     int col = SR2D.ARGB(255, (byte)(128 + 127 * MathF.Sin(a)), (byte)(128 + 127 * MathF.Sin(a + 2)), (byte)(128 + 127 * MathF.Sin(a + 4)));
-                    c.Canvas.DrawLine(c.X, c.Y, (int)(c.X + MathF.Cos(a) * c.W), (int)(c.Y + MathF.Sin(a) * c.W), col, c.DotStep, c.Xor);
+                    c.Canvas.DrawLine(c.X, c.Y, (int)(c.X + MathF.Cos(a) * c.W), (int)(c.Y + MathF.Sin(a) * c.H), col, c.DotStep, c.Xor);
                 }
-            });
+            }).Ui(Param.DotStep, "Dot step (0 = solid, 1..8 = dotted)", Param.Xor, "XOR the dots instead of painting them", Param.Count, "Lines / 64", Param.Time, "Animate: the fan turns").With(Param.DotStep, 3);
             T(GOriginal, "DrawRotate (Smooth = AA, right click = pivot)", "Original fixed-point rotation: source pixel (Sx, Sy) = the PIVOT lands on the canvas position and the sprite turns around it; 'Smooth' toggles DRAW_ROT_AA. Angle = slider; with 'Animate' ticked the time is added (continuous spin). With Animate OFF turn it with the mouse: drag anywhere outside the sprite and it points at the cursor, or use the wheel (5 degrees per notch). RIGHT CLICK on the sprite moves the pivot to that source pixel (the marker shows it; the sprite stays where it is); right click outside the sprite resets the pivot to the centre. The pivot cross-hair is an overlay drawn after the timed frame.", c =>
             {
                 int px = c.PivotX < 0 ? c.S / 2 : c.PivotX, py = c.PivotY < 0 ? c.S / 2 : c.PivotY;
@@ -437,9 +481,10 @@ namespace Sr2d64CSport
                 c.Canvas.DrawText(c.W / 2, 58, "red = the pixels it counted   |   colours = the layers being tested   |   grey dots on the wall = layers switched off (ignored)", unchecked((int)0xFF8890A0), unchecked((int)0xFF000000), TextAnchor.TopCenter);
                 c.Note = $"overlap = {n} px (bits 0x{bits:X}: {layers})";
             }, clears: true).Ui(Param.Mouse, "Drag the player", Param.MaskBits, "Bits (layers) that take part in the test:", Param.Count, "Repetitions of the query (timing only)").With(Param.MaskBits, 1);
-            T(GOriginal, "ClearAlpha (+ managed SetPixel/GetPixel plasma)", "Managed per-pixel access: plasma via SetPixel over a Count*64x64 area, then ClearAlpha on the canvas.", c =>
+            T(GOriginal, "ClearAlpha (forces alpha = 255) + managed SetPixel/GetPixel plasma", "Two things: managed per-pixel access (a plasma painted with SetPixel / GetPixel over a Count*64x64 area of the canvas), and ClearAlpha. Despite the name it does NOT zero the alpha - it ORs 0xFF000000 into every pixel of the sprite, i.e. it makes the whole sprite opaque (not clipped by the lock rect, rgb untouched). The pair on the checker shows both sides: a scratch whose only opaque part is one sprite-sized patch (the rest is ARGB 0,0,0,0), drawn over the light/dark checker BEFORE (alpha 0 there, so AlphaBlend contributes nothing and the checker stays) and AFTER ClearAlpha (every pixel opaque, so those same pixels become solid black).", c =>
             {
                 int n = 64 * (int)Math.Sqrt(c.Count);
+                Checker(c, 0, 0);
                 for (int y = 0; y < n; y++)
                     for (int x = 0; x < n; x++)
                     {
@@ -447,8 +492,17 @@ namespace Sr2d64CSport
                         int g = (int)(128 + 60 * v);
                         c.Canvas.SetPixel(c.X + x, c.Y + y, SR2D.ARGB(255, (byte)g, (byte)(255 - g), (byte)(g / 2)) ^ (c.Canvas.GetPixel(c.X + x, c.Y + y) & 0x0F0F0F));
                     }
-                c.Canvas.ClearAlpha();
-            });
+                Sprite t = c.Temp;
+                t.ClearBuffer(0);                                  // the scratch is shared with other tests: start clean
+                t.Draw(c.A.Color, 0, 0, SR2D.Op.Paint);            // one opaque sprite-sized patch; the rest stays ARGB 0,0,0,0
+                int gap = 16, ty = (c.H - t.Height) / 2;
+                int x0 = (c.W - 2 * t.Width - gap) / 2, x1 = x0 + t.Width + gap;
+                c.Canvas.Draw(t, x0, ty, SR2D.Op.AlphaBlend);      // alpha 0 in the three empty quadrants: AlphaBlend adds nothing, the checker stays
+                t.ClearAlpha();                                    // alpha |= 0xFF everywhere, rgb untouched: those empty pixels are now opaque BLACK
+                c.Canvas.Draw(t, x1, ty, SR2D.Op.AlphaBlend);
+                c.Label(x0, ty - 16, "before: alpha 0 where the scratch is empty");
+                c.Label(x1, ty - 16, "after ClearAlpha: every pixel opaque");
+            }).Ui(Param.Count, "Plasma area (x 64*64 px)", Param.Mouse, "Drag the plasma patch", Param.Time, "Animate: the plasma moves");
 
             // ================================================= Original - masked
             T(GMask, "MaskDraw (Op selector)", "Sprite.MaskDraw through the selected mask bit(s); NotMask inverts.",
@@ -457,21 +511,23 @@ namespace Sr2d64CSport
                 c =>
                 {
                     // backdrop: the colour sprite at half brightness everywhere - not part of what the test measures, but
-                    // without it the moving mask is invisible (sprite drawn on sprite)
-                    int dim = SR2D.ARGB(255, 96, 96, 96);
-                    for (int y = 0; y < c.H; y += c.S) for (int x = 0; x < c.W; x += c.S) c.Canvas.MulAddS2X(c.A.Color, x, y, dim, 0);
+                    // without it the moving mask is invisible (sprite drawn on sprite).
+                    // S2X convention: mul 128 = x1.00, add 128 = +0, so half brightness is mul 64 with the NEUTRAL add
+                    // (an add of 0 is -256 per byte: the whole backdrop would collapse to black).
+                    int dim = SR2D.ARGB(128, 64, 64, 64), neutral = SR2D.ARGB(128, 128, 128, 128);
+                    for (int y = 0; y < c.H; y += c.S) for (int x = 0; x < c.W; x += c.S) c.Canvas.MulAddS2X(c.A.Color, x, y, dim, neutral);
                     FixedGrid(c, (x, y) => c.Canvas.MaskDraw(SrcFor(c, c.Op), c.A.Mask, x, y, c.X - c.S / 2, c.Y - c.S / 2, c.MaskBits, c.NotMask, c.Op));
                 }).Ui(Param.Mouse, "Drag the mask", Param.Count, "Sprites the mask is tested against (grid from the top-left)", Param.MaskBits, "Mask shape", Param.NotMask, "Invert the mask", Param.Op, "Blend op (AlphaBlend / AlphaTest pick the alpha / keyed sprite)").With(Param.Count, 16);
             T(GMask, "MaskBlend", "Masked crossfade by BlendFactor.",
                 c => Grid(c, (x, y) => c.Canvas.MaskBlend(c.A.Color, c.A.Mask, x, y, x, y, c.Blend, c.MaskBits, c.NotMask)));
             T(GMask, "MaskClearBuffer", "Fills the masked area with a colour.",
                 c => Grid(c, (x, y) => c.Canvas.MaskClearBuffer(c.A.Mask, x, y, SR2D.ARGB(255, 200, 120, 30), c.MaskBits, c.NotMask)));
-            T(GMask, "MaskMulAddS2X", "Masked multiply/add (Brightness = Mul, Blend = Add).", c =>
+            T(GMask, "MaskMulAddS2X", "Masked multiply/add (Brightness = Mul x128, Blend = Add). The neutral point of both sliders (Mul x1.00 / Add 128) would make this a plain MaskDraw, so the start values are off-neutral.", c =>
             {
                 int m = (int)Math.Clamp(c.Brite * 128, 0, 255); int mul = SR2D.ARGB((byte)m, (byte)m, (byte)m, (byte)m);
                 int add = SR2D.ARGB((byte)c.Blend, (byte)c.Blend, (byte)c.Blend, (byte)c.Blend);
                 Grid(c, (x, y) => c.Canvas.MaskMulAddS2X(c.A.Color, c.A.Mask, x, y, x, y, mul, add, c.MaskBits, c.NotMask));
-            });
+            }).With(Param.Brite, 55).With(Param.Blend, 175);
             T(GMask, "MaskMoveByte / MaskMoveBit", "Masked channel copy (red->green) and bit copy.", c => Grid(c, (x, y) =>
             {
                 c.Canvas.MaskMoveByte(c.A.Color, c.A.Mask, x, y, x, y, SR2D.ColChannel.ChRed, SR2D.ColChannel.ChGreen, c.MaskBits, c.NotMask);
@@ -482,21 +538,21 @@ namespace Sr2d64CSport
             // Bump tests: sprites are stationary (grid from the top-left); the MOUSE is the light.
             // Directional light = direction from the canvas centre to the mouse; point light = mouse position.
             var bumpUi = new object[] { Param.Mouse, "Light follows the mouse (untick: drag the light, right click = jump)", Param.Z, "Light height Z (px)", Param.Brite, "Brightness (x0.01)", Param.Count, "Sprites drawn (grid, centred on the canvas)" };
-            T(GBump, "DrawDPBM directional", "Sprites in a grid centred on the canvas; light direction = vector from the canvas centre to the light (the mouse), height Z, Brightness slider. The cross-hair overlay marks the light.",
-                c => CentredGrid(c, (x, y) => c.Canvas.DrawDPBM(c.A.Normal, x, y, c.X - c.W / 2, c.Y - c.H / 2, c.Z, c.Brite, false))).Ui(bumpUi).With(Param.Mouse, true);
-            T(GBump, "DrawDPBM point light", "Sprites centred; point light at the mouse (DPBM_POINT), height Z, Brightness slider.",
-                c => CentredGrid(c, (x, y) => c.Canvas.DrawDPBM(c.A.Normal, x, y, c.X, c.Y, c.Z, c.Brite, true))).Ui(bumpUi).With(Param.Mouse, true);
-            T(GBump, "DrawDPBM + Mul2X colour", "Point-light bump then the colour sprite multiplied on top - the classic 2-pass look. Light at the mouse.", c => CentredGrid(c, (x, y) =>
+            T(GBump, "DrawDPBM directional", "Sprites in a grid centred on the canvas; light direction = vector from the canvas centre to the light (the mouse), height Z, Brightness slider (the kernel clamps it to 0..1, so the slider is capped at 100 - above that nothing gets brighter). A faint frame marks the light.",
+                c => CentredGrid(c, (x, y) => c.Canvas.DrawDPBM(c.A.Normal, x, y, c.X - c.W / 2, c.Y - c.H / 2, c.Z, c.Brite, false))).Ui(bumpUi).With(Param.Mouse, true).Range(Param.Brite, 0, 100);
+            T(GBump, "DrawDPBM point light", "Sprites centred; point light at the mouse (DPBM_POINT), height Z, Brightness slider (clamped to 0..1 by the kernel).",
+                c => CentredGrid(c, (x, y) => c.Canvas.DrawDPBM(c.A.Normal, x, y, c.X, c.Y, c.Z, c.Brite, true))).Ui(bumpUi).With(Param.Mouse, true).Range(Param.Brite, 0, 100);
+            T(GBump, "DrawDPBM + Mul2X colour", "Point-light bump then the colour sprite multiplied on top - the classic 2-pass look. Light at the mouse. Brightness is clamped to 0..1.", c => CentredGrid(c, (x, y) =>
             {
                 c.Canvas.DrawDPBM(c.A.Normal, x, y, c.X, c.Y, c.Z, c.Brite, true);
                 c.Canvas.Draw(c.A.Color, x, y, SR2D.Op.Mul2X);
-            })).Ui(bumpUi).With(Param.Mouse, true);
-            T(GBump, "MaskDrawDPBM (dir / point = Smooth)", "Masked bump mapping, sprites centred, light at the mouse; 'Smooth' switches to the point-light variant.",
+            })).Ui(bumpUi).With(Param.Mouse, true).Range(Param.Brite, 0, 100);
+            T(GBump, "MaskDrawDPBM (dir / point = Smooth)", "Masked bump mapping, sprites centred, light at the mouse; 'Smooth' switches to the point-light variant. Brightness is clamped to 0..1.",
                 c => CentredGrid(c, (x, y) => c.Canvas.MaskDrawDPBM(c.A.Normal, c.A.Mask, x, y, x, y, c.MaskBits, c.Smooth ? c.X : c.X - c.W / 2, c.Smooth ? c.Y : c.Y - c.H / 2, c.Z, c.Brite, c.NotMask, c.Smooth)))
-                .Ui(bumpUi).Ui(Param.Smooth, "Point light (else directional)", Param.MaskBits, "Mask bits:", Param.NotMask, "NotMask (invert the mask)").With(Param.Mouse, true);
+                .Ui(bumpUi).Ui(Param.Smooth, "Point light (else directional)", Param.MaskBits, "Mask bits:", Param.NotMask, "NotMask (invert the mask)").With(Param.Mouse, true).Range(Param.Brite, 0, 100);
             T(GBump, "DrawEBM (environment map)", "Environment-mapped bump ('fake chrome'): for every pixel the normal's (x, y) is used as a texture coordinate into the ENVIRONMENT image (sky gradient, horizon, sun) - flat areas show the centre of the environment, slopes show sky or ground. The function itself has no light position, so to make it interactive the bench moves the environment: the mouse shifts the environment image (a 256x256 TileDraw into a scratch sprite, ~free), which is what 'the sun moving around a chrome object' looks like; with Animate the sun also orbits with time. The Brightness slider scales the environment (MulAddS2X on the scratch). 'Smooth' = DestSpace variant: the lookup is additionally offset by the canvas position, so the reflection sweeps across the sprite grid instead of repeating per sprite.",
                 c => { var env = ShiftedEnv(c); CentredGrid(c, (x, y) => c.Canvas.DrawEBM(c.A.Normal, env, x, y, c.Smooth)); })
-                .Ui(Param.Mouse, "Environment (sun position) follows the mouse", Param.Brite, "Environment brightness (x0.01)", Param.Smooth, "DestSpace lookup (reflection sweeps across the grid)", Param.Count, "Sprites drawn (grid, centred)", Param.Time, "Animate: the sun orbits").With(Param.Mouse, true);
+                .Ui(Param.Mouse, "Environment (sun position) follows the mouse", Param.Brite, "Environment brightness (x0.01: 100 = unchanged, 0 = black, 200 = x2)", Param.Smooth, "DestSpace lookup (reflection sweeps across the grid)", Param.Count, "Sprites drawn (grid, centred)", Param.Time, "Animate: the sun orbits").With(Param.Mouse, true).Range(Param.Brite, 0, 200);
             T(GBump, "DrawEBM + Mul2X colour", "Same lookup, then the colour sprite multiplied on top: metallic bricks. Mouse = environment / sun position, Brightness = environment intensity.",
                 c => { var env = ShiftedEnv(c); CentredGrid(c, (x, y) => { c.Canvas.DrawEBM(c.A.Normal, env, x, y, c.Smooth); c.Canvas.Draw(c.A.Color, x, y, SR2D.Op.Mul2X); }); })
                 .Ui(Param.Mouse, "Environment (sun position) follows the mouse", Param.Brite, "Environment brightness (x0.01)", Param.Smooth, "DestSpace lookup", Param.Count, "Sprites drawn (grid, centred)", Param.Time, "Animate: the sun orbits").With(Param.Mouse, true);
@@ -525,7 +581,7 @@ namespace Sr2d64CSport
                     using var s = new Sprite(c.A.Color, SR2D.Transform.None, w, h);
                     c.Canvas.Draw(s, (c.W - s.Width) / 2 + k * 16, (c.H - s.Height) / 2 + k * 16, SR2D.Op.Paint);
                 }
-            }).Ui(Param.Scale, "Scale (x0.05 .. x4)", Param.Count, "Copies per frame");
+            }).Ui(Param.Scale, "Scale (x0.05 .. x4)", Param.Count, "Copies per frame").With(Param.Scale, 150);
             T(GXform, "new Sprite(src, RotCW, W*Scale, H*0.6*Scale)  [RESIZE+ROT]", "Resize to W x 0.6 W and rotate 90 degrees clockwise in one constructor (temporary buffer path); the result is drawn centred on the canvas.", c =>
             {
                 int w = Math.Max(2, (int)(c.S * c.Scale)), h = Math.Max(2, (int)(c.S * c.Scale * 0.6f));
@@ -565,10 +621,10 @@ namespace Sr2d64CSport
                     Checker(c, 0, 0);
                     c.Canvas.Draw(s, (c.W - s.Width) / 2, (c.H - s.Height) / 2, SR2D.Op.AlphaBlend);
                     c.Label(4, 4, $"{s.Width} x {s.Height}");
-                }, warp: true, needsFx: true, needsFlood: true, clears: true).Ui(Param.Op, "Edit list", Param.Count, "Edits per frame", Param.Angle, "Rotate angle / hue", Param.Scale, "Scale / margin / blur", Param.Smooth, "Bicubic (off = Nearest)", Param.NotMask, "Rotate: Grow", Param.Blend, "Fade", Param.Brite, "Brightness", Param.Mouse, "Scroll offset (Scroll / Shift list)").Ops("Flips + quarter turns", "Rotate(degrees)", "Scroll / Shift", "Expand / Trim", "Scale / Resize", "Colour (Invert, Grayscale, Hue, Adjust, Fade)", "Apply(Effects)", "Region edit (lock rect)", "Selection.Rotate90 / FlipX").With(Param.Op, 1).With(Param.Count, 1);
+                }, warp: true, needsFx: true, needsFlood: true, clears: true).Ui(Param.Op, "Edit list", Param.Count, "Edits per frame", Param.Angle, "Rotate angle / hue", Param.Scale, "Scale / margin / blur", Param.Smooth, "Bicubic (off = Nearest)", Param.NotMask, "Rotate: Grow", Param.Blend, "Fade", Param.Brite, "Brightness", Param.Mouse, "Scroll offset (Scroll / Shift list)").Ops("Flips + quarter turns", "Rotate(degrees)", "Scroll / Shift", "Expand / Trim", "Scale / Resize", "Colour (Invert, Grayscale, Hue, Adjust, Fade)", "Apply(Effects)", "Region edit (lock rect)", "Selection.Rotate90 / FlipX").With(Param.Op, 1).With(Param.Count, 1).With(Param.Angle, 35);   // the list opens on Rotate: at the generic Angle 0 it would be Rotate(0 deg) = nothing happens
 
             // ======================================================= Scenes
-            T(GScene, "Scene A: 4x DPBM point + 4x Mul2X (user's PointLite branch)", "Exactly the user's first Render() block, on a 512x512 quadrant grid.", c =>
+            T(GScene, "Scene A: 4x DPBM point + 4x Mul2X (user's PointLite branch)", "Exactly the user's first Render() block: four point-light bumps on a 2x2 grid of S x S quadrants (S = the sprite size in the strip) plus the colour sprite multiplied over each one. Count = the WHOLE block repeated per frame (timing) - it is not a copy placement, and because Mul2X is inside the loop every extra pass multiplies the colour in again, so raising Count darkens the scene.", c =>
             {
                 for (int k = 0; k < c.Count; k++)
                 {
@@ -581,16 +637,18 @@ namespace Sr2d64CSport
                     c.Canvas.Draw(c.A.Color, 0, c.S, SR2D.Op.Mul2X);
                     c.Canvas.Draw(c.A.Color, c.S, c.S, SR2D.Op.Mul2X);
                 }
-            }, clears: true);
-            T(GScene, "Scene B: DPBM dir + Mul + TileDraw (user's else branch)", "Exactly the user's second Render() block: bump into Temp, multiply colour, tile Temp over the canvas.", c =>
+            }, clears: true).Ui(Param.Mouse, "Point light (the mouse)", Param.Z, "Light height Z (px)", Param.Count, "Whole block repeats per frame (each one multiplies again - timing)");
+            T(GScene, "Scene B: DPBM dir + Mul + TileDraw (user's else branch)", "Exactly the user's second Render() block: the directional bump into a scratch the size of one sprite, the colour sprite multiplied into it, then that cell tiled over the whole canvas. The cell is its own S x S sprite, NOT a CreateView of the 2S x 2S Temp: a view is only a WRITE clip - Draw / TileDraw read the source's full meWidth x meHeight extent, so tiling a view tiles the whole scratch. And the bump kernel writes d = 0x10101 * dot(normal, light), i.e. it leaves the ALPHA byte at 0, so the tiled Paint blit would clear the canvas to transparent - ClearAlpha() (alpha |= 0xFF, see that test) makes the cell opaque again. Count = the whole block repeated per frame (timing only - the cell is rebuilt every pass).", c =>
             {
+                if (tcell == null || tcell.Width != c.S) { tcell?.Dispose(); tcell = new Sprite(c.S, c.S); }
                 for (int k = 0; k < c.Count; k++)
                 {
-                    c.Temp.DrawDPBM(c.A.Normal, 0, 0, c.X - c.S, c.Y - c.S, c.Z, 1);
-                    c.Temp.Draw(c.A.Color, 0, 0, SR2D.Op.Mul);
-                    c.Canvas.TileDraw(c.Temp, 0, 0, c.W, c.H);
+                    tcell.DrawDPBM(c.A.Normal, 0, 0, c.X - c.S, c.Y - c.S, c.Z, 1);
+                    tcell.Draw(c.A.Color, 0, 0, SR2D.Op.Mul);
+                    tcell.ClearAlpha();                                                 // the bump left alpha 0: without this the tile below paints the whole canvas transparent
+                    c.Canvas.TileDraw(tcell, 0, 0, c.W, c.H);
                 }
-            }, clears: true);
+            }, clears: true).Ui(Param.Mouse, "Light direction (the mouse, around the cell centre)", Param.Z, "Light height Z (px)", Param.Count, "Whole block repeats per frame (each one multiplies again - timing)");
             T(GScene, "Scene C: particles (AlphaBlend x Count*50)", "Count*50 alpha-blended glow sprites, moving - a typical particle workload.", c =>
             {
                 int n = c.Count * 50;
@@ -617,7 +675,7 @@ namespace Sr2d64CSport
                 for (int k = 0; k < c.Count; k++)
                     c.Canvas.DrawScaled(SrcFor(c, c.Op), c.X + k * 10, c.Y + k * 10, c.Scale, c.ScaleY, c.PivotXF, c.PivotYF, c.Op, Filt(c), c.Blend);
                 c.Note = $"{w} x {h} px, pivot {(c.PivotXF < 0 ? "centre" : $"{c.PivotXF:0},{c.PivotYF:0}")}";
-            }, warp: true).Ui(Param.Scale, "Width scale (x0.01) - height by dragging the top / bottom edge", Param.Smooth, "Bilinear (else nearest)", Param.Op, "Blend op", Param.Blend, "Blend factor (Op.Blend)", Param.Count, "Copies per frame", Param.NotMask, "Benchmark: stretch the sprite over the whole canvas", Param.Mouse, "Drag = move, edges = resize, right click = pivot");
+            }, warp: true).Ui(Param.Scale, "Width scale (x0.01) - height by dragging the top / bottom edge", Param.Smooth, "Bilinear (else nearest)", Param.Op, "Blend op", Param.Blend, "Blend factor (Op.Blend)", Param.Count, "Copies per frame", Param.NotMask, "Benchmark: stretch the sprite over the whole canvas", Param.Mouse, "Drag = move, edges = resize, right click = pivot").With(Param.Scale, 150);
             t.Resizable = true; t.PivotByClick = true;
             T(GNew, "Downscale filters: Nearest | Bilinear | Area | BilinearArea", "A 2048x2048 test card (1-px grid, dense 1-px lines, 1-px checker) drawn 4 times side by side at Scale/4 of the canvas height. Nearest and Bilinear drop lines as soon as the factor exceeds 2x; the Area filters keep everything (they average the source by the integer shrink factor first).", c =>
             {
@@ -632,7 +690,7 @@ namespace Sr2d64CSport
             {
                 Sprite s = c.A.Color;
                 int crop = 64; if (crop > s.Width) crop = s.Width;
-                using Sprite v = s.CreateView(new Rectangle((s.Width - crop) / 2, (s.Height - crop) / 2, crop, crop));
+                using Sprite v = s.Clone(new Rectangle((s.Width - crop) / 2, (s.Height - crop) / 2, crop, crop));   // Clone = a real crop; a CreateView would still blit the whole sprite
                 int size = (int)(crop * 8 * c.Scale); if (size < 8) size = 8;
                 int gap = 8, colW = (c.W - 2 * gap) / 3, top = 96, thumb = 128, panelH = c.H - top - thumb - 40;
                 // scroll: the mouse position is an offset from the canvas centre; the results follow it (clamped so
@@ -738,7 +796,7 @@ namespace Sr2d64CSport
                 for (int k = 0; k < c.Count; k++) c.Canvas.DrawQuad(SrcFor(c, c.Op), q, hex, c.Op, Filt(c), c.Blend);
             }, warp: true);
 
-            T(GNew, "DrawLine2 - fan (dashes along the line)", "Same fan as the original DrawLine test but with DrawLine2: dash pattern from the dot-step slider (dot = gap = step*2 px), animated phase. Op selector: Paint=Set, AlphaBlend, Add, Max, Min; XOR checkbox.", c =>
+            T(GNew, "DrawLine2 - fan (dashes along the line)", "Same fan as the original DrawLine test but with DrawLine2: dash pattern from the dot-step slider (dot = gap = step*2 px, measured ALONG the line so every direction looks equally dense), animated phase. The dot-step slider starts at 3 - at 0 the dash length is 0 and DrawLine2 draws solid lines, exactly like the original test, with nothing to compare. Op selector: Paint=Set, AlphaBlend, Add, Max, Min; XOR checkbox.", c =>
             {
                 int n = c.Count * 64;
                 float dash = c.DotStep * 2f;
@@ -747,9 +805,9 @@ namespace Sr2d64CSport
                 {
                     float a = i * MathF.PI * 2 / n + c.Time * 0.2f;
                     int col = SR2D.ARGB(160, (byte)(128 + 127 * MathF.Sin(a)), (byte)(128 + 127 * MathF.Sin(a + 2)), (byte)(128 + 127 * MathF.Sin(a + 4)));
-                    c.Canvas.DrawLine2(c.X, c.Y, c.X + MathF.Cos(a) * c.W, c.Y + MathF.Sin(a) * c.W, col, op, dash, dash, c.Time * 30f);
+                    c.Canvas.DrawLine2(c.X, c.Y, c.X + MathF.Cos(a) * c.W, c.Y + MathF.Sin(a) * c.H, col, op, dash, dash, c.Time * 30f);
                 }
-            }, warp: true, needsLine2: true);
+            }, warp: true, needsLine2: true).Ui(Param.DotStep, "Dash length x2 px (also the gap; 0 = solid)", Param.Xor, "XOR the dashes", Param.Op, "Line op", Param.Count, "Lines / 64", Param.Time, "Animate: the fan turns and the dash phase marches").With(Param.DotStep, 3);
             T(GNew, "DrawPolyline2 - marching ants", "Dashed closed polyline (star around the mouse) with the phase animated; the pattern is continuous across corners.", c =>
             {
                 Span<PointF> poly = stackalloc PointF[10];
@@ -773,7 +831,7 @@ namespace Sr2d64CSport
                 int col = SR2D.ARGB(160, 255, 220, 60);
                 for (int k = 0; k < c.Count; k++) c.Canvas.DrawPolyline(poly, col, MathF.Max(1f, c.Scale * 8f), c.Smooth, true, op, true, c.Blend);
             }, needsPoly: true, needsLine2: true);
-            T(GText, "DrawText - pixel font (scale / weight / colour / ops)", "Sprite.DrawText: the built-in 5x7 PixelFont drawn with ClearRect runs (Set) or FillRect + LineOp. Scale slider = pixel size (x0.01 -> 1..4), Blend = stroke weight (0..3 extra px), Brite = letter spacing (-2..+6), Op selector: Set / AlphaBlend (alpha 160) / Xor / Add; Smooth = draw a background box; Count = how many lines (timing). Drag = anchor point (TextAnchor.Center); the label shows what the frame cost.", c =>
+            T(GText, "DrawText - pixel font (scale / weight / colour / ops)", "Sprite.DrawText: the built-in 5x7 PixelFont drawn with ClearRect runs (Set) or FillRect + LineOp. Scale slider = pixel size (x0.01, clamped to 1..8), Blend = stroke weight (0..255 -> 0..3 extra px) AND the BlendFactor handed to DrawText, Brite = letter spacing (x4 px, clamped -2..8), Op selector: Set / AlphaBlend (alpha 160) / Xor / Add; Smooth = draw a background box; Count = how many lines (timing). Drag = anchor point (TextAnchor.Center); the label shows what the frame cost.", c =>
             {
                 int scale = Math.Clamp((int)MathF.Round(c.Scale), 1, 8), weight = Math.Clamp(c.Blend / 64, 0, 3), spacing = Math.Clamp((int)MathF.Round(c.Brite * 4), -2, 8);
                 var op = c.Xor ? SR2D.LineOp.Xor : c.Op switch { SR2D.Op.AlphaBlend => SR2D.LineOp.AlphaBlend, SR2D.Op.Add => SR2D.LineOp.Add, SR2D.Op.Blend => SR2D.LineOp.Blend, _ => SR2D.LineOp.Set };
@@ -791,16 +849,19 @@ namespace Sr2d64CSport
                 c.Canvas.DrawText(c.W - 8, c.H - 8, "BottomRight, weight 1, spacing 2", SR2D.ARGB(255, 255, 255, 255), SR2D.ARGB(255, 20, 60, 20), 1, 1, 2, SR2D.LineOp.Set, 128, TextAnchor.BottomRight);
                 c.Canvas.DrawText(8, c.H - 8, "multi\nline\ntext", SR2D.ARGB(255, 120, 255, 160), 0, 2, 0, 0, SR2D.LineOp.Set, 128, TextAnchor.BottomLeft);
                 c.Note = $"{c.Count} line(s) x {line.Length} chars, scale {scale}, weight {weight}, spacing {spacing}, {op}";
-            }, needsPoly: true, needsLine2: true).Ui(Param.Mouse, "Drag the text block (anchor = its centre)", Param.Scale, "Pixel size (x0.01, rounded to 1..8)", Param.Blend, "Weight (0..255 -> 0..3 extra px)", Param.Brite, "Letter spacing (x4 px, -2..8)", Param.Op, "Op: Paint=Set | AlphaBlend | Add | Blend (others = Set)", Param.Xor, "XOR text", Param.Smooth, "Background box", Param.Count, "Lines drawn").With(Param.Scale, 200).With(Param.Blend, 0).With(Param.Brite, 0).With(Param.Count, 3).Range(Param.Scale, 100, 800);
+            }, needsPoly: true, needsLine2: true).Ui(Param.Mouse, "Drag the text block (anchor = its centre)", Param.Scale, "Pixel size (x0.01, rounded to 1..8)", Param.Blend, "Weight (0..255 -> 0..3 extra px; it is ALSO the BlendFactor - with Op = Blend the text fades out as it thins)", Param.Brite, "Letter spacing (x4 px, -2..8)", Param.Op, "Op: Paint=Set | AlphaBlend | Add | Blend (others = Set)", Param.Xor, "XOR text", Param.Smooth, "Background box", Param.Count, "Lines drawn").With(Param.Scale, 200).With(Param.Blend, 96).With(Param.Brite, 0).With(Param.Count, 3).Range(Param.Scale, 100, 800);
 
-            T(GControls, "SpriteKnob / SpriteSlider (strip above the canvas)", "Ordinary WinForms controls (cs/SpriteControls.cs, derived from SpriteBox, usable on any form / designer) drawn with SR2D. SpriteKnob is modular - three independent choices: DragMode (Angular = the knob faces the pointer; Endless = press to jump, then keep circling, Turns turns for the whole range), Gauge (Arc = 270-degree C; Circle = one full turn; Rings = one ring per turn; Spiral = a real spiral with Turns coils lit along its length; None) and Pointer (Bounded = it stops at the ends; Infinite = a jog wheel: the pointer spins for ever, only the value and the gauge stop). The Offset knob has all of them switchable next to it. Sizes: everything scales with the control Size; TextScale fixes the font size (Blend knob = 2), 0 = automatic (small knobs). The strip is two rows, the canvas below is shortened so every control is visible. Sliders: horizontal (Scale, with a native TrackBar bound to the same value - compare a quick drag) and vertical (Brite). The value is computed from the absolute pointer position on every mouse message and the control repaints synchronously, so a quick drag never lags. Wheel (Shift = fine), arrows / PgUp / PgDn / Home / End, double click = reset value. SpriteWheel (cs/SpriteControls.Wheel.cs) is a drum picker - a NumericUpDown whose buttons are a wheel: vertical (Blur, Editable = a text box to type / paste) and horizontal (Hue: WrapAround 0..360 and WrapMouse - the pointer is put back at the opposite edge when it leaves the control, so the drum turns for ever; the second Hue wheel has WrapMouse off and a text box). CommitOnRelease (all): the thumb / knob lifts while you drag, a ghost marks the committed value, release drops it and applies the value once; Escape cancels. The canvas shows the sprite driven by the controls.", c =>
+            T(GControls, "SpriteKnob / SpriteSlider (strip above the canvas)", "Ordinary WinForms controls (cs/SpriteControls.cs, derived from SpriteBox, usable on any form / designer) drawn with SR2D. SpriteKnob is modular - three independent choices: DragMode (Angular = the knob faces the pointer; Endless = press to jump, then keep circling, Turns turns for the whole range), Gauge (Arc = 270-degree C; Circle = one full turn; Rings = one ring per turn; Spiral = a real spiral with Turns coils lit along its length; None) and Pointer (Bounded = it stops at the ends; Infinite = a jog wheel: the pointer spins for ever, only the value and the gauge stop). The Offset knob has all of them switchable next to it. Sizes: everything scales with the control Size; TextScale picks the font size explicitly (Blend knob = 2), and 0 (the default) is the smallest pixel-font size - which is what the tiny knobs use. The strip is two rows with a scroll bar when the window is too narrow for them; the canvas below is shortened to make room. Sliders: horizontal (Scale, with a native TrackBar bound to the same value - compare a quick drag) and vertical (Brite). A slider or an Angular knob takes its value from the absolute pointer position on every mouse message; an Endless / Infinite knob and a wheel work off relative angle / pixel deltas. Either way the control repaints synchronously, so a quick drag never lags. Wheel (Shift = fine), arrows / PgUp / PgDn / Home / End, double click = reset value (on a wheel double click opens the edit field instead - Ctrl + double click resets it). SpriteWheel (cs/SpriteControls.Wheel.cs) is a range control whose spin buttons are replaced by a draggable drum: vertical (Blur, Edit = Beside keeps an SR2D numeric field next to it to type / paste into) and horizontal (Hue: WrapAround 0..360 and WrapMouse - when the pointer reaches the SCREEN edge it is put back at the opposite edge, so the drum turns for ever; the second Hue wheel has WrapMouse off and a text box that opens on a plain click). CommitOnRelease (all): the thumb / knob lifts while you drag, a ghost marks the committed value, release drops it and applies the value once; Escape cancels. The canvas shows the sprite driven by the controls.", c =>
             {
                 float sc = (float)ControlsDemo.ScalePct / 100f;
                 int w = (int)(c.S * sc), h = (int)(c.S * sc);
                 float ang = (float)ControlsDemo.AngleDeg * MathF.PI / 180f;
                 int m = (int)Math.Clamp(ControlsDemo.Brite * 1.28, 0, 255), mul = SR2D.ARGB((byte)m, (byte)m, (byte)m, (byte)m);
                 c.Temp.ClearBuffer(0);
-                c.Temp.MulAddS2X(c.A.Color, 0, 0, mul, 0);
+                // the scratch is 2S x 2S and the sprite is S x S, so tile it 2x2 - a single copy would leave three
+                // empty quadrants, and Op.Blend ignores alpha: those quadrants would paint flat grey over the disc.
+                for (int ty = 0; ty < 2; ty++) for (int tx = 0; tx < 2; tx++)
+                    c.Temp.MulAddS2X(c.A.Color, tx * c.S, ty * c.S, mul, SR2D.ARGB(128, 128, 128, 128));   // add 128 per byte = +0; an add of 0 would be -256 and collapse the sprite to nothing
                 int cx = c.W / 2 + (int)ControlsDemo.Offset, cy = c.H / 2;
                 // the wheels: a hue-tinted backdrop disc (Hue wheel, wraps) and a blur level (Level wheel) on the sprite
                 int tint = LightsDemo.HueToArgb(ControlsDemo.Hue);
@@ -814,14 +875,18 @@ namespace Sr2d64CSport
                 c.Note = "controls strip above the canvas";
             }, warp: true, needsPoly: true, needsLine2: true).Ui(Param.Smooth, "Bilinear filter for the rotated sprite").Also(t => t.ControlStrip = ControlsDemo.Build);
 
-            T(GControls, "SpriteButton / SpriteToggle / SpriteRadio / SpriteProgress", "The rest of the control set (cs/SpriteControls.Buttons.cs), same look as the knob: SpriteButton (Rounded / Pill / Square / Round shape, Accented = primary), SpriteToggle in four styles (Switch = sliding pill, Ellipse = circle inside an ellipse, Rocker = two-part tipping button with I / O, CheckBox = tick box), SpriteRadio (exclusive within the parent + GroupName - two groups here) and SpriteProgress (Horizontal / Vertical / Ring; continuous, Segments = LED bar, Marquee = indeterminate). Start runs a fake 8-second job that drives every progress bar (the sprite fades in with it, the marquee ring spins while it runs), Pause / Resume and Reset do what they say, Step adds 10 %. The toggles switch spin / bilinear / backdrop / grid on the canvas, the radios pick the draw Op and the size. Keyboard: Tab between the controls, Space / Enter presses, arrows do nothing on these (they are for the knobs). Everything repaints synchronously on the mouse message, like the knobs.", c =>
+            T(GControls, "SpriteButton / SpriteToggle / SpriteRadio / SpriteProgress", "The rest of the control set (cs/SpriteControls.Buttons.cs), same look as the knob: SpriteButton (Rounded / Pill / Square / Round shape, Accented = primary), SpriteToggle in four styles (Switch = sliding pill, Ellipse = circle inside an ellipse, Rocker = two-part tipping button with I / O, CheckBox = tick box), SpriteRadio (exclusive within the parent + GroupName - two groups here) and SpriteProgress (Horizontal / Vertical / Ring; continuous, Segments = LED bar, Marquee = indeterminate). Start runs a fake 8-second job that drives every progress bar (the sprite fades in with it, the marquee ring spins while it runs), Pause / Resume and Reset do what they say, Step adds 10 %. The toggles switch spin / bilinear / backdrop / grid on the canvas, the radios pick the draw Op and the size. Note that the Paint op has no opacity of its own, so while the job is running the 'Paint' radio quietly draws through Blend instead - that is the only way it can fade in. Keyboard: Tab between the controls, Space / Enter presses, arrows do nothing on these (they are for the knobs). Everything repaints synchronously on the mouse message, like the knobs.", c =>
             {
                 double p = ControlsDemo.Progress / 100.0;
                 float sc = ControlsDemo.SizeChoice switch { 0 => 0.5f, 2 => 1.4f, _ => 1f };
-                int w = (int)(c.S * sc), h = w;
+                // small viewport in the corner: the strip's toggles act on what it shows
+                int vw = Math.Min(470, Math.Max(80, c.W - 24)), vh = Math.Min(310, Math.Max(60, c.H - 24));
+                int vx = 12, vy = 12;
+                int w = (int)(vh * 0.62f * sc), h = w;
                 float ang = ControlsDemo.Spin ? c.Time * 0.9f : 0f;
-                int cx = c.W / 2, cy = c.H / 2;
-                if (ControlsDemo.Grid) for (int g = 32; g < Math.Max(c.W, c.H); g += 32) { if (g < c.W) c.Canvas.DrawLine(g, 0, g, c.H - 1, unchecked((int)0xFF303840)); if (g < c.H) c.Canvas.DrawLine(0, g, c.W - 1, g, unchecked((int)0xFF303840)); }
+                int cx = vx + vw / 2, cy = vy + vh / 2;
+                c.Canvas.FillRect(vx, vy, vw, vh, unchecked((int)0xFF101418));
+                if (ControlsDemo.Grid) for (int g = 32; g < Math.Max(vw, vh); g += 32) { if (g < vw) c.Canvas.DrawLine(vx + g, vy, vx + g, vy + vh - 1, unchecked((int)0xFF303840)); if (g < vh) c.Canvas.DrawLine(vx, vy + g, vx + vw - 1, vy + g, unchecked((int)0xFF303840)); }
                 if (ControlsDemo.Backdrop) { float r = w * 0.8f; c.Canvas.FillRect(cx - r, cy - r, 2 * r, 2 * r, unchecked((int)0xFFD8DCE0), SR2D.LineOp.Set, true); }
                 var op = ControlsDemo.OpChoice switch { 1 => SR2D.Op.AlphaBlend, 2 => SR2D.Op.Add, 3 => SR2D.Op.Blend, _ => SR2D.Op.Paint };
                 var src = op == SR2D.Op.AlphaBlend ? c.A.Alpha : c.A.Color;
@@ -829,12 +894,42 @@ namespace Sr2d64CSport
                 int blend = started ? (int)Math.Round(255 * p) : 255;                // the job fades the sprite in; idle = fully visible
                 if (op == SR2D.Op.Paint && blend < 255) { op = SR2D.Op.Blend; }     // "Paint" fades in via Blend until the job is done
                 c.Canvas.DrawRotate2(src, cx, cy, ang, w, h, -1, -1, op, ControlsDemo.Bilinear ? SR2D.Filter.Bilinear : SR2D.Filter.Nearest, blend);
+                c.Canvas.DrawRect(vx + 0.5f, vy + 0.5f, vw - 1, vh - 1, unchecked((int)0xFF707880), 1f, false, SR2D.LineOp.AlphaBlend);   // the viewport rim
                 c.Info($"job {ControlsDemo.Progress:0}% {(ControlsDemo.Running ? "running" : ControlsDemo.Progress >= 100 ? "done" : ControlsDemo.Progress > 0 ? "paused" : "idle")}  op {op}  size {sc:0.0}x  spin {ControlsDemo.Spin}  bilinear {ControlsDemo.Bilinear}");
                 c.Info($"{ControlsDemo.Events} control events so far, last: {ControlsDemo.LastSource}");
-                c.Note = "controls strip above the canvas";
+                c.Note = "corner viewport; the strip's buttons / toggles / radios drive it";
             }, warp: true, needsPoly: true, needsLine2: true).Also(t => { t.ControlStrip = ControlsDemo.BuildButtons; t.StripHeight = ControlsDemo.ButtonsStripHeight; });
 
-            T(GControls, "SpriteLabel / GroupBox / Tabs / TextBox / Numeric / Combo / ListBox / LED", "The form furniture in the same look (cs/SpriteControls.Static.cs + SpriteControls.Input.cs), arranged as a small settings form on the strip: SpriteTabControl (three pages; Left / Right keys, the wheel over the strip), SpriteGroupBox with a check box in its caption (unchecking disables everything inside - the 'Enable group' switch on the right is bound to it both ways), SpriteLabel in five styles (Plain / Heading with a rule / Muted / Readout / Badge, AutoSize like a Label, word wrap on the About page), SpriteTextBox (caret, mouse + Shift selection, double click = word, Ctrl+A/C/X/V, Home / End, Ctrl+arrows, placeholder, PasswordChar; Enter or focus loss commits, Escape reverts), SpriteNumeric (spin buttons with auto-repeat, Up / Down / PgUp / PgDn, wheel, Shift = a tenth, a Unit suffix, typed garbage is rejected), SpriteCombo (opens an SR2D menu; Up / Down and the wheel change it without opening, first letter jumps), SpriteListBox (SR2D scroll bar, multi selection with Shift / Ctrl, check boxes, Ctrl+A, first-letter search, double click / Enter = ItemActivated), SpriteLed (round / square / bar; lit = glowing, Blink, Clickable = a tiny toggle), SpriteSeparator, SpritePanel (Sunken / Raised / Outline / Flat). Containers hand their face colour to the SpriteControls inside (a knob on a sunken panel needs no BackColor). The canvas draws Copies sprites in the chosen Layout with the caption, tinted by the Hue when the LED is on, framed when the group is enabled, with the checked list items as tags.", c =>
+            T(GControls, "SpriteColorPicker / SpriteColorDialog (colour, on its own test)", "The colour controls on their own test: LEFT - SpriteColorPicker (cs/SpriteControls.Color.cs) as a plain control, the same HSV area + strip + alpha slider + hex box + six-scheme numeric column the dialog uses, as a Value / ValueChanged control for any form; the canvas shows a big swatch of its colour. ON THE CANVAS - the embedded SpriteColorDialog beside the corner viewport: OK paints the viewport's background (instant, no modal loop - it stays open while the picture answers), Cancel reverts. The dialog's preview doubles as the eyedropper: press it, sweep anywhere on the screen, release - one click (or the release after a sweep) takes that pixel's colour and restores the cursor; Esc or right click cancels.", c =>
+            {
+                // corner viewport painted by the dialog's OK (ViewBack), the strip's picker colour as a swatch beside it
+                int vw = Math.Min(470, Math.Max(80, c.W - 24)), vh = Math.Min(310, Math.Max(60, c.H - 24));
+                int vx = 12, vy = 12;
+                c.Canvas.FillRect(vx, vy, vw, vh, ColorDemo.ViewBack);
+                c.Canvas.DrawRect(vx + 0.5f, vy + 0.5f, vw - 1, vh - 1, unchecked((int)0xFF707880), 1f, false, SR2D.LineOp.AlphaBlend);
+                var pc = Color.FromArgb(ColorDemo.PickerArgb);
+                // The swatch sits right of the embedded dialog, wherever it actually is. The old fixed offset from the
+                // viewport (vx + vw + 280) put its left edge at 762 while the dialog spans 498..774, so the first 12 px
+                // of the swatch were painted under it - and a narrower canvas buried the whole thing.
+                int sx = ColorDemo.ColorOverlay is { Visible: true } ov ? Math.Max(vx + vw + 16, ov.Right + 8) : vx + vw + 300;
+                int sw = Math.Min(220, Math.Max(8, c.W - sx - 12)), sh = Math.Min(220, Math.Max(40, c.H - 24));
+                c.Canvas.FillRect(sx, vy, sw, sh, ColorDemo.PickerArgb, SR2D.LineOp.Set, true);
+                c.Canvas.DrawRect(sx + 0.5f, vy + 0.5f, sw - 1, sh - 1, unchecked((int)0xFF707880), 1f, false, SR2D.LineOp.AlphaBlend);
+                c.Info($"picker #{ColorDemo.PickerArgb & 0xFFFFFF:X6}  alpha {(ColorDemo.PickerArgb >> 24) & 255}  hue {Math.Round(pc.GetHue())}  viewport #{ColorDemo.ViewBack & 0xFFFFFF:X6}");
+                c.Info($"{ColorDemo.Edits} colour events so far, last: {ColorDemo.LastAction}");
+                c.Note = "the dialog (beside the viewport) paints the viewport's background on OK; the strip's picker drives the swatch";
+            }, needsPoly: true).Also(t => { t.ControlStrip = ColorDemo.Build; t.StripHeight = ColorDemo.StripHeight; });
+
+            T(GControls, "Discrete values: Values / PowersOfTwo / notches / labels", "The snapping mode of the range controls (cs/SpriteControls.cs): 'Snap+Step 2' is the arithmetic grid (Snap + Step = every 2), 'Powers of two' is PowersOfTwo (the powers of two inside Minimum..Maximum - the list follows range changes), 'Predetermined' is an explicit Values list (0 0.5 1.5 3 4 - sorted and de-duplicated automatically, EVEN spacing: the thumb sits between the entries, not at their numeric position), the Gear KNOB shows the same on a rotary control with ticks and numbers around the body, and the Numeric snaps to the powers of two as well (buttons / arrows / wheel / typing all pick the nearest entry; the buttons step one ENTRY at a time, never value + Step, which would get stuck between two entries). ShowNotches draws a tick per value, NotchLabels prints it (marks that would overlap the numbers are skipped). Every input snaps to the nearest entry: drags, wheel, keys, typed text, code. The 'Predetermined' slider has CommitOnRelease on, so dragging it previews the snapped thumb and only applies the value when you let go. The caption below shows the last value each control delivered.", c =>
+            {
+                c.Canvas.ClearBuffer(unchecked((int)0xFF14181E));
+                c.Canvas.DrawText(20, 20, $"last: {DiscreteDemo.Last}", unchecked((int)0xFFE0E0E0), 0, TextAnchor.TopLeft, 2);
+                c.Canvas.DrawText(20, 70, $"snap2 {DiscreteDemo.Steps:0.##}   pow2 {DiscreteDemo.Pow2:0}   list {DiscreteDemo.List:0.###}   gear {DiscreteDemo.Num:0.##}   numeric {DiscreteDemo.NumV:0}", unchecked((int)0xFF9FC0E0), 0, TextAnchor.TopLeft, 2);
+                c.Canvas.DrawText(20, 120, "wheel / arrows / buttons step ONE list entry - drags and typing snap to the NEAREST entry", unchecked((int)0xFF808090), 0, TextAnchor.TopLeft);
+                c.Canvas.DrawText(20, 150, $"changes: {ControlsDemo.Events}", unchecked((int)0xFF808090), 0, TextAnchor.TopLeft);
+            }, clears: true)
+                .Also(m => m.ControlStrip = () => DiscreteDemo.Build()).Also(m => m.StripHeight = DiscreteDemo.StripHeight);
+T(GControls, "SpriteLabel / GroupBox / Tabs / TextBox / Numeric / Combo / ListBox / LED", "The form furniture in the same look (cs/SpriteControls.Static.cs + SpriteControls.Input.cs), arranged as a small settings form on the strip: SpriteTabControl (three pages; Left / Right keys, the wheel over the strip), SpriteGroupBox with a check box in its caption (unchecking disables everything inside - the 'Enable group' switch on the right is bound to it both ways), SpriteLabel in five styles (Plain / Heading with a rule / Muted / Readout / Badge, AutoSize like a Label, word wrap on the About page), SpriteTextBox (caret, mouse + Shift selection, double click = word, Ctrl+A/C/X/V, Home / End, Ctrl+arrows, placeholder, PasswordChar; Enter or focus loss commits, Escape reverts), SpriteNumeric (spin buttons with auto-repeat, Up / Down / PgUp / PgDn, wheel, Shift = a tenth, a Unit suffix, typed garbage is rejected), SpriteCombo (opens an SR2D menu; Up / Down and the wheel change it without opening, first letter jumps), SpriteListBox (SR2D scroll bar, multi selection with Shift / Ctrl, check boxes, Ctrl+A, first-letter search, double click / Enter = ItemActivated), SpriteLed (round / square / bar; lit = glowing, Blink, Clickable = a tiny toggle), SpriteSeparator, SpritePanel (Sunken / Raised / Outline / Flat). Containers hand their face colour to the SpriteControls inside (a knob on a sunken panel needs no BackColor). The canvas draws Copies sprites in the chosen Layout with the caption, tinted by the Hue when the LED is on, framed when the group is enabled, with the checked list items as tags.", c =>
             {
                 int n = Math.Max(1, FormDemo.Copies), gap = FormDemo.Spacing, w = c.S, h = c.S;
                 int cx = c.W / 2, cy = c.H / 2;
@@ -863,7 +958,7 @@ namespace Sr2d64CSport
                 c.Note = "controls strip above the canvas";
             }, needsFx: true).Also(t => { t.ControlStrip = FormDemo.Build; t.StripHeight = FormDemo.StripHeight; });
 
-            T(GControls, "SpriteBox SizeMode: zoom / pan / scroll bars / navigation", "SpriteBox with a SizeMode (cs/SpriteBox.View.cs): the Surface is ImageSize (1600 x 1200 here, drawn by the Render handler exactly as before) and is placed like a PictureBox image - CenterImage (1:1), StretchImage, Zoom (fit, borders), Fill (cover, clipped), FitWidth, FitHeight - times a Zoom multiplier, moved by Pan. Only the visible pixels are ever resampled (a 64x zoom costs the same as 1x; shrinking below 1/2 uses a cached box-averaged copy), and the composed screen is cached until the view or the picture changes. Navigation like Photoshop: the plain cursor is a magnifier (drag left / right = scrubby zoom about the pressed point, click = in, Alt + click = out), Space or the middle button = hand, release while moving = the image keeps sliding (Inertia, Friction), free pan may push up to Overscroll of the image out of the view, wheel scrolls (Shift sideways, Ctrl zooms), right click = context menu (modes, zoom, reset), SR2D scroll bars (SpriteScrollBar) appear when the image is larger than the view. ImageAt(clientPoint) maps the mouse to the image pixel (extrapolated outside, with an Inside flag) - shown below the strip while you hover. None = the classic SpriteBox (surface = client area).", c =>
+            T(GControls, "SpriteBox SizeMode: zoom / pan / scroll bars / navigation", "SpriteBox with a SizeMode (cs/SpriteBox.View.cs): the Surface is ImageSize (1600 x 1200 here, drawn by the Render handler exactly as before) and is placed like a PictureBox image - CenterImage (1:1), StretchImage, Zoom (fit, borders), Fill (cover, clipped), FitWidth, FitHeight - times a Zoom multiplier, moved by Pan. Only the visible pixels are ever resampled (a 64x zoom costs the same as 1x; shrinking below 1/2 uses a cached box-averaged copy), and the composed screen is cached until the view or the picture changes. Navigation like Photoshop: the plain cursor is a magnifier (drag left / right = scrubby zoom about the pressed point, click = in, Alt + click = out), Space or the middle button = hand, release while moving = the image keeps sliding (Inertia, Friction), free pan may push up to Overscroll of the image out of the view, wheel scrolls (Shift sideways, Ctrl zooms), right click = context menu (modes, zoom, reset), SR2D scroll bars (SpriteScrollBar) appear when the image is larger than the view - and, in the Free pan mode this test starts in, always, because overscroll widens the pan range past the picture. ImageAt(clientPoint) maps the mouse to the image pixel (extrapolated outside, with an Inside flag) - shown below the strip while you hover. None = the classic SpriteBox (surface = client area).", c =>
             {
                 c.Info(ViewDemo.State);
                 c.Info(ViewDemo.Hover.Length > 0 ? ViewDemo.Hover : "hover the picture for the image pixel under the mouse");
@@ -871,7 +966,7 @@ namespace Sr2d64CSport
                 c.Note = "SpriteBox in the strip above";
             }).Also(t => { t.ControlStrip = ViewDemo.Build; t.StripHeight = ViewDemo.StripHeight; });
 
-            T(GControls, "VoxelBox: a SpriteBox viewport onto a VoxelGrid", "VoxelBox (cs/SpriteBox.Voxel.cs) is a SpriteBox that shows a VoxelGrid you attach in code (box.Grid = grid) with the camera / lighting / fade machinery of the voxel tests, all driven from the control itself: left drag orbits the free camera (presets pan), middle button or Space + left pans, wheel zooms about the pointer (whole pixels per voxel in the pixel-art presets), arrows / + - / Home / F / I / N on the keyboard, and the RIGHT BUTTON opens an SR2D-drawn settings menu (SpriteMenu, cs/SpriteControls.Menu.cs - no native ContextMenuStrip): camera presets, voxel mode, lighting tiers with sky / lamp / reach sliders, depth fade, zoom, parallel render, preview while dragging, info, axes. Check / radio / slider rows keep the menu open; a click outside closes it without being swallowed. While the mouse button is down a cheap preview (Points, unlit) is drawn and the full picture follows on release - so a 256 x 256 x 128 terrain still orbits fluidly. The strip on the right picks the scene, and with 'Edit' the left click adds a voxel on the face you hit (Shift = remove) through the VoxelClick event.", c =>
+            T(GControls, "VoxelBox: a SpriteBox viewport onto a VoxelGrid", "VoxelBox (cs/SpriteBox.Voxel.cs) is a SpriteBox that shows a VoxelGrid you attach in code (box.Grid = grid) with the camera / lighting / fade machinery of the voxel tests, all driven from the control itself: left drag orbits the free camera (presets pan), middle button or Space + left pans, wheel zooms about the pointer (whole pixels per voxel in the pixel-art presets), arrows / + - / Home / F / I / N on the keyboard, and the RIGHT BUTTON opens an SR2D-drawn settings menu (SpriteMenu, cs/SpriteControls.Menu.cs - no native ContextMenuStrip): camera presets, voxel mode, lighting tiers with sky / lamp / reach sliders, depth fade, zoom, parallel render, preview while dragging, info, axes. Check / radio / slider rows keep the menu open; a click outside closes it without being swallowed. While the mouse button is down a cheap preview is drawn (propagated light and AO off, and once the last full frame took over 40 ms or the grid passes 128^3 it drops to unlit 1-px Points) and the full picture follows on release - so a 256 x 256 x 128 terrain still orbits fluidly. The strip on the right picks the scene, and with 'Edit' the left click adds a voxel on the face you hit (Shift = remove) through the VoxelClick event.", c =>
             {
                 c.Info(VoxelDemo.State);
                 c.Info(VoxelDemo.Hit.Length > 0 ? VoxelDemo.Hit : "right click the voxel view for its settings menu; hover for the voxel under the mouse");
@@ -892,8 +987,8 @@ namespace Sr2d64CSport
                     c.Canvas.DrawCurve(p, SR2D.ARGB(200, 255, 210, 60), w, c.Smooth, false, tension, op, true);
                 }
                 c.Note = $"tension {tension:F2}, width {w:F1}";
-            }, needsPoly: true, needsLine2: true);
-            T(GShapes, "Curves: FillCurve / closed blob + dashed DrawCurve2", "Closed spline through 7 points around the object: FillCurve (AlphaBlend, Smooth = AA) + DrawCurve outline + DrawCurve2 marching-ants hairline (phase animated). Scale = Tension.", c =>
+            }, needsPoly: true, needsLine2: true).Ui(Param.Scale, "Tension (slider / 100 - 0.05): 5 = the roundest spline, 105 and above = the straight polyline", Param.Blend, "Stroke width (Blend / 32 px)", Param.Smooth, "Anti-aliased", Param.Op, "Line op", Param.Xor, "XOR lines", Param.Count, "Repeats of the figure", Param.Mouse, "Drag the figure", Param.Time, "Animate: the points drift").With(Param.Scale, 20);   // the generic Scale 1.00 would be tension 0.95 = a straight polyline: the spline would look like the grey reference
+            T(GShapes, "Curves: FillCurve / closed blob + dashed DrawCurve2", "Closed spline through 7 points around the object: FillCurve (AlphaBlend, Smooth = AA) + a white DrawCurve outline + DrawCurve2 marching-ants hairline (phase animated), then the grey 1-px DrawPolygon outline = the straight-edged reference (what the same 7 points look like without any spline). Scale = Tension (5 = round, 105 and above = straight - it starts round, the generic Scale 1.00 would be tension 0.95 and the blob would sit on its own reference).", c =>
             {
                 Span<PointF> p = stackalloc PointF[7];
                 float R = c.S * 0.8f;
@@ -906,7 +1001,7 @@ namespace Sr2d64CSport
                     c.Canvas.DrawCurve2(p, unchecked((int)0xFF000000), true, tension, SR2D.LineOp.Set, 6, 6, -c.Time * 40f);
                     c.Canvas.DrawPolygon(p, unchecked((int)0xFF505050));
                 }
-            }, needsPoly: true, needsLine2: true);
+            }, needsPoly: true, needsLine2: true).Ui(Param.Scale, "Tension (slider / 100 - 0.05): 5 = round, 105+ = straight", Param.Smooth, "Anti-aliased", Param.Count, "Repeats", Param.Mouse, "Drag the blob", Param.Time, "Animate: the points breathe").With(Param.Scale, 20);
             T(GShapes, "Curves: PathBuilder (Bézier / arcs / smooth / holes)", "Explicit control: a PathBuilder with CurveTo / SmoothTo (SVG-style S: continuous tangent, only the second control point given) / ArcTo / SmoothThrough, stroked with DrawPath (width, round caps) and DrawPath2 (dashes). Right: FillPath of RoundRect + Circle with EvenOdd = hole, a pie by ArcAround, a SmoothPolygon blob. Control points shown in grey; drag moves the first curve's control point.", c =>
             {
                 float ox = 40, oy = c.H * 0.5f;
@@ -933,9 +1028,9 @@ namespace Sr2d64CSport
                     c.Canvas.FillPath(blob, unchecked((int)0xFF60C060), SR2D.LineOp.Set, c.Smooth);
                 }
             }, needsPoly: true, needsLine2: true);
-            T(GShapes, "Stroker: caps / joins / miter limit / dashes (Sprite.Stroke.cs)", "StrokePolyline / StrokePath / StrokeRect with a StrokeStyle: proper joins (Miter, Round, Bevel) and caps (Butt, Round, Square), miter limit, dash arrays with offset, each pixel touched once (no double blending at the joins even with alpha). Width = Scale*24 px, Angle bends the zig-zag, Blend = miter limit (x0.1), Smooth = AA, Op selector as for the other shapes. Drag the star. Compare with DrawPolyline (old, joins overlap).", c =>
+            T(GShapes, "Stroker: caps / joins / miter limit / dashes (Sprite.Stroke.cs)", "StrokePolyline / StrokePath / StrokeRect with a StrokeStyle: proper joins (Miter, Round, Bevel) and caps (Butt, Round, Square), miter limit, dash arrays with offset, each pixel touched once (no double blending at the joins even with alpha). Width = Scale*24 px, Angle bends the zig-zag, Z = miter limit (x0.1), Blend = the BlendFactor the AlphaBlend op uses, Smooth = AA, Op selector as for the other shapes. Drag the star. Compare with DrawPolyline (old, joins overlap).", c =>
             {
-                float w = MathF.Max(1f, c.Scale * 24f), lim = MathF.Max(1f, c.Blend * 0.1f);
+                float w = MathF.Max(1f, c.Scale * 24f), lim = MathF.Max(1f, c.Z * 0.1f);
                 var op = ShapeOp(c); int col = SR2D.ARGB(op == SR2D.LineOp.AlphaBlend ? (byte)150 : (byte)255, 255, 220, 60);
                 // three zig-zags, one per join, the corner angle from the Angle knob
                 float ox = 40, oy = 60, span = (c.W - 80) / 3f, dy = 90 + 70 * MathF.Sin(c.Angle);
@@ -969,8 +1064,8 @@ namespace Sr2d64CSport
                 c.Canvas.StrokePolyline(old, SR2D.ARGB(150, 255, 220, 60), new StrokeStyle(w, LineCap.Butt, LineJoin.Miter, lim), c.Smooth, false, SR2D.LineOp.AlphaBlend);
                 c.Canvas.DrawText(300, c.H - 24, "StrokePolyline (new, single blend per pixel)", unchecked((int)0xFF808080), 0, 1);
                 c.Note = $"width {w:0.#} px, miter limit {lim:0.#}, {op}";
-            }, needsPoly: true, needsLine2: true).Ui(Param.Mouse, "Drag the star", Param.Scale, "Stroke width (x24 px)", Param.Angle, "Corner angle of the zig-zags", Param.Blend, "Miter limit (x0.1; below ~2 the miters turn into bevels)", Param.Smooth, "Anti-aliasing", Param.Op, "Op: Paint=Set | AlphaBlend (alpha 150) | Add | Max | Min", Param.Count, "Repetitions (timing)", Param.Time, "Dash offset animation");
-            T(GText, "SpriteFont: TrueType / OpenType text (SpriteFont.cs, no GDI+)", "Sprite.DrawString with a SpriteFont (the engine's own TrueType / CFF / TTC parser + rasteriser, glyph bitmap cache, kerning, sub-pixel positioning, word wrap, alignment, outline and gradient text along a transform). The strip above picks the family / face, the fake bold (em) and your own paragraph; TextCache ticked draws the paragraph from a cached bitmap (SpriteFont.Render + TextCache, one blit per frame) instead of laying it out every frame. Scale = font size (x40 px), Brite = fake italic, Angle rotates the path text, Smooth toggles sub-pixel positions (4 vs 1). Drag the paragraph block. Op selector: Set / AlphaBlend (alpha 180) / Add / Max / Min.", c =>
+            }, needsPoly: true, needsLine2: true).Ui(Param.Mouse, "Drag the star", Param.Scale, "Stroke width (x24 px)", Param.Angle, "Corner angle of the zig-zags", Param.Z, "Miter limit (x0.1; below ~2 the miters turn into bevels)", Param.Blend, "BlendFactor of the strokes (only used by the AlphaBlend op)", Param.Smooth, "Anti-aliasing", Param.Op, "Op: Paint=Set | AlphaBlend (alpha 150) | Add | Max | Min", Param.Count, "Repetitions (timing)", Param.Time, "Dash offset animation").With(Param.Z, 120).With(Param.Op, 2);
+            T(GText, "SpriteFont: TrueType / OpenType text (SpriteFont.cs, no GDI+)", "Sprite.DrawString with a SpriteFont (the engine's own TrueType / CFF / TTC parser + rasteriser, glyph bitmap cache, kerning, sub-pixel positioning, word wrap, alignment, outline and gradient text along a transform). The strip above picks the family / face, the fake bold (em) and your own paragraph; TextCache ticked draws the paragraph from a cached bitmap (SpriteFont.Render + TextCache, one blit per frame) instead of laying it out every frame. Scale = font size (x40 px), Brite = fake italic, Angle rotates the path text, Smooth toggles sub-pixel positions (4 vs 1). Drag the paragraph block. Op selector: Set / AlphaBlend (alpha 180, and the only op the TextCache path uses - the cached bitmaps are premultiplied, so with Set / Add / Max / Min the text stays live and the note says so; the test opens on AlphaBlend) / Add / Max / Min.", c =>
             {
                 var f = FontDemo.Get(); if (f == null) { c.Canvas.DrawText(20, 60, "no TrueType font found on this system (SpriteFont.Installed)", unchecked((int)0xFFFF8080), 0, 2); return; }
                 float size = MathF.Max(6f, c.Scale * 40f);
@@ -1001,8 +1096,8 @@ namespace Sr2d64CSport
                 }
                 if (cache.Bytes > 24L << 20) cache.Clear();                                      // dragging / resizing makes many one-off bitmaps; keep the demo's footprint small
                 c.Note = $"{size:0.#} px, bold {f.FakeBold:0.###} em, italic {f.FakeItalic:0.##}, sub-pixel {f.SubPixelPositions}, {op}{(cached ? ", TextCache" : FontDemo.UseCache ? ", TextCache off (needs the AlphaBlend op)" : "")}";
-            }, needsPoly: true, needsLine2: true).Ui(Param.Mouse, "Drag the paragraph (anchor = its centre)", Param.Scale, "Font size (x40 px)", Param.Brite, "Fake italic (shear, 0 = upright)", Param.Angle, "Rotation of the gradient / outline text", Param.Smooth, "Sub-pixel glyph positions (4) vs whole pixels (1)", Param.Op, "Op: Paint=Set | AlphaBlend (alpha 180, the TextCache path) | Add | Max | Min", Param.Count, "Repetitions (timing)").Also(t => { t.ControlStrip = FontDemo.Build; t.StripHeight = FontDemo.StripHeight; });
-            T(GFiles, "PNG codec: ToPng -> FromPng round trip (Png.cs, no GDI+)", "Sprite.ToPng() encodes with the managed PNG encoder (auto colour type: RGBA / RGB / grey / palette, adaptive filters, zlib level from the Blend slider: 0 = store, 1 = fastest, 2 = default, 3+ = smallest), Sprite.FromPng decodes it back; Count round trips per frame - compare the timing with 'ToBitmap round-trip'. Op: Smooth ticked encodes the alpha asset (RGBA) instead of the opaque colour asset (RGB).", c =>
+            }, needsPoly: true, needsLine2: true).Ui(Param.Mouse, "Drag the paragraph (anchor = its centre)", Param.Scale, "Font size (x40 px)", Param.Brite, "Fake italic (shear, 0 = upright)", Param.Angle, "Rotation of the gradient / outline text", Param.Smooth, "Sub-pixel glyph positions (4) vs whole pixels (1)", Param.Op, "Op: Paint=Set | AlphaBlend (alpha 180, the TextCache path) | Add | Max | Min", Param.Count, "Repetitions (timing)", Param.Blend, "BlendFactor of the live text (only used by the AlphaBlend op)").Also(t => { t.ControlStrip = FontDemo.Build; t.StripHeight = FontDemo.StripHeight; }).With(Param.Op, 2);
+            T(GFiles, "PNG codec: ToPng -> FromPng round trip (Png.cs, no GDI+)", "Sprite.ToPng() encodes with the managed PNG encoder (auto colour type: RGBA / RGB / grey / palette, adaptive filters), Sprite.FromPng decodes it back; Count round trips per frame - compare the timing with 'ToBitmap round-trip'. The zlib level comes from the Blend slider as Blend x 10 / 256 (so 0..25 -> 0 = stored uncompressed, 26..51 -> 1 = fastest, 52..77 -> 2 = the encoder default, up to 231..255 -> 9 = smallest); the byte count and the level are in the info line. 'Smooth' ticked encodes the alpha asset (RGBA) instead of the opaque colour asset (RGB).", c =>
             {
                 var src = c.Smooth ? c.A.Alpha : c.A.Color; int level = Math.Clamp(c.Blend * 10 / 256, 0, 9);
                 byte[] png = Array.Empty<byte>(); Sprite? back = null;
@@ -1118,7 +1213,7 @@ namespace Sr2d64CSport
                 int r = BlurR(c);
                 Grid(c, (x, y) => c.Canvas.DrawBlurred(SrcFor(c, c.Op), x, y, r, c.Op, c.Blend + (c.Blend >> 7), Opaque: c.Op != SR2D.Op.AlphaBlend && c.Op != SR2D.Op.AlphaOver, Fast: !c.Smooth));
             }, needsBlur: true);
-            T(GEffects, "Drop shadow: by hand (DrawBlurred)  vs  Effects.ShadowAt (one stage)", "The same Photoshop-style drop shadow of the KEYED sprite (a hard-edged shape, so the shadow reads clearly), side by side. LEFT - the old recipe: a black copy carrying the shape's alpha is drawn blurred by DrawBlurred (radius Scale*8, Op.AlphaBlend, opacity Blend), offset by Distance px (Z slider) in direction Angle, then the sharp sprite on top (Draw, AlphaTest). RIGHT - the effects pipeline: ONE ShadowAt stage (blur Scale*4 px, spread 'Smooth' ? 0 : 2 px) on the same sprite - the shadow is generated, blurred, offset and composited under the sprite inside the DrawFx call, and any stage added after it (a distortion, a colour step) would apply to sprite and shadow together. NotMask = ShadowOnlyAt on the right half (all shadows of a scene first, then the sprites; the left half ignores it). The MOUSE moves the shadow of both halves: dragging sets Distance and Angle from the vector between the sprite centre and the pointer (the light comes from the opposite side). Light backdrop so the shadow shows.",
+            T(GEffects, "Drop shadow: by hand (DrawBlurred)  vs  Effects.ShadowAt (one stage)", "The same Photoshop-style drop shadow of the KEYED sprite (a hard-edged shape, so the shadow reads clearly), side by side. LEFT - the old recipe: a black copy carrying the shape's alpha is drawn blurred by DrawBlurred (radius Scale*8, Op.AlphaBlend, opacity Blend), offset by Distance px (Z slider) in direction Angle, then the sharp sprite on top (Draw, AlphaTest). RIGHT - the effects pipeline: ONE ShadowAt stage (blur Scale*4 px, spread 'Smooth' ? 0 : 2 px) on the same sprite - the shadow is generated, blurred, offset and composited under the sprite inside the DrawFx call, and any stage added after it (a distortion, a colour step) would apply to sprite and shadow together. NotMask = ShadowOnlyAt on the right half (all shadows of a scene first, then the sprites; the left half ignores it). The MOUSE moves the shadow of both halves: dragging sets Distance and Angle from the vector between the CANVAS CENTRE (the seam between the two halves - the red arrow drawn there is that vector) and the pointer (the light comes from the opposite side). Light backdrop so the shadow shows.",
                 c =>
                 {
                     LightBackdrop(c);
@@ -1159,15 +1254,20 @@ namespace Sr2d64CSport
                 fx.Clear().Wave(c.Scale * 16f, c.Blend / 16f, c.Time * 4f, c.Angle, Longitudinal: !c.Smooth);
                 Grid(c, (x, y) => c.Canvas.DrawFx(SrcFor(c, c.Op), x, y, fx, c.Op, Opaque: c.Op != SR2D.Op.AlphaBlend && c.Op != SR2D.Op.AlphaOver));
             }, needsFx: true);
-            T(GEffects, "Effects: Ripple from the cursor (Scale = wavelength, Blend = strength)", "Effects.Ripple centred on the mouse (Post mode: screen coordinates, so the rings stay put while the picture moves under them), falloff Scale*100 px, animated phase. The colour picture is enlarged to the canvas height in the middle of the canvas (DrawFxScaled - the effect runs at screen resolution after the scale) so the rings are visible at once; move the mouse over it. Count = extra copies of the alpha sprite drawn in a row above (timing).", c =>
+            T(GEffects, "Effects: Ripple from the cursor (Scale = wavelength, Blend = strength)", "Effects.Ripple centred on the mouse, falloff Scale*100 px, animated phase. The colour picture is enlarged to the canvas height in the middle of the canvas with DrawFxScaled + Post mode: the stages then run AFTER the scale, at screen resolution, so one continuous ring system sits under the cursor and stays put while the picture moves. Count = extra copies of the alpha sprite in a row along the top edge (timing): a plain 1:1 DrawFx ignores Post and reads the ripple centre in SPRITE pixels, so each copy is given the centre minus its own position - the rings of all copies still land on the same screen point as the big picture's.", c =>
             {
                 fx.Clear().Ripple(c.Scale * 12f, c.Blend / 12f, c.Time * 6f, c.X, c.Y, c.Scale * 100f);
                 fx.Post = true;
                 int big = Math.Min(c.H - 16, c.W - 16);
                 c.Canvas.DrawFxScaled(c.A.Color, (c.W - big) / 2, (c.H - big) / 2, big, big, fx, SR2D.Op.Paint, Opaque: true);
-                int per = Math.Max(1, c.W / c.S);
-                for (int i = 1; i < c.Count; i++) c.Canvas.DrawFx(c.A.Alpha, ((i - 1) % per) * c.S, ((i - 1) / per) * c.S, fx, SR2D.Op.AlphaBlend);
-            }, needsFx: true, clears: false).Ui(Param.Mouse, "Ripple centre (follow the mouse or drag)", Param.Scale, "Wavelength x12 px, falloff x100 px", Param.Blend, "Strength (Blend / 12 px)", Param.Count, "1 = the big picture only; more = extra alpha sprites (timing)", Param.Time, "Animate: the rings travel outwards");
+                int per = Math.Max(1, c.W / (c.S + 4));
+                for (int i = 1; i < c.Count; i++)
+                {   // 1:1 draws ignore Post: shift the centre into this copy's sprite frame so the ring stays on the same pixel
+                    int x = 4 + ((i - 1) % per) * (c.S + 4), y = 4;
+                    fx.Clear().Ripple(c.Scale * 12f, c.Blend / 12f, c.Time * 6f, c.X - x, c.Y - y, c.Scale * 100f);
+                    c.Canvas.DrawFx(c.A.Alpha, x, y, fx, SR2D.Op.AlphaBlend);
+                }
+            }, needsFx: true, clears: false).Ui(Param.Mouse, "Ripple centre (follow the mouse or drag)", Param.Scale, "Wavelength x12 px, falloff x100 px", Param.Blend, "Strength (Blend / 12 px)", Param.Count, "1 = the big picture only; more = the 1:1 row along the top (timing)", Param.Time, "Animate: the rings travel outwards");
             T(GEffects, "Effects: Noise | Turbulence wobble (Scale = feature size, Blend = strength)", "Left: Effects.Noise, right: Effects.Turbulence (3 octaves), both animated by phase = time*0.5, feature size Scale*24 px, strength Blend/16 px. 'Smooth' off = nearest sampling inside the distortion.", c =>
             {
                 var samp = c.Smooth ? SR2D.Filter.Bilinear : SR2D.Filter.Nearest;
@@ -1181,11 +1281,71 @@ namespace Sr2d64CSport
                 fx.Clear().DistortMap(c.A.Tile, c.Scale, c.Blend / 16f, c.Time * 20f, c.Time * 12f);
                 Grid(c, (x, y) => c.Canvas.DrawFx(SrcFor(c, c.Op), x, y, fx, c.Op, Opaque: c.Op != SR2D.Op.AlphaBlend && c.Op != SR2D.Op.AlphaOver));
             }, needsFx: true);
-            T(GEffects, "Effects: colour (Brite = brightness, Scale = contrast, Angle = hue, Blend = opacity)", "One Effects.Color stage: brightness Brite/2, contrast Scale, hue rotation Angle, opacity Blend/255; 'Smooth' off = greyscale; NotMask = invert. Everything is done in one pass at draw time - the sprite is untouched.", c =>
+            T(GEffects, "Effects: colour (Brite = brightness, Scale = contrast, Angle = hue, Blend = opacity)", "One Effects.Color stage: brightness Brite/2 (ADDITIVE -1..+1, so 0 = unchanged and 200 = a white-out), contrast Scale, hue rotation Angle, opacity Blend/255; 'Smooth' off = greyscale; NotMask = invert. Everything is done in one pass at draw time - the sprite is untouched. The start values show the colour half of the stage (Saturation 1, hue 60 deg, neutral brightness and contrast, full opacity) - with the generic Smooth off the picture is a greyscale copy and the hue slider looks dead.", c =>
             {
                 fx.Clear().Color(Brightness: c.Brite * 0.5f, Contrast: c.Scale, Saturation: c.Smooth ? 1f : 0f, Hue: c.Angle * 57.29578f, Opacity: c.Blend / 255f, Invert: c.NotMask);
                 Grid(c, (x, y) => c.Canvas.DrawFx(SrcFor(c, c.Op), x, y, fx, c.Op, Opaque: c.Op != SR2D.Op.AlphaBlend && c.Op != SR2D.Op.AlphaOver));
-            }, needsFx: true);
+            }, needsFx: true).Ui(Param.Brite, "Brightness Brite/2, additive -1..+1 (0 = unchanged)", Param.Scale, "Contrast (x0.01, 100 = unchanged)", Param.Angle, "Hue rotation (deg)", Param.Blend, "Opacity (Blend / 255)", Param.Smooth, "Keep the colour (off = greyscale)", Param.NotMask, "Invert", Param.Op, "Blend op").With(Param.Smooth, true).With(Param.Angle, 60).With(Param.Brite, 0).With(Param.Blend, 255);
+            T(GEffects, "Effects: motion blur (Op = mode: straight / curve / echo / taps)", "Four modes (the Op selector), all on the Lenna photo (Assets.Color): STRAIGHT - MotionBlur(Angle degrees, Scale px): the picture averaged along a straight trail, the last tap Scale px away in the Angle direction (0 = right, 90 = down; up to 400 px). CURVE - MotionBlurPath over the trail curve EDITED IN THE STRIP ABOVE: drag the points (a click on empty space adds, right click selects one and opens its menu, double click switches the tangent type), the curve bends the trail perpendicular to the Angle direction, the Blend slider sets how much of the bend applies (0 = straight trail), Scale = trail length - the trail follows the curve, Angle rotates the whole thing. The strip opens on an S-bend so the curve mode differs from the straight one at once; RESET puts the trail back on the flat centre line (then CURVE looks exactly like STRAIGHT). Both of those RESAMPLE every pixel of the sprite-plus-trail image once per tap, which is what makes them exact and slow: fine for an editor, for baking the blur into a sprite, not for a frame loop. ECHO - the feedback version (MotionEcho): no per-frame resampling, a persistent accumulator fades by Persistence (Blend / 255 * 0.97) and the new frame is drawn over it, so the cost per frame is two whole-surface passes at ANY trail length; tick Animate, because a still object just saturates. TAPS - Sprite.DrawMotionTaps: the same curve trail, covered by as many whole copies of the sprite as the Taps slider says and AVERAGED in one reused surface, so the work is sprite-sized instead of trail-sized and the picture is deterministic (a still object and a screenshot look right, at any frame rate, which the echo is not). The info line prints the pixels each way touches for one sprite; the real answer is the FPS / render-ms line the demo writes under the info text - tick Animate and switch CURVE to TAPS to watch that figure fall (measured here for a 256 px sprite on a 400 px trail: 220 - 290 ms resampled against 1.4 ms for 8 taps).", c =>
+            {
+                float deg = c.Angle * 180f / MathF.PI;        // the bench hands over radians, both blur APIs take degrees
+                float len = Math.Max(1f, c.Scale * 100f);     // the Scale slider is the trail length in px (5..400)
+                if ((int)c.Op == 3)
+                {   // real-time echo: object layer into a scratch, the echo accumulates, the accumulator goes to the canvas.
+                    // Bands (Parallel) render the same frame: the Step is keyed on the animation time so it runs once.
+                    lock (echoLock)
+                    {
+                        if (mecho == null || mecho.Accumulator.Width != c.W || mecho.Accumulator.Height != c.H) { mecho?.Dispose(); mecho = new MotionEcho(c.W, c.H); }
+                        if (esrc == null || esrc.Width != c.W || esrc.Height != c.H) { esrc?.Dispose(); esrc = new Sprite(c.W, c.H); }
+                        mecho.Persistence = c.Blend / 255f * 0.97f;
+                        esrc.ClearBuffer(0);
+                        int w = Math.Clamp((int)(c.S * 0.25f * c.Scale), 8, Math.Min(c.W, c.H) / 2);   // echo: Scale is the object size
+                        float x = c.W / 2 + MathF.Sin(c.Time * 1.7f) * c.W * 0.32f, y = c.H / 2 + MathF.Sin(c.Time * 2.3f) * c.H * 0.27f;
+                        esrc.DrawRotate2(c.A.Color, (int)x, (int)y, c.Time * 1.1f, w, w, -1, -1, SR2D.Op.Paint);
+                        if (c.Time != lastEchoTime) { lastEchoTime = c.Time; mecho.Step(esrc); }
+                        c.Canvas.Draw(mecho.Accumulator, 0, 0, SR2D.Op.AlphaBlend);
+                        c.Info($"echo persistence {mecho.Persistence:0.00} (Blend)  object {w} px at {x:0},{y:0}  trail = feedback history");
+                        c.Note = "tick Animate - the echo accumulates frames; a still object saturates to a still picture";
+                    }
+                    return;
+                }
+                if ((int)c.Op == 4)
+                {   // Real-time multi-tap (Sprite.DrawMotionTaps): the sprite is copied Taps times along the
+                    // SAME curve trail the curve mode uses and the copies are averaged in one reused surface.
+                    // The numbers are the pixels each algorithm touches for ONE sprite - the resampled blur
+                    // re-samples the whole sprite-plus-trail image per tap, the taps work is sprite-sized - and
+                    // they are what the two modes cost differently, which is why this one runs at frame rate.
+                    int taps = Math.Clamp((int)c.Grid, 2, 32);
+                    var path = MotionDemo.Path(deg, len, c.Blend / 255f);
+                    int pminX = 0, pmaxX = 0, pminY = 0, pmaxY = 0;
+                    for (int k = 0; k < path.Length; k++)
+                    {
+                        pminX = Math.Min(pminX, (int)path[k].X); pmaxX = Math.Max(pmaxX, (int)path[k].X);
+                        pminY = Math.Min(pminY, (int)path[k].Y); pmaxY = Math.Max(pmaxY, (int)path[k].Y);
+                    }
+                    long accArea = (long)(c.S + pmaxX - pminX) * (c.S + pmaxY - pminY);       // the average surface
+                    long tapWork = (taps + 3L) * c.S * c.S + accArea;                          // blits, scaling, composite
+                    fx.Clear().MotionBlur(deg, len);
+                    int m = fx.Margin;
+                    long blurTaps = Math.Clamp((int)MathF.Ceiling(len) + 1, 2, 32);
+                    long resampled = blurTaps * (long)(c.S + 2 * m) * (c.S + 2 * m);
+                    Grid(c, (x, y) => c.Canvas.DrawMotionTaps(c.A.Color, x, y, path, taps));
+                    c.Info($"{taps} taps over a {c.S} px sprite = {tapWork / 1000}k px touched; the resampled blur needs {blurTaps} taps x {(c.S + 2 * m)}² = {resampled / 1000}k px ({resampled / Math.Max(1, tapWork):0.0}x more) - same trail, same curve, but see the note");
+                    c.Note = "a tap is a whole copy: few taps on a long trail show separate ghosts, not a smooth sweep";
+                    return;
+                }
+                if ((int)c.Op == 2)
+                {   // the trail follows the curve edited in the strip; Angle rotates the whole path, Blend applies the bend
+                    fx.Clear().MotionBlurPath(MotionDemo.Path(deg, len, c.Blend / 255f), 1f);
+                    c.Info($"curve trail {len:0} px, direction {deg:0} deg, bend {c.Blend / 255f * 100:0}% - edit the curve in the strip above");
+                }
+                else
+                {   // straight trail: Angle = direction, Scale = length in px (the old 32 px cap is gone)
+                    fx.Clear().MotionBlur(deg, len);
+                    c.Info($"straight trail {len:0} px towards {deg:0} deg (0 = right, 90 = down)");
+                }
+                Grid(c, (x, y) => c.Canvas.DrawFx(c.A.Color, x, y, fx, SR2D.Op.AlphaBlend));
+            }, needsFx: true).Ui(Param.Op, "Motion mode (the editor strip ABOVE the canvas bends the CURVE and TAPS trail)", Param.Angle, "Trail direction in degrees (straight / curve / taps)", Param.Scale, "Trail length px (straight / curve / taps) / object size (echo)", Param.Blend, "Curve bend % (curve / taps) / echo persistence (echo)", Param.Grid, "Taps in the trail (taps mode: 8 .. 32, above 32 the engine stops)").Ops("Straight", "Curve", "Echo", "Taps").With(Param.Op, 1).With(Param.Scale, 48).With(Param.Blend, 230).With(Param.Grid, 8).Also(t => { t.ControlStrip = MotionDemo.Build; t.StripHeight = MotionDemo.StripHeight; });
             T(GEffects, "Effects: outline (Scale = thickness, Angle = hue) | Dilate / Erode", "Three columns, Count rows. Left: the plain alpha sprite. Middle: Effects.Outline(thickness Scale*3 px, colour from Angle) - a solid border around the shape, sprite on top. Right: 'Smooth' on = Dilate(Scale*3) (the shape grows, colours spread outward), off = Erode(Scale*3) (the shape shrinks, thin parts vanish). Drag moves the grid.", c =>
             {
                 int t = Math.Max(1, (int)MathF.Round(c.Scale * 3));
@@ -1203,13 +1363,17 @@ namespace Sr2d64CSport
                     c.Canvas.DrawFx(c.A.Alpha, x0 + 2 * colw, y, fx2, SR2D.Op.AlphaBlend);
                 }
             }, needsFx: true);
-            T(GEffects, "Effects: one chain, stages toggled at run time (Enable / Disable)", "The chain Shadow -> Blur -> Wave -> Colour is built ONCE; every second a different subset is enabled with fx.Enable(i, bool) - no rebuild, disabled stages cost nothing and add no margin. 'Smooth' off = all on. Blend = opacity of the colour stage.", c =>
+            T(GEffects, "Effects: one chain, stages toggled at run time (Enable / Disable)", "The chain Shadow -> Blur -> Wave -> Colour is built every frame (a list of structs, cheap); every second a different subset of it is enabled with fx.Enable(i, bool) - the stage list never changes, a disabled stage costs nothing and adds no margin, so the frame grows and shrinks with the subset. Stage 0 (shadow) always stays on so the picture is never empty. Blend = opacity of the colour stage. 'Smooth' forces all four stages on (the whole chain, the expensive frame).", c =>
             {
-                if (fx.Count != 4) fx.Clear().Shadow(6, 6, 6).Blur(3).Wave(24, 4, 0).Color(Opacity: 1);
+                fx.Clear().Shadow(6, 6, 6).Blur(3).Wave(24, 4, c.Time * 4f).Color(Opacity: c.Blend / 255f);
                 int phase = ((int)c.Time) & 15;
-                for (int i = 0; i < 4; i++) fx.Enable(i, !c.Smooth || ((phase >> i) & 1) != 0);
+                var en = new bool[4];
+                for (int i = 0; i < 4; i++) en[i] = c.Smooth || i == 0 || ((phase >> i) & 1) != 0;
+                for (int i = 0; i < 4; i++) fx.Enable(i, en[i]);
+                string on = ""; for (int i = 0; i < 4; i++) on += en[i] ? "SBWC"[i] : "-";
+                c.Note = $"second {phase} - stages on: {on}  (S shadow, B blur, W wave, C colour)";
                 Grid(c, (x, y) => c.Canvas.DrawFx(c.A.Alpha, x, y, fx, SR2D.Op.AlphaBlend));
-            }, needsFx: true);
+            }, needsFx: true).Ui(Param.Blend, "Colour stage opacity (Blend / 255)", Param.Smooth, "Force all four stages on (off = a different subset each second)", Param.Time, "Animate: the subset advances with time");
             T(GEffects, "Effects: DrawTransparent (Blend = opacity)", "Sprite.DrawTransparent(src, x, y, Blend/255): the sprite drawn with a global transparency, alpha channel untouched. Count copies.", c =>
             {
                 Grid(c, (x, y) => c.Canvas.DrawTransparent(SrcFor(c, c.Op), x, y, c.Blend / 255f, c.Op));
@@ -1221,7 +1385,7 @@ namespace Sr2d64CSport
                 int w = (int)(c.S * c.Scale), h = (int)(c.S * c.Scale);
                 for (int i = 0; i < c.Count; i++) c.Canvas.DrawFxRotated(c.A.Alpha, c.X + i * 7, c.Y + i * 5, c.Angle, fx, w, h, Filter: SR2D.Filter.Bilinear);
             }, needsFx: true, warp: true);
-            T(GEdit, "FloodFill / Selection: click to bucket-fill (Blend = tolerance, Smooth = soft edge, NotMask = global, XOR = diagonal)", "Scene of flat shapes over a gradient. Every frame: FloodFill at the mouse with tolerance Blend/4 (0..63; the background is a gradient of ~1 level per 5 rows, so a tolerance of t selects a band of ~5t rows around the click - and above ~15 it also squeezes through the anti-aliased notch where two lines cross), colour from Angle, Op selector (Paint = Set, AlphaBlend, Add...). 'Smooth' = Soft (anti-aliased edge on gradients), 'NotMask' = Contiguous off (replace the colour everywhere), 'XOR lines' = Diagonal (8-connected: the region may continue across a pixel corner). Then the same region as a Selection: canvas.Apply(sel, hue shift) inside it and sel.Draw(canvas, time) - blue tint + marching ants along the edge (edge pixels cached until the selection changes). Count = number of fills per frame.", c =>
+            T(GEdit, "FloodFill / Selection: click to bucket-fill (Blend = tolerance, Smooth = soft edge, NotMask = global, XOR = diagonal)", "Scene of flat shapes over a gradient. Every frame: FloodFill at the mouse with tolerance Blend/4 (0..63; the background is a gradient of ~1 level per 5 rows, so a tolerance of t selects a band of ~5t rows around the click - and above ~15 it also squeezes through the anti-aliased notch where two lines cross), colour from Angle, Op selector (Paint = Set, AlphaBlend, Add...). 'Smooth' = Soft (anti-aliased edge on gradients), 'NotMask' = Contiguous off (replace the colour everywhere), 'XOR lines' = Diagonal (8-connected: the region may continue across a pixel corner). Then the same region as a Selection: canvas.Apply(sel, hue shift) inside it and sel.Draw(canvas, time) - blue tint + marching ants along the edge (edge pixels cached until the selection changes). Count = number of fills per frame (the note sums their pixels). Note that the BLEND slider does double duty here: Blend/4 is the tolerance AND Blend is the BlendFactor the fill is mixed with when Op = AlphaBlend / Blend.", c =>
             {
                 Sprite scene;
                 lock (sceneLock)
@@ -1234,7 +1398,7 @@ namespace Sr2d64CSport
                 var op = c.Op switch { SR2D.Op.AlphaBlend => SR2D.LineOp.AlphaBlend, SR2D.Op.Add => SR2D.LineOp.Add, SR2D.Op.Max => SR2D.LineOp.Max, SR2D.Op.Min => SR2D.LineOp.Min, SR2D.Op.Blend => SR2D.LineOp.Blend, _ => SR2D.LineOp.Set };
                 int n = 0;
                 int tol = c.Blend / 4;
-                for (int k = 0; k < c.Count; k++) n = c.Canvas.FloodFill(c.X, c.Y, col, tol, !c.NotMask, op, Diagonal: c.Xor, Soft: c.Smooth, BlendFactor: c.Blend);
+                for (int k = 0; k < c.Count; k++) n += c.Canvas.FloodFill(c.X, c.Y, col, tol, !c.NotMask, op, Diagonal: c.Xor, Soft: c.Smooth, BlendFactor: c.Blend);
                 var sel = tsel; if (sel == null || sel.Width != c.W || sel.Height != c.H) { sel?.Dispose(); sel = tsel = new Selection(c.W, c.H); }
                 int m = sel.Wand(scene, c.X, c.Y, tol, Contiguous: !c.NotMask, Diagonal: c.Xor, Soft: c.Smooth);
                 var b = sel.Bounds;
@@ -1245,7 +1409,30 @@ namespace Sr2d64CSport
                 }
                 c.Note = $"filled {n} px, tolerance {tol}{(c.Xor ? ", 8-connected" : "")}, bounds {b.Width}x{b.Height} at {b.X},{b.Y}, edge {sel.EdgeCount} px";
             }, needsPoly: true, needsFx: true, needsFlood: true, clears: true);
-            T(GEffects, "Depth-of-field slice stack: Count x 256^2 slices, blur by depth, redrawn EVERY frame, composed and scaled to the canvas (Op = quality, Smooth = threads, NotMask = diffuse)", "Your cellular-automaton case: Count (1..64) slice sprites of 256x256 are cleared and redrawn every frame (moving blobs + flicker), each one blurred by its depth (bottom slice radius 40, top 0), composed bottom-to-top into one 256x256 premultiplied composite by a LayeredSprite (PrefixCache off - everything changes), which is then drawn ONCE onto the canvas scaled by Scale (bilinear) at the mouse. Op selector = blur quality: Paint = Gaussian at full resolution (3 box passes; the old Blur(r)), AlphaTest = Fast 2-pass + automatic downscale, anything else = Box 1-pass + automatic downscale (Blur(r, BlurQuality.Box, Effects.AutoDownscale) - the cheapest, and for a depth blur visually the same). 'Smooth' = LayeredSprite.Threads = 0 (one worker per core; the per-layer effects run in parallel, the composite stays bit-identical). 'NotMask' = also run a Diffuse(2, 1, seed = frame) over the whole composite when drawing (Photoshop-style grain, animated). The caption shows compose vs draw time so you can see where the frame goes.", c =>
+            T(GEdit, "Move: grid shuffle + pen paint (Sprite.Move)", "Lenna (512, centred) is cut into a Grid x Grid block puzzle and ONE block is erased. Every step: a RANDOM block adjacent to the hole is selected (never the block that just moved in) and ANIMATED into the hole with Sprite.Move - the Photoshop move tool inside one sprite: the selected pixels travel, the vacated area turns transparent, anything pushed off the board is clipped. Move again moves the fresh paint: PAINT OVER THE PICTURE with the LEFT button (pen cursor) - the paint sticks to the board and every block carries what it picks up; paint landing in the hole is erased by the next move-in. The OP BOX picks the motion TANGENT of the move (the 3ds Max tangent model of cs/Animation.cs; CURVE = the curve editor on the strip above - drag its points, the curve shapes the speed). The little graph in the canvas's top-right draws the shaping with a dot at the current time. Grid slider = block size (8 16 32 64 128 256 px, powers of two only), 'Grid lines' toggles the grid, Speed slider = the move SPEED in px/s (x8 - a block of 64 px crosses at Speed 8 in about one second), Animate ticked = blocks move.", c => MoveDemo.Puzzle(c), clears: true)
+                .Also(m => m.PaintByMouse = true).Also(m => m.SpriteSize = 512).Also(m => m.SettingsControl = () => TangentTools.BuildEditor()).Also(m => m.SettingsVisible = c => Math.Clamp((int)c.Op - 1, 0, 7) == 7)
+                .Ui(Param.Grid, "Block size (px)", Param.Speed, "Speed (x8 px/s)", Param.Op, "Tangent", Param.GridOn, "Grid lines")
+                .Ops("Smooth", "Linear", "Step", "Fast", "Slow", "Spline", "Auto", "Curve")
+                .With(Param.Grid, 64).With(Param.Speed, 6).With(Param.Op, 1)
+                .Range(Param.Grid, 8, 256).Range(Param.Speed, 1, 100);
+            T(GEdit, "Offset: grid scramble (Sprite.Offset)", "Lenna (512, centred) is gridded. Every so often a random FULL strip is picked (Grid slider = strip width, a power of two) and Sprite.Offset shifts it ALONG ITSELF: the content wraps around the strip's bounding box, exactly like Photoshop Filter > Other > Offset (nothing is ever cleared, the pixels just redistribute inside the selection). A strip is NEVER the previous one (other axis or other index), and the shift distance is snapped to the grid but capped by the picture size (a full wrap would be a no-op). The OP BOX picks the motion TANGENT of the shift (CURVE = the curve editor in the Move test's strip). The pen paints over the picture. 'Grid lines' toggles the grid, Speed slider = px/s (x8), Animate ticked = strips shift.", c => OffsetDemo.Scramble(c), clears: true)
+                .Also(m => m.PaintByMouse = true).Also(m => m.SpriteSize = 512).Also(m => m.SettingsControl = () => TangentTools.BuildEditor()).Also(m => m.SettingsVisible = c => Math.Clamp((int)c.Op - 1, 0, 7) == 7)
+                .Ui(Param.Op, "Tangent", Param.Grid, "Strip width (px)", Param.Speed, "Speed (x8 px/s)", Param.GridOn, "Grid lines")
+                .Ops("Smooth", "Linear", "Step", "Fast", "Slow", "Spline", "Auto", "Curve")
+                .With(Param.Grid, 64).With(Param.Speed, 6).With(Param.Op, 1).With(Param.GridOn, true)
+                .Range(Param.Grid, 8, 256).Range(Param.Speed, 1, 100);
+            T(GEdit, "Offset: selection tool (Sprite.Offset)", "A Photoshop-style selection tool on top of Lenna (512, centred): the buttons above the canvas pick RECTANGLE / ELLIPSE / LASSO / PEN (the active one is accented). With a shape tool the LEFT button draws a NEW selection (each shape replaces the old one, like a fresh marquee); with the PEN it paints on the picture instead - selecting and painting never happen at once. Push the selection around with the OFFSET X / OFFSET Y sliders (the content follows the slider 1:1 - Sprite.Offset redistributes the pixels inside the selection); 'Wrap rows / cols' routes the content inside the selected rows / columns instead of around the selection's bounding box (for non-rectangular selections nothing jumps across a gap). Clear selection = an empty canvas (no selection). The selection shows as marching ants with a faint tint.", c => OffsetDemo.Selection(c), clears: true)
+                .Also(m => m.PaintByMouse = true).Also(m => m.SpriteSize = 512).Also(m => m.ControlStrip = () => OffsetTools.Strip()).Also(m => m.StripHeight = 40)
+                .Ui(Param.OffsetX, "Offset X (px)", Param.OffsetY, "Offset Y (px)", Param.NotMask, "Wrap rows / cols")
+                .With(Param.OffsetX, 0).With(Param.OffsetY, 0).With(Param.NotMask, false)
+                .Range(Param.OffsetX, -256, 256).Range(Param.OffsetY, -256, 256);
+            T(GEdit, "Offset: full scramble (Sprite.Offset, parallel)", "Lenna (512, centred) scrambles CONTINUOUSLY: all 512 single-pixel lines - rows AND columns in random order, each with a random position, direction and shift amount - rotate endlessly (a line that finishes picks a new random shift at once, no pauses). The WORKERS slider sets how many lines advance at once: the lines of the current window really do run IN PARALLEL (Parallel.For) and each of them is a DISTINCT line index, so no line is ever touched twice in one frame - but a row and a column cross at a pixel, so which side of the crossing wins depends on how the workers land: the picture is not identical for every worker count (watch the texture of the motion change as you move the slider). The OP BOX picks the tangent shaping of every line's motion (CURVE = the curve editor in the Move test's strip). The pen paints over the picture. Speed slider = px/s (x8), Animate ticked = the scramble runs.", c => OffsetDemo.Chaos(c), clears: true)
+                .Also(m => m.PaintByMouse = true).Also(m => m.SpriteSize = 512).Also(m => m.SettingsControl = () => TangentTools.BuildEditor()).Also(m => m.SettingsVisible = c => Math.Clamp((int)c.Op - 1, 0, 7) == 7)
+                .Ui(Param.Op, "Tangent", Param.Count, "Workers (lines at once)", Param.Speed, "Speed (x8 px/s)")
+                .Ops("Smooth", "Linear", "Step", "Fast", "Slow", "Spline", "Auto", "Curve")
+                .With(Param.Op, 1).With(Param.Count, 8).With(Param.Speed, 6)
+                .Range(Param.Speed, 1, 100);
+            T(GEffects, "Depth-of-field slice stack: Count x 256^2 slices, blur by depth, redrawn EVERY frame, composed and scaled to the canvas (Op = quality, Smooth = threads, NotMask = diffuse)", "Your cellular-automaton case: Count (1..64) slice sprites of 256x256 are cleared and redrawn every frame (moving blobs + flicker), each one blurred by its depth (bottom slice radius 40, top 0), composed bottom-to-top into one 256x256 premultiplied composite by a LayeredSprite (PrefixCache off - everything changes), which is then drawn ONCE onto the canvas scaled to 256 * Scale * 2 px (bilinear) at the mouse. Op selector = blur quality: Paint = Gaussian at full resolution (3 box passes; the old Blur(r)), AlphaTest = Fast 2-pass + automatic downscale, anything else = Box 1-pass + automatic downscale (Blur(r, BlurQuality.Box, Effects.AutoDownscale) - the cheapest, and for a depth blur visually the same). 'Smooth' = LayeredSprite.Threads = 0 (one worker per core; the per-layer effects run in parallel, the composite stays bit-identical). 'NotMask' = also run a Diffuse(2, 1, seed = frame) over the whole composite when drawing (Photoshop-style grain, animated). The caption shows compose vs draw time so you can see where the frame goes.", c =>
             {
                 int n = Math.Clamp(c.Count, 1, 64);
                 int q = c.Op == SR2D.Op.Paint ? 0 : c.Op == SR2D.Op.AlphaTest ? 1 : 2;
@@ -1271,9 +1458,10 @@ namespace Sr2d64CSport
                 }
             }, needsFx: true, needsPoly: true).Controls = UI(Param.Count, "Slices (layers) redrawn and composed per frame", Param.Op, "Blur quality: Paint=Gaussian full-res | AlphaTest=Fast + auto downscale | other=Box + auto downscale",
                 Param.Scale, "Composite size on screen: 256 px x Scale x 2", Param.Mouse, "Drag: composite position", Param.Smooth, "LayeredSprite.Threads = 0 (one worker per core)", Param.NotMask, "Diffuse(2, 1) grain over the composite, animated");
-            T(GLayers, "LayeredSprite: 12 layers, one effect each, composed once, drawn rotated (Angle, Scale; Smooth = animate a layer)", "A LayeredSprite of 12 alpha layers (blur / wave / colour / shadow effects, integer offsets) composes itself into ONE premultiplied sprite and re-composes only what changed: 'Smooth' on animates the wave of layer 6 every frame (prefix cache -> layers 6..11 redrawn), off = nothing changes (one blit). The composite is drawn Count x with DrawRotate2 (Angle, Scale, Filter.Auto) through a whole-stack Shadow. NotMask = the same 12 layers drawn one by one with DrawFxRotated for comparison (same look, many times slower when rotated/scaled). Caption shows what the last Compose redrew.", c =>
+            T(GLayers, "LayeredSprite: 12 layers, one effect each, composed once, drawn rotated (Angle, Scale; Smooth = animate a layer)", "A LayeredSprite of 12 alpha layers (blur / wave / colour / shadow effects, integer offsets) composes itself into ONE premultiplied sprite and re-composes only what changed: 'Smooth' on animates the wave of layer 6 every frame (prefix cache -> layers 6..11 redrawn), off = nothing changes (one blit). The composite is drawn Count x with DrawRotate2 (Angle, Scale, Filter.Auto) through a whole-stack Shadow. NotMask = the same 12 layers drawn one by one with DrawFxRotated for comparison (the per-layer effects are identical; the whole-stack Shadow of the composite is missing there, because the manual path has no composite to shadow - and it is many times slower when rotated/scaled). Caption shows what the last Compose redrew.", c =>
             {
                 var ls = Layers(c);
+                ls[11].Transform = null;                    // the stack is cached between tests: the Transform test can leave a per-layer transform here
                 if (c.Smooth) ls[6].Effects!.Clear().Wave(18f, 4f, c.Time * 4f);
                 int w = (int)(ls.Width * c.Scale), h = (int)(ls.Height * c.Scale);
                 if (c.NotMask)
@@ -1294,7 +1482,7 @@ namespace Sr2d64CSport
                     c.Note = ls.LastComposedFrom < 0 ? "Compose: nothing changed (cached)" : "Compose: redrew layers " + ls.LastComposedFrom + ".." + (ls.Count - 1);
                     for (int k = 0; k < c.Count; k++) ls.DrawRotate2(c.Canvas, c.X + k * 24, c.Y + k * 24, c.Angle, w, h);
                 }
-            }, needsFx: true, warp: true);
+            }, needsFx: true, warp: true).With(Param.Angle, 32).With(Param.Scale, 120);   // off-neutral: at x1.00 / 0 deg the stack is drawn exactly like the un-rotated 'LayeredSprite.Transform' test
             T(GLayers, "LayeredSprite.Transform: the whole stack through one editable transform frame (drag inside = move, corners = scale, edge dots = stretch, outside = rotate, Ctrl+corner = perspective)", "The same 12-layer stack; its geometry lives in ls.Transform, which the frame around it edits like an image editor: drag inside to move, a corner handle to scale about the opposite corner (Shift = keep aspect), an edge dot to stretch one axis, the ring outside to rotate about the pivot (Shift = 15 degree steps), Ctrl + a corner to pull that corner alone (perspective quad), right click to reset. The Op box adds an extra on top: skew, mirror, a layer with its own SpriteTransform inside the stack, Transform.Opacity from Blend. Changing the transform never recomposes (note: 'nothing changed') - one warp per draw; only 'Animate layer 6' recomposes, from layer 6. HitTest maps the mouse back to a composite pixel (label). Count copies (offset).",
                 c =>
                 {
@@ -1320,19 +1508,26 @@ namespace Sr2d64CSport
                     c.Info(c.Frame.Describe());
                     c.Info(hit.HasValue ? $"mouse -> composite pixel {hit.Value.X}, {hit.Value.Y}" : "mouse outside the transformed stack");
                 }, needsFx: true, warp: true).Ui(Param.Op, "Extra on top of the frame", Param.Blend, "Transform.Opacity (Opacity list)", Param.Count, "Copies", Param.Mouse, "Frame: drag / handles / ring; right click = reset", Param.Smooth, "Animate layer 6 (recomposes from 6)").Ops("Frame only", "+ Skew", "+ Mirror", "Layer 11: own transform", "+ Opacity").Also(t => t.Frame = true);
-            T(GEffects, "Effects: heat haze over the scene (Post, Turbulence)", "The Count x grid of colour sprites is drawn to Temp-sized cells, then each cell is redrawn through Effects.Turbulence in Post mode - a screen-space shimmer whose strength is Blend/24 px.", c =>
+            T(GEffects, "Effects: heat haze over the whole scene (screen-space Turbulence on one blit)", "A heat haze is a SCREEN-space effect: one continuous displacement field over the finished picture. So the grid of colour sprites is rendered once into a full-canvas scratch (cached - every parallel band only reads it) and that scratch is blitted back through Effects.Turbulence in a single DrawFx call: the shimmer slides over the sprites instead of wobbling each sprite on its own. Sprite-local DrawFx cannot do this - Effects.Post is ignored for a plain 1:1 draw (Effects.cs: 'Ignored for plain 1:1 draws'), so the pattern would restart on every sprite. Strength = Blend/24 px, feature size = Scale*16 px, phase = time*0.6. 'Smooth' = bilinear sampling of the displacement (off = nearest, blockier).", c =>
             {
-                fx.Clear().Turbulence(c.Scale * 16f, c.Blend / 24f, c.Time * 0.6f);
-                fx.Post = true;
-                Grid(c, (x, y) => c.Canvas.DrawFx(c.A.Color, x, y, fx, SR2D.Op.Paint, Opaque: true));
-            }, needsFx: true);
+                lock (hazeLock)
+                {   // static scene: rebuilt only when the canvas size or the asset set changed
+                    if (thaze == null || !ReferenceEquals(hazeOf, c.A) || thaze.Width != c.W || thaze.Height != c.H)
+                    {
+                        thaze?.Dispose(); thaze = new Sprite(c.W, c.H); hazeOf = c.A;
+                        for (int y = 0; y + c.S <= c.H; y += c.S) for (int x = 0; x + c.S <= c.W; x += c.S) thaze.Draw(c.A.Color, x, y, SR2D.Op.Paint);
+                    }
+                }
+                fx.Clear().Turbulence(c.Scale * 16f, c.Blend / 24f, c.Time * 0.6f, c.Smooth ? SR2D.Filter.Bilinear : SR2D.Filter.Nearest);
+                c.Canvas.DrawFx(thaze, 0, 0, fx, SR2D.Op.Paint, Opaque: true);
+            }, needsFx: true, clears: true).Ui(Param.Scale, "Feature size (x16 px)", Param.Blend, "Strength (Blend / 24 px)", Param.Smooth, "Bilinear displacement (off = nearest)", Param.Time, "Animate: the shimmer travels").With(Param.Smooth, true).With(Param.Blend, 200);
 
             T(GEffects, "Blur in place (canvas.Blur)", "Draws the Count x grid of colour sprites, then blurs the whole canvas in place with Sprite.Blur(radius). Full-frame cost at 1080p: ~5-6 ms per pass set (AVX2).", c =>
             {
                 Grid(c, (x, y) => c.Canvas.Draw(c.A.Color, x, y, SR2D.Op.Paint));
                 c.Canvas.Blur(BlurR(c), !c.Smooth);
-            }, needsBlur: true);
-            T(GEffects, "Blurred backdrop behind a sprite (frosted glass)", "A rectangle of the canvas is copied to Temp, blurred once with ToBlurred, and drawn back under the alpha sprite: the effect that UI 'acrylic' panels use.", c =>
+            }, needsBlur: true).Ui(Param.Scale, "Blur radius (x8 px)", Param.Smooth, "Fast (2-pass) blur", Param.Count, "Sprites (timing)").With(Param.Scale, 150);
+            T(GEffects, "Blurred backdrop behind a sprite (frosted glass)", "A rectangle of the canvas is copied to the Temp scratch, blurred IN PLACE with Sprite.Blur - clipped to the panel, which is exactly what an acrylic panel needs (no ToBlurred margin bookkeeping) - then lightened with MulAddS2X and drawn back under the alpha sprite. Radius = Scale*8 px, 'Smooth' off = the Fast 2-pass blur.", c =>
             {
                 int r = BlurR(c);
                 // background: tiles
@@ -1342,7 +1537,7 @@ namespace Sr2d64CSport
                 panel.Draw(c.Canvas, -px, -py, SR2D.Op.Paint);                          // grab the panel area
                 panel.ClearAlpha();
                 panel.Blur(r, !c.Smooth);                                               // frost it (clipped to the panel: exactly what a panel needs)
-                panel.MulAddS2X(panel, 0, 0, 96, 160);                                  // lighten like frosted glass
+                panel.MulAddS2X(panel, 0, 0, SR2D.ARGB(96, 96, 96, 96), SR2D.ARGB(160, 160, 160, 160));   // per byte x0.75 + 64: frosted, and the alpha byte stays 255
                 c.Canvas.Draw(panel, px, py, SR2D.Op.Paint);
                 if (Caps.HasPoly) c.Canvas.DrawRect(px + 0.5f, py + 0.5f, pw - 1, ph - 1, SR2D.ARGB(255, 255, 255, 255), 1f, false, SR2D.LineOp.AlphaBlend);
                 c.Canvas.Draw(c.A.Alpha, c.X - c.A.Alpha.Width / 2, c.Y - c.A.Alpha.Height / 2, SR2D.Op.AlphaBlend);
@@ -1404,7 +1599,6 @@ namespace Sr2d64CSport
                     c.Note = (ls.LastComposedFrom < 0 ? "Compose: cached" : "Compose: redrew layers " + ls.LastComposedFrom + "..") + " - top layer " + m;
                     ls.DrawScaled(c.Canvas, 0, 0, c.W, c.H);
                 }, needsBlend: true, needsFx: true, warp: true, clears: true).Ui(Param.Op, "Mode of the top layer", Param.Blend, "Opacity of the top layer", Param.Mouse, "Drag = move the top layer").Ops(modeNames).With(Param.Blend, 255).With(Param.Op, 9);
-
 
             // ===================================================== Voxels (VoxelGrid.cs)
             // Shared control layout of the voxel tests (see DemoTest.Controls / Ops / Bits): Op = camera (presets or free orbit),
@@ -1472,7 +1666,7 @@ namespace Sr2d64CSport
                 return t;
             }
 
-            VoxTest(T(GVoxel, "Voxel terrain (Count = grid size, camera / zoom / lighting from the controls)", "A procedurally generated terrain (Count x 8 voxels per side, half as deep: noise heightmap, caves carved with 3-D noise, a hollow tower with a blue lamp inside, lamps of different colours and strengths scattered on the surface, a fire pit, a beacon on the highest hill) drawn once per frame with Sprite.DrawVoxels. Camera: free orbit by default - drag the canvas to turn / tilt, middle-drag to pan, wheel to zoom - or a pixel-art preset from the Op selector. Lighting tier: None / Faces / Propagated (sky + lamps) / Smooth + ambient occlusion. Night lowers the sky light to the 'Sky light' slider; 'Lamp energy' scales what a lamp light level is worth on screen (the sky is not touched). The caption shows voxels drawn and the draw time; VoxelGrid.Update (faces + light propagation, done once per edit) is timed when the grid is rebuilt (Count changed).", c =>
+            VoxTest(T(GVoxel, "Voxel terrain (Count = grid size, camera / zoom / lighting from the controls)", "A procedurally generated terrain (Count x 8 voxels per side, half as deep: noise heightmap, caves carved with 3-D noise, a hollow tower with a blue lamp inside and an orange beacon on its roof, lamps of different colours and strengths scattered on the surface, a fire pit) drawn once per frame with Sprite.DrawVoxels. Camera: free orbit by default - drag the canvas to turn / tilt, middle-drag to pan, wheel to zoom - or a pixel-art preset from the Op selector. Lighting tier: None / Faces / Propagated (sky + lamps) / Smooth + ambient occlusion. Night lowers the sky light to the 'Sky light' slider; 'Lamp energy' scales what a lamp light level is worth on screen (the sky is not touched). The caption shows voxels drawn and the draw time; VoxelGrid.Update (faces + light propagation, done once per edit) is timed when the grid is rebuilt (Count changed).", c =>
             {
                 int side = Math.Clamp(c.Count * 8, 8, 512);
                 var g = EnsureVoxels(side, 0, out double tUp);
@@ -1566,7 +1760,7 @@ namespace Sr2d64CSport
                     px += sw2 + 14;
                 }
                 c.Note = $"{n}^3 from {desc} | {g.Stats().solid} solid, {drawn} drawn, {Lt} | build {tBuild:F1} ms | draw {tDraw:F2} ms";
-            }, needsVoxel: true, clears: true)).Ui(Param.Count, "Grid size: Count x 8 voxels per side (8 .. 256)", Param.Op, "Shape (built-in sprite set; a loaded file set replaces it)", Param.MaskBits, "Views used (rebuilds the model):",
+            }, needsVoxel: true, clears: true)).Ui(Param.Count, "Grid size: Count x 8 voxels per side (8 .. 256)", Param.Scale, "Zoom: pixels per voxel = Scale x 4 x 64 / grid size (so the model keeps its on-screen size as Count changes)", Param.Op, "Shape (built-in sprite set; a loaded file set replaces it)", Param.MaskBits, "Views used (rebuilds the model):",
                 Param.DotStep, "Blend of opposite views: 0=Dither 1=Lerp 2=Nearest 3=SurfaceOnly", Param.Blend, "Lighting tier: 0=None 1=Faces 2=Propagated 3=Smooth+AO",
                 Param.Smooth, "Fit: proportional (checked) or stretched to the face", Param.Xor, "Cut the model open (front quarter removed) to see the interior blend", Param.Time, "Animate: slow auto-rotation")
                 .Ops("Ball (3 discs)", "Box", "Cylinder", "Square top, round bottom", "Rocket").Bits(false, projViews).Range(Param.DotStep, 0, 3).Range(Param.Blend, 0, 3)
@@ -1637,7 +1831,7 @@ namespace Sr2d64CSport
             L[L.Count - 1].FileFilter = "Voxel / mesh files|*.vox;*.obj|MagicaVoxel (*.vox)|*.vox|Wavefront OBJ (*.obj)|*.obj|All files|*.*";
 
             // ===================================================== Old vs new
-            T(GCompare, "Lines: DrawLine (old)  vs  PreciseDots  vs  DrawLine2 (new)", "The same fan three ways: LEFT original DrawLine with DotStep (a fixed number of dots along the chord); MIDDLE the same call with PreciseDots: true (dots spaced evenly along the line); RIGHT DrawLine2 (dash = gap = DotStep px). Move the mouse to change the angles; 'XOR lines' flips all three to XOR.", c =>
+            T(GCompare, "Lines: DrawLine (old)  vs  PreciseDots  vs  DrawLine2 (new)", "The same fan three ways: LEFT original DrawLine with DotStep (a fixed number of dots along the major axis, so diagonals look sparser); MIDDLE the same call with PreciseDots: true (dots spaced evenly along the line); RIGHT DrawLine2 (dash = gap = DotStep px, also along the line). The difference only exists while the dot step is above 0 - at 0 all three draw solid lines and the panes are identical, so the slider starts at 3. Move the mouse to slide the three fan centres (each pane clips its own third; the angles themselves are fixed); 'XOR lines' flips all three to XOR.", c =>
             {
                 int n = c.Count * 32, third = c.W / 3;
                 for (int i = 0; i < n; i++)
@@ -1657,7 +1851,7 @@ namespace Sr2d64CSport
                 c.Canvas.SetLockRect();
                 c.Canvas.DrawLine(third, 0, third, c.H - 1, unchecked((int)0xFF808080));
                 c.Canvas.DrawLine(2 * third, 0, 2 * third, c.H - 1, unchecked((int)0xFF808080));
-            }, needsLine2: true);
+            }, needsLine2: true, check: c => ThreeFansDrawn(c)).Ui(Param.DotStep, "Dot / dash step (px) - 0 makes all three panes identical solid lines", Param.Xor, "XOR lines", Param.Count, "Lines (x32)").With(Param.DotStep, 3);
             T(GCompare, "Layer: AlphaBlend (old)  vs  AlphaOver (new) on a transparent layer", "Both halves draw into a TRANSPARENT (all-zero) layer, then the layer is composited over a checkerboard. Top: glow sprites (Draw with AlphaBlend vs a premultiplied sprite with AlphaOver) - left the soft edges turn black (they blend towards the layer's black rgb), right they stay correct. Bottom: shapes (12 soft discs + a ring) written with LineOp.AlphaBlend vs LineOp.AlphaOver - the same effect on fills and strokes (folded in from the old 'Layer: shapes with AlphaOver' test).", c =>
             {
                 // checkerboard background
@@ -1689,7 +1883,23 @@ namespace Sr2d64CSport
                     c.Canvas.Draw(layer, side * half, 0, SR2D.Op.AlphaOver);   // composite the layer (premultiplied by construction)
                 }
                 c.Canvas.DrawLine(half, 0, half, c.H - 1, unchecked((int)0xFFFFFFFF));
-            }, clears: true, needsOver: true);
+            }, clears: true, needsOver: true, check: c =>
+            {
+                // both halves must composite the layer over the checkerboard substantially (the two sides are
+                // SUPPOSED to differ - AlphaBlend darkens the glow's soft edges, that is the point of the test)
+                var px = c.Canvas.Pixels; int half = c.W / 2; int changedL = 0, changedR = 0;
+                for (int y = 0; y < c.H; y++) for (int x = 0; x < half; x++)
+                {
+                    int want = ((x / 32 + y / 32) & 1) == 0 ? unchecked((int)0xFF9090A0) : unchecked((int)0xFF606070);   // the bare checkerboard
+                    if (px[y * c.W + x] != want) changedL++;
+                    int wantR = ((x / 32 + y / 32) & 1) == 0 ? unchecked((int)0xFF9090A0) : unchecked((int)0xFF606070);
+                    if (px[y * c.W + half + x] != wantR) changedR++;
+                }
+                int area = c.H * half;
+                if (changedL < area / 20) return $"the AlphaBlend side barely changed the checkerboard ({changedL}/{area})";
+                if (changedR < area / 20) return $"the AlphaOver side barely changed the checkerboard ({changedR}/{area})";
+                return null;
+            });
             T(GCompare, "Rotate: DrawRotate (old)  vs  DrawRotate2 (new)  vs  DrawRotateShear (lossless)", "Left: original DrawRotate (DRAW_ROT kernels). Middle: DrawRotate2 (DRAW_WARP). Right: DrawRotateShear (three shears, every source pixel exactly once, pixel-sharp, staircase outline). Same angle, same source, all three turning the same way (the original's angle is counter-clockwise, so it gets -Angle); 'Smooth' = AA / bilinear on the first two (the shear version never interpolates). Labels under each.", c =>
             {
                 float a = c.Angle + c.Time * 0.5f;
@@ -1711,8 +1921,28 @@ namespace Sr2d64CSport
                     c.Canvas.DrawRotate(c.A.Color, c.S / 2, c.S / 2, c.W / 4, c.H / 2, a, c.Smooth, UseWarp: false);
                     if (Caps.HasWarp) c.Canvas.DrawRotate(c.A.Color, c.S / 2, c.S / 2, c.W * 3 / 4, c.H / 2, a, c.Smooth, UseWarp: true);
                 }
-            }, warp: true);
-            T(GCompare, "Scale: RESIZE ctor (old)  vs  DrawScaled (new)", "Left: new Sprite(src, None, w, h) + Draw (area average). Right: DrawScaled bilinear/nearest. Scale slider.", c =>
+            }, warp: true, check: c =>
+            {
+                // DRAW_ROT and its DRAW_WARP routing must agree: the description pins ~0.05 % differing edge
+                // pixels for nearest. A wider gap means one of the two kernels drifted.
+                var px = c.Canvas.Pixels; int half = c.W / 2; long diff = 0, drawn = 0;
+                for (int y = 0; y < c.H; y++) for (int x = 0; x < half; x++)
+                {
+                    int l = px[y * c.W + x], r = px[y * c.W + (c.W - 1 - x)];
+                    int lb = l >>> 24, rb = r >>> 24;
+                    if ((lb > 16) != (rb > 16)) { diff++; continue; }
+                    if (lb > 16)
+                    {
+                        drawn++;
+                        if ((Math.Abs((l >>> 16 & 255) - (r >>> 16 & 255)) + Math.Abs((l >>> 8 & 255) - (r >>> 8 & 255)) + Math.Abs((l & 255) - (r & 255))) > 24) diff++;
+                    }
+                }
+                if (drawn < 100) return "the rotation drew almost nothing";
+                double frac = diff / (double)drawn;
+                double limit = c.Smooth ? 0.10 : 0.01;
+                return frac <= limit ? null : $"DRAW_ROT vs UseWarp differ on {frac:0.###} of the drawn pixels (limit {limit:0.###}, smooth={c.Smooth})";
+            });
+            T(GCompare, "Scale: RESIZE ctor (old)  vs  DrawScaled (new)", "Left: new Sprite(src, None, w, h) + Draw - the old way: the native RESIZE builds a NEW sprite (area average when it shrinks), so every copy allocates one. Right: no allocation, DrawScaled onto the canvas with 'Smooth' on = Bilinear / off = Nearest. Scale slider = the output size (x0.01 of the sprite); it starts at 150% because at the generic 100% w = the sprite size, neither side resamples anything and the two halves are two identical exact copies - nothing to compare. Count = copies per frame (the left allocates a sprite for each one).", c =>
             {
                 int w = Math.Max(2, (int)(c.S * c.Scale)), h = w;
                 for (int k = 0; k < c.Count; k++)
@@ -1721,7 +1951,7 @@ namespace Sr2d64CSport
                     c.Canvas.Draw(s, c.W / 4 - w / 2, c.H / 2 - h / 2, SR2D.Op.Paint);
                     if (Caps.HasWarp) c.Canvas.DrawScaled(c.A.Color, c.W * 3 / 4 - w / 2, c.H / 2 - h / 2, w, h, SR2D.Op.Paint, Filt(c));
                 }
-            }, warp: true);
+            }, warp: true).Ui(Param.Scale, "Output size (x0.01 of the sprite; 100 = no resize at all)", Param.Smooth, "Right: Bilinear (off = Nearest)", Param.Count, "Copies per frame (the left allocates one sprite each)").With(Param.Scale, 150).With(Param.Smooth, true);
 
             // the list shows one header per group: order by group (stable, so the order inside a group is the order above)
             var order = new[] { GOriginal, GMask, GBump, GXform, GScene, GNew, GShapes, GText, GEdit, GLayers, GEffects, GBlend, GFiles, GVoxel, GControls, GCompare };
@@ -2267,28 +2497,48 @@ namespace Sr2d64CSport
             tdof!.Invalidate(0);
         }
         [ThreadStatic] static LayeredSprite? tblend; [ThreadStatic] static Assets? tblendOf;
+        [ThreadStatic] static List<Sprite>? tblendSrc;   // the stack does NOT own its source sprites - release them with it (they leaked per rebuild before)
         static LayeredSprite BlendLayers(Ctx c)
         {
-            if (tblend == null || !ReferenceEquals(tblendOf, c.A) || tblend.Width != Math.Max(64, c.W / 2) || tblend.Height != Math.Max(64, c.H / 2)) { tblend?.Dispose(); tblend = BuildBlendLayers(c); tblendOf = c.A; }
+            if (tblend == null || !ReferenceEquals(tblendOf, c.A) || tblend.Width != Math.Max(64, c.W / 2) || tblend.Height != Math.Max(64, c.H / 2))
+            {
+                tblend?.Dispose();
+                if (tblendSrc != null) foreach (var s in tblendSrc) s.Dispose();
+                tblend = BuildBlendLayers(c, out tblendSrc); tblendOf = c.A;
+            }
             return tblend;
         }
         /// <summary>Stack for the blend-mode layer test: picture, Multiply vignette, Screen streak, Color tint, and the interactive top layer (alpha sprite).</summary>
-        static LayeredSprite BuildBlendLayers(Ctx c)
+        static LayeredSprite BuildBlendLayers(Ctx c, out List<Sprite> owned)
         {
             int w = Math.Max(64, c.W / 2), h = Math.Max(64, c.H / 2);
             var ls = new LayeredSprite(w, h);
-            var pic = new Sprite(w, h); pic.DrawScaled(c.A.Color, 0, 0, w, h, SR2D.Op.Paint, SR2D.Filter.Auto);
+            owned = new List<Sprite>();
+            var pic = new Sprite(w, h); pic.DrawScaled(c.A.Color, 0, 0, w, h, SR2D.Op.Paint, SR2D.Filter.Auto); owned.Add(pic);
             ls.Add(pic, null, 0, 0, SR2D.Op.Paint);
-            var vig = new Sprite(w, h); vig.ClearBuffer(0);
+            var vig = new Sprite(w, h); vig.ClearBuffer(0); owned.Add(vig);
             vig.FillRect(0, 0, w, h, SpriteGradient.Radial(w / 2f, h / 2f, MathF.Max(w, h) * 0.7f, false, unchecked((int)0xFFFFFFFF), unchecked((int)0xFF202020)));
             ls.Add(vig, null, 0, 0, SR2D.Op.Multiply);
-            var streak = new Sprite(w, h); streak.ClearBuffer(0);
+            var streak = new Sprite(w, h); streak.ClearBuffer(0); owned.Add(streak);
             streak.FillRect(0, 0, w, h, SpriteGradient.Linear(0, 0, w, h, false, 0, unchecked((int)0xFFFFE0A0), 0));
             ls.Add(streak, null, 0, 0, SR2D.Op.Screen).Opacity = 0.7f;
-            var tint = new Sprite(w, h); tint.ClearBuffer(unchecked((int)0xFF3060C0));
+            var tint = new Sprite(w, h); tint.ClearBuffer(unchecked((int)0xFF3060C0)); owned.Add(tint);
             ls.Add(tint, null, 0, 0, SR2D.Op.Color).Opacity = 0.35f;
-            ls.Add(c.A.Alpha, null, 0, 0, SR2D.Op.Overlay);
+            ls.Add(c.A.Alpha, null, 0, 0, SR2D.Op.Overlay);      // a SHARED asset - not owned here
             return ls;
+        }
+        /// <summary>Suite check helper: every third of the Lines old-vs-new test must have drawn a real fan.</summary>
+        static string? ThreeFansDrawn(Ctx c)
+        {
+            var px = c.Canvas.Pixels; int third = c.W / 3;
+            for (int pane = 0; pane < 3; pane++)
+            {
+                int lit = 0;
+                for (int y = 0; y < c.H; y++) for (int x = pane * third; x < (pane + 1) * third; x++)
+                    if ((px[y * c.W + x] >>> 24) > 32) lit++;
+                if (lit < 1000) return $"pane {pane + 1} of 3 drew almost nothing ({lit} lit px) - the fan collapsed";
+            }
+            return null;
         }
         static LayeredSprite BuildLayers(Ctx c)
         {
@@ -2314,6 +2564,11 @@ namespace Sr2d64CSport
         }
         [ThreadStatic] static Effects? tfx, tfx2;
         static Effects fx => tfx ??= new Effects();
+        // the heat haze test renders its static scene into a full-canvas scratch so the displacement is screen-space
+        static Sprite? thaze; static Assets? hazeOf; static readonly object hazeLock = new object();
+        // the real-time motion echo of the effects test (shared across frames; Step is keyed on the animation time)
+        static MotionEcho? mecho; static Sprite? esrc; static float lastEchoTime = -1;
+        static readonly object echoLock = new();
 
         static Sprite Shadow(Sprite src)
         {
@@ -2484,6 +2739,7 @@ namespace Sr2d64CSport
             for (int k = 0; k < n; k++) draw(x0 + (k % per) * c.S, y0 + (k / per) * c.S);
         }
         [ThreadStatic] static Sprite? tand;   // MaskInterSector visualisation scratch
+        [ThreadStatic] static Sprite? tcell;  // Scene B's tile cell (a real S x S sprite: a CreateView would not clip a blit)
         [ThreadStatic] static Sprite? tworld; // MaskInterSector collision map (canvas-sized, bit values only)
         static Sprite MaskWorld(int w, int h) { if (tworld == null || tworld.Width != w || tworld.Height != h) { tworld?.Dispose(); tworld = new Sprite(w, h); } return tworld; }
         // environment image for the EBM tests shifted by the mouse (sun position) and scaled by Brite - a 256x256 TileDraw, ~free
@@ -2495,10 +2751,58 @@ namespace Sr2d64CSport
             float t = c.Time * 0.5f;
             int ox = (int)((c.X - c.W / 2) * 0.5f + MathF.Cos(t) * 40), oy = (int)((c.Y - c.H / 2) * 0.5f + MathF.Sin(t) * 40);
             tenv.TileDraw(e, 0, 0, e.Width, e.Height, ox, oy);
-            int m = (int)Math.Clamp(c.Brite * 128, 0, 255);
-            if (m != 128) tenv.MulAddS2X(tenv, 0, 0, SR2D.ARGB(255, (byte)m, (byte)m, (byte)m), 0);
+            int m = (int)Math.Clamp(c.Brite * 128, 0, 255);       // S2X: mul 128 = x1.00, so Brite 100 = the environment unchanged
+            // add 128 = +0: an add of 0 is MINUS 256 per byte, which would punch the whole environment to black
+            tenv.MulAddS2X(tenv, 0, 0, SR2D.ARGB(128, (byte)m, (byte)m, (byte)m), SR2D.ARGB(128, 128, 128, 128));
             return tenv;
         }
+    }
+
+    /// <summary>
+    /// Strip of the motion blur test: the trail curve editor (SpriteCurveEditor over <see cref="TrailCurve"/>).
+    /// The curve bends the trail perpendicular to its direction: x walks the trail (0 = first tap, 1 = last),
+    /// y is the bend in ± half lengths around the centre line (the default is the flat centre line).
+    /// </summary>
+    internal static class MotionDemo
+    {
+        public const int StripHeight = 216;
+        /// <summary>The trail curve the motion test samples (x along the trail 0..1, y = bend, 0.5 = the centre line).</summary>
+        public static readonly Curve TrailCurve = Flat();
+        static MotionDemo()
+        {   // the CURVE mode has to bend from the first frame: over the flat centre line the path IS the straight
+            // trail (perp = 0 for every tap), so the demo would show nothing until the strip is edited by hand.
+            TrailCurve.Set(new[] { new PointF(0f, 0.5f), new PointF(0.32f, 0.1f), new PointF(0.66f, 0.9f), new PointF(1f, 0.5f) });
+        }
+        /// <summary>The WinForms strip (built in demo/ControlsDemo.cs as MotionStrip; the headless runner stubs it).</summary>
+        public static Control Build() => MotionStrip.Build();
+
+        public static Curve Flat()
+        {
+            var c = new Curve { Clamp01 = false };
+            c.Reset();
+            c.Move(0, 0f, 0.5f); c.Move(1, 1f, 0.5f);           // the diagonal -> the flat centre line
+            return c;
+        }
+
+        /// <summary>
+        /// The MotionBlurPath points for the current curve: <paramref name="length"/> px along the
+        /// <paramref name="angleDeg"/> direction, bent perpendicular by the curve (the y excursion is
+        /// scaled by <paramref name="bend"/>, 0 = a straight trail, 1 = the curve at full ± half length).
+        /// </summary>
+        public static System.Drawing.PointF[] Path(float angleDeg, float length, float bend, int points = 24)
+        {
+            var pts = new System.Drawing.PointF[points];
+            float a = angleDeg * MathF.PI / 180f, ca = MathF.Cos(a), sa = MathF.Sin(a);
+            for (int k = 0; k < points; k++)
+            {
+                float t = (float)k / (points - 1);
+                float v = (float)TrailCurve.Evaluate(t) - 0.5f;      // 0 = the centre line
+                float along = t * length, perp = v * 2f * bend * length;
+                pts[k] = new System.Drawing.PointF(along * ca - perp * sa, along * sa + perp * ca);
+            }
+            return pts;
+        }
+
     }
 
     /// <summary>The demo's text face: the first installed family found from a preference list (Segoe UI on Windows, DejaVu Sans on Linux, ...), loaded once.</summary>

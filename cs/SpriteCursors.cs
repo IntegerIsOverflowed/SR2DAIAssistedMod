@@ -31,7 +31,7 @@ namespace Sr2d64CSport
     /// <summary>Procedurally drawn cursors (open hand, grabbing hand, rotate, magnifiers) as real <see cref="Cursor"/> objects.</summary>
     internal static class SpriteCursors
     {
-        public enum Kind { HandOpen, HandGrab, Rotate, ZoomIn, ZoomOut }
+        public enum Kind { HandOpen, HandGrab, Rotate, ZoomIn, ZoomOut, Pen }
 
         static readonly Dictionary<(Kind, int), Cursor> cache = new Dictionary<(Kind, int), Cursor>();
         static readonly object gate = new object();
@@ -44,6 +44,8 @@ namespace Sr2d64CSport
         public static Cursor Rotate => Get(Kind.Rotate);
         public static Cursor ZoomIn => Get(Kind.ZoomIn);
         public static Cursor ZoomOut => Get(Kind.ZoomOut);
+        /// <summary>A pen, tip at the hot spot: for surfaces you draw on with the left button.</summary>
+        public static Cursor Pen => Get(Kind.Pen);
 
         /// <summary>The cursor for a kind at the current <see cref="Size"/> (created on first use; a system cursor when the OS refuses).</summary>
         public static Cursor Get(Kind kind) => Get(kind, Size);
@@ -143,7 +145,7 @@ namespace Sr2d64CSport
                 case Kind.HandOpen:
                 case Kind.HandGrab:
                 {
-                    // the hands come from a vector drawing (uploads/cursor/hand_cursor.svg, traced into the *Outline / *Fill
+                    // the hands come from a vector drawing (legacy/reference/cursor/hand_cursor.svg, traced into the *Outline / *Fill
                     // constants below): a black outline shape with the white hand on top, like the system cursors. The
                     // design space is 32 px; anything else is a uniform scale.
                     bool open = kind == Kind.HandOpen;
@@ -172,6 +174,24 @@ namespace Sr2d64CSport
                     s.FillPath(head, paper, op, true);
                     return new Point((int)(15 * scale), (int)(16 * scale));
                 }
+                case Kind.Pen:
+                {
+                    // a slim pen at -45 degrees, tip at the hot spot (bottom left): black outline, white body, dark nib
+                    float tx = 7.5f * scale, ty = 24.5f * scale;                       // the tip
+                    const float k = 0.70710678f;                                       // axis unit (-45 deg)
+                    (float ux, float uy) = (k, -k); (float nx, float ny) = (k, k);
+                    System.Drawing.Point C(float d, float w) => new System.Drawing.Point((int)MathF.Round(tx + ux * d + nx * w), (int)MathF.Round(ty + uy * d + ny * w));
+                    float half = 2.3f * scale, nib = 5.2f * scale, body = 20.5f * scale;
+                    var b = new Sprite.PathBuilder();
+                    b.MoveTo(C(nib, half)).LineTo(C(body, half)).LineTo(C(body, -half)).LineTo(C(nib, -half)).Close();
+                    s.DrawPath(b, ink, 2.2f * scale, true, op, true);
+                    s.FillPath(b, paper, op, true);
+                    var nibPath = new Sprite.PathBuilder();
+                    nibPath.MoveTo(C(0.5f * scale, 0)).LineTo(C(nib, half)).LineTo(C(nib, -half)).Close();
+                    s.DrawPath(nibPath, ink, 1.6f * scale, true, op, true);
+                    s.FillPath(nibPath, unchecked((int)0xFF303438), op, true);
+                    return new Point((int)MathF.Round(tx), (int)MathF.Round(ty));
+                }
                 case Kind.ZoomIn:
                 case Kind.ZoomOut:
                 {
@@ -195,7 +215,7 @@ namespace Sr2d64CSport
 
         // ---------------------------------------------------------------- the hand pictures
         // SVG path data (M / L / C / Z only, absolute) in the 32 px design space, x right, y down. Extracted from
-        // uploads/cursor/hand_cursor.svg (CorelDRAW): each hand is the black outline shape + the white fill shape.
+        // legacy/reference/cursor/hand_cursor.svg (CorelDRAW): each hand is the black outline shape + the white fill shape.
         const string OpenOutline =
             "M25.40 18.41C25.35 18.65 25.33 18.90 25.32 19.12L25.32 19.17L25.19 20.94L25.19 20.94C25.06 23.13 24.38 24.24 23.73 25.28C23.46 25.72 23.19 26.15 23.03" +
             " 26.65C22.96 26.88 22.94 27.18 22.92 27.48C22.87 28.35 22.82 29.20 21.92 30.04C20.88 31.00 18.52 30.98 17.11 30.97C17.00 30.97 17.33 30.97 16.72 30.97" +

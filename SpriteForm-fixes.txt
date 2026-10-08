@@ -1,0 +1,1099 @@
+================================================================================
+SpriteForm.cs - what was broken, how it was fixed, and why
+================================================================================
+Files touched:  cs/SpriteForm.cs  (the whole chrome), cs/Sprite.Text.cs (one
+                engine bug), cs/ChromeDesign.cs (the designer's colour dialogs, new),
+                EmptySR2DFormTemplate/ (new empty project).
+Everything below was checked by running real windows on this machine (175% DPI,
+2048x1536) and reading their pixels back, not by reasoning about the code. From
+round six the reads are DPI-aware SCREEN grabs (PrintWindow renders a native
+caption for a window that keeps an invisible real frame - section 20). The
+harness lives outside the repo (D:\SR2Dlastdump\harness):
+BarHarness.csproj compiles cs/*.cs plus a knob-driven form, so every property
+below can be photographed:
+  dotnet run -c Release -project harness/BarHarness -- --seed=7 --count=9 --skew=10 --shot=out.png
+  harness\hit.ps1   - sends WM_NCHITTEST at the edges / corners, prints the HT code
+  harness\dbl.ps1   - real SetCursorPos + mouse_event double click, compares window rects
+  harness\winshot.ps1 - PrintWindow (flag 2) of any running process's main window
+  harness\grab.ps1  - DPI-aware screen grab of a window rectangle plus its surroundings
+  harness\crop.ps1  - crops / zooms one of those grabs nearest-neighbour, for reading pixels
+  harness\styles.ps1 - decodes GWL_STYLE / GWL_EXSTYLE of a running window
+  harness\anim6.ps1 - samples a window rectangle ~74x/second and prints every pixel
+                       signature that changes: the minimize animation meter
+  harness\Probe.cs  - pixel-counting tests against the engine (the shadow bug)
+  harness\shots.sh  - one live screen grab per chrome variant + crop.ps1 + montage.ps1
+  harness\pdiff.ps1 - counts the differing pixels of two same-size grabs: the A/B meter
+  harness\extshot.ps1 - launches an app that has no harness knobs of its own (the
+                       template) and grabs its real window pixels
+  harness\wins.ps1  - every top-level window of a process (finds a stuck modal dialog)
+  harness\evt.ps1   - pulls the exception of a crashed GUI app out of the event log
+  harness\b.sh      - kill + dotnet build -c Release (the harness builds Debug by
+                      default, so running the Release exe without this can shoot a stale binary)
+
+
+--------------------------------------------------------------------------------
+1. The chrome disappeared: "title bar covered with a rectangular something
+   containing text", buttons gone, no icon.
+--------------------------------------------------------------------------------
+Was:   the bar was a strip with several children - a stripe Sprite, a caption
+       Label, an icon box, a Dock.Fill filler label, the three buttons.
+Bug:   SpriteForm's own teardown and any app that calls
+       `Controls.Clear()` / rebuilds its child list disposed those children,
+       because ControlCollection.Clear() disposes everything it removes. The
+       form survived with a half-drawn bar: the leftover opaque filler label
+       sat over the stripes showing the caption, which is exactly the
+       "rectangular something containing text" that was reported.
+Fix:   the bar is ONE control. TitleBarStrip owns a single cached Sprite and
+       paints the background, the colour bars, the icon, the caption and the
+       extra texts into it in one pass (RenderBar), then blits it. Its only
+       children are the three caption buttons; even they are not required for
+       the bar to look right.
+Why:   one surface cannot be covered by a sibling, cannot be disposed behind
+       your back by layout, and cannot get its z-order wrong. It also removes
+       a class of flicker: the old bar repainted 4-6 controls per frame.
+       Docked layout runs back-to-front through the child list, so the bar must
+       have the HIGHEST child index to stay on top - OnControlAdded now calls
+       bar.SendToBack() whenever app content is added on top of it.
+
+--------------------------------------------------------------------------------
+2. No window icon in the title bar.
+--------------------------------------------------------------------------------
+Was:   no icon was drawn at all.
+Fix:   EnsureIconSprite() draws Form.Icon (or TitleIcon when set, ShowIcon=false
+       hides the slot) sized with the bar (bar height - 8, clamped to 12..32),
+       vertically centred, before the caption. A click in the icon's x range
+       (iconClickZone) opens the window menu, a double click closes the form -
+       native title bar behaviour.
+Engine trap found: `icon.ToBitmap()` returns the icon's STORED frame (32x32) no
+       matter what size you built the Icon with, so asking for
+       `new Icon(ic, 16, 16).ToBitmap()` and blitting it overflowed the 24 px
+       bar. Fixed by forcing the size in the engine instead:
+       `new Sprite(bmp, SR2D.Transform.None, size, size)` resamples to exactly
+       the slot. That is the shape of the fix, not a workaround - SR2D owns the
+       rasterisation, so the icon scales with TitleBarHeight.
+
+--------------------------------------------------------------------------------
+3. The colour bars (the requested pattern).
+--------------------------------------------------------------------------------
+Bars are skewed rectangles running the full height of the bar: the top edge is
+to the RIGHT of the bottom edge (as in the reference image), equal width,
+random colours. Settings, all live (each setter touches the bar and it
+re-renders on the next frame):
+  StripeSeed            int, -1 (default) = a random seed picked when the form
+                        is created (Environment.TickCount), same colours for
+                        the life of the window; set it to a number to make the
+                        palette reproducible.
+  StripeBarWidth        px per bar (0..128, default 0 = the width comes out of the length) -
+                        taken LITERALLY in every mode (round
+                        nine: it used to be a maximum in the two text modes, which made the
+                        painted bar narrower than the number in the property).
+  StripeBarCount        used by FixedCount mode (0..4096, default 8). In the two text modes it
+                        is the number the mirrored length is DIVIDED BETWEEN, and only while
+                        StripeBarWidth is 0 - a positive width decides the count instead.
+  StripeMode            None | CaptionLength (default) | AllTitleTextLength |
+                        FixedCount. CaptionLength = one bar per character of
+                        Text; AllTitleTextLength = one per character of the
+                        caption PLUS every extra title text.
+                        (ROUND NINE CHANGED WHAT THE TWO NUMBERS MEAN in the two
+                        text modes: the length the run mirrors is the icon + text
+                        block in pixels, a positive StripeBarWidth is that width
+                        literally and the COUNT becomes ceil(length / width),
+                        while width 0 divides the length between the mode's
+                        count. FixedCount still takes both literally. See the
+                        round nine section at the end.)
+  StripeStyle           FullBars (default) | TopAndBottomLines - the same
+                        parallelograms, but only a StripeLineThickness px band
+                        at the top and the same at the bottom is painted, the
+                        middle keeps the bar colour.
+  StripeSkew            px the top of a bar sits right of its bottom. -1
+                        (default) = half the bar height, which keeps the
+                        slant constant as the bar grows.
+  StripeColors          optional explicit palette (repeats, then alpha-forced
+                        opaque); empty = the seeded HSL random colours.
+  ShowStripes           convenience on/off switch.
+Rendering notes: the bars go through SR2D's FillPolygon with pixel-CORNER
+  coordinates and the engine fills rows [top, bottom), so 0..h covers the bar
+  exactly and adjacent skewed bars share an edge with no seam and no
+  half-transparent column. StripeLineThickness and the two line bands use
+  SetLockRectXY to clip the same geometry instead of drawing different
+  geometry - lines and full bars always agree.
+
+--------------------------------------------------------------------------------
+4. Caption + extra texts, each with its own settings, shadow on by default.
+--------------------------------------------------------------------------------
+SetTitleTags(new TitleTag("DRAFT", 0xFF7FD4FF), ...) puts any number of texts
+after the caption; each TitleTag has Text, Color, FontFamily, FontSize, Shadow
+and ShadowColor, and Shadow defaults to true. Bar-wide knobs:
+TitleTextColor, TitleTextFontFamily, TitleTextFontSize, TitleTextShadow
+(default true), TitleTextShadowColor, TitleTextShadowOffset (default 1 px).
+Both the caption and the tags draw through SR2D's DrawText with the shadow
+overload, so a tag can opt out (Shadow = false) or use its own shadow colour.
+The shadow exists so text stays readable over any bar colour, which is why it
+is on by default rather than opt-in.
+Bug found while doing this - real fonts were vertically clipped in a 24 px bar.
+  The pixel font is 5x7 so it must be stepped up with the bar, but a SpriteFont
+  size is already an absolute px em and the old code multiplied THAT by the
+  same step (a 12 px font at scale 2 in a 40 px bar overflowed). TextScale()
+  now splits the two: pixel font steps with the bar height, a real font draws
+  at 1 when an explicit size is given and only the app default follows the bar.
+
+--------------------------------------------------------------------------------
+5. Borders: too thick, custom, no corner resize cursor, "transparent at full
+   size", "garbage when scaling".
+--------------------------------------------------------------------------------
+Was:   eight separate grip Controls (4 edges + 4 corners) around the window,
+       plus a thick fixed-colour frame.
+Bugs:  a) the corner grips were sized 0x0 in several states, so the resize
+          CURSOR never appeared on a corner (only the four edges worked);
+       b) the grips were children with BackColor = Transparent, and in
+          WinForms a transparent child paints the PARENT's background over its
+          siblings - so the "invisible overlay" was visible and smeared the
+          bar; that is the "transparent at full size" report;
+       c) the grips were positioned from the old bounds during a live resize,
+          which is the garbage seen while dragging an edge.
+Fix:   all grip controls are deleted. The frame is now structural:
+         - BorderColor (0xAARRGGBB) + BorderThickness (0..24, default 6) paint
+           the frame as the FORM's own Padding + BackColor. No child control
+           is involved, so nothing can be transparent over nothing, and there
+           is nothing to mis-position mid-resize. An alpha of 00 (or
+           thickness 0) = no frame at all, the content runs to the edge.
+         - ResizeBandWidth (0..24) widens the grab without thickening the
+           visible line (the classic thin-border-hard-to-grab tradeoff).
+         - WndProc answers WM_NCHITTEST with HTLEFT/HTRIGHT/HTTOP/HTBOTTOM and
+           all four HT*_LEFT/RIGHT corner codes, so the eight native cursors
+           and the native resize loop come from Windows itself. GrabBand is 0
+           when maximized or full screen, so a maximized window has no grab.
+       BarCount/PatternWidth and the bar itself follow the new size through
+       OnResize -> ApplyFrame + bar.Touch, which is why scaling is clean now.
+Proof: hit.ps1 at pad 3 returns 13/14/16/17 on the four corners and 10/11/12/15
+       on the edges (HTCLIENT at pad 10 = inside); the resize shots z1_grow
+       (500 -> 750 wide) and z2_shrink (900 -> 400) plus the 260 px and the
+       maximized 2048 px windows show a correct bar at every size.
+
+--------------------------------------------------------------------------------
+6. Double-clicking the title bar did not maximize / restore.
+--------------------------------------------------------------------------------
+Cause: TitleBarStrip is a Control, and Control raisesDoubleClick only fires when
+       the ControlStyles.StandardDoubleClick bit is set (it is off for a plain
+       Control, and Control.DoubleClick is an event - it cannot just be
+       assigned). OnMouseDoubleClick was therefore never called. That is why
+       the old handler existed but never ran.
+Fix:   the bar's constructor calls
+       SetStyle(... | ControlStyles.StandardClick | ControlStyles.StandardDoubleClick, true).
+       Double-click now toggles maximize/restore; dragging a MAXIMIZED window
+       restores it under the cursor with the grab point kept on the caption
+       (Windows behaviour), right click on the maximize button is full screen.
+Proof: dbl.ps1 (a real synthesized double click, not a call into the handler):
+       800x500 -> 0,0 2048x1452 (working area, taskbar untouched) -> back to
+       800x500.
+
+--------------------------------------------------------------------------------
+7. Constructor-order crash (found immediately, it blocked everything else).
+--------------------------------------------------------------------------------
+Bug:   the base Form constructor sizes the window, which calls the OVERRIDDEN
+       OnResize; that touched `bar`, which is a readonly field not assigned
+       until the derived constructor body runs -> NullReferenceException on the
+       first `new SpriteForm()`, and the same for OnTextChanged.
+Fix:   a `barLive` flag, false while the base constructor runs, set to true
+       right after the bar is created and before it is added. OnResize,
+       OnTextChanged, ApplyFrame, OnControlAdded and PlaceCorners-style layout
+       all return early while it is false. The alternative (creating the bar in
+       a field initializer) does not work: the bar needs `this`.
+
+--------------------------------------------------------------------------------
+8. ENGINE BUG (cs/Sprite.Text.cs) - a text background erased the drop shadow.
+--------------------------------------------------------------------------------
+Was:   Sprite.DrawText's shadow overload drew the shadow first and then handed
+       the SAME bg colour to the plain overload for the main pass. The plain
+       overload starts by filling its text box, and that box carries 2*scale
+       padding - strictly larger than a 1-2 px shadow offset - so the fill
+       painted the shadow away completely. Any caller using shadow + background
+       got a shadowless, wrongly-padded box. This is a real engine bug, not a
+       SpriteForm misuse.
+Fix:   the background box is now filled BEFORE the shadow pass, and both text
+       passes are made with bg = 0. Order: box -> shadow -> glyphs.
+Proof: harness/Probe.cs counts pixels of each colour in a 120x40 target
+       (bg = blue, text = white, shadow = green): fixed order gives
+       "shadow px=104 bg px=1147 text px=46", the old order gives
+       "shadow px=0" - the shadow was literally gone. The probe reproduces the
+       old call order non-destructively rather than patching the engine down
+       temporarily.
+
+--------------------------------------------------------------------------------
+9. New empty project: EmptySR2DFormTemplate/
+--------------------------------------------------------------------------------
+What:  a .NET 10 WinForms desktop project that is as empty as Visual Studio's
+       own "Empty App" template - Program.cs with the stock
+       ApplicationConfiguration.Initialize() / Application.Run(new Form1()),
+       Form1.cs + Form1.Designer.cs with only AutoScaleMode, ClientSize 800x450,
+       Text = "Form1" - except Form1 derives from SpriteForm, so the window
+       already has the SR2D chrome (bars, icon, caption with shadow, buttons,
+       resizable border) with zero code written.
+Why:  the repo's template/ is a working app with a SpriteBox canvas and a pile
+       of controls; this is the "nothing but a form" starting point.
+Two deliberate deviations from the VS template, both explained in
+EmptySR2DFormTemplate/README.txt: AutoScaleMode is None (SR2D works in device
+pixels; a scaled designer font desynchronises the chrome from the content), and
+- since round two, see section 13 - Form1 is PUBLIC partial in both files, which
+is what lets the Visual Studio designer open it at all. csproj mirrors
+template/SR2DApp.csproj:
+net10.0-windows, x64, nullable, implicit usings, allow unsafe, the latest
+recommended analyzers, the engine compiled in from ../cs/*.cs, SR2D64.dll
+copied next to the exe from ../native/bin/x64.
+Verified: `dotnet build -c Release` succeeds with no warnings, the exe runs,
+and winshot.ps1 captured an 800x450 window with the empty client area and the
+full bar.
+
+--------------------------------------------------------------------------------
+10. Incidental fixes made along the way
+--------------------------------------------------------------------------------
+* The pattern used to push the caption off-screen on a narrow window. The bar
+  now clips the pattern to `width - ButtonsWidth() - TextGap`, so the caption
+  and the three buttons always survive; DrawBars returns early at zero width.
+* ButtonsWidth() is computed from Visible, so hiding a button (ShowMinimize-
+  Button = false etc.) reclaims its room; each Show*Button setter touches the
+  bar so the change is immediate.
+* The bar's cache signature now includes the three button Visible flags and
+  the app default font family / size, so those changes invalidate the cached
+  render instead of showing a stale frame.
+* CA2014 (stackalloc inside a loop): the bar's four polygon points are one
+  stackalloc hoisted outside the loop and rewritten per bar.
+* CS0649: TitleTag gained the (text, color, fontFamily, fontSize, shadowColor)
+  constructor so ShadowColor is settable rather than left unassigned.
+* CS1503: the frame colour is built with `unchecked((int)(0xFF000000u |
+  (uint)borderColor))` - `int | uint` widens to long in C#, which does not
+  convert back to Color.FromArgb's int implicitly.
+
+--------------------------------------------------------------------------------
+11. Round two, item by item (all of these were re-measured on live windows)
+--------------------------------------------------------------------------------
+a) "title bar smallest size by default, with the smallest possible pixel font"
+   MinBarHeight = 18 / MaxBarHeight = 64 now bracket TitleBarHeight, and the
+   constructor starts the bar at 18 px instead of 26. The button glyphs used to
+   be a fixed 12 px em, which is taller than an 18 px bar once the padding is
+   counted, so LayoutBar sizes them with the bar: `glyph = clamp(bar.Height - 6,
+   8, 20)`. The caption / tags already fell back to the 1 px PixelFont when no
+   font is set, which is the smallest face SR2D has, and the default
+   TitleTextFontSize is 0, so the bar renders at the pixel font by default.
+   Evidence: def_bar.png (no --tbh at all) shows 18 px of bar with the icon, the
+   bars, "SR2D64.dll" and three legible buttons; tall_bar.png is the same chrome
+   at --tbh=40.
+
+b) "text and icon in front of the coloured pattern, with a flag to put them after"
+   RenderBar now paints the bars first and the icon + caption on top of them,
+   starting at TextGap from the left edge. StripesBehindText (default true) is
+   the flag: false restores the old order, where the pattern occupies the left
+   part of the bar and the icon + caption start after it.
+   Evidence: the default shot vs --behind=0 (behind0_bar.png) - same seed, the
+   caption sits over the bars in one and after them in the other.
+
+c) "when the icon is over the pattern, put it in a little rounded rectangle"
+   IconChip() draws a FillRoundRect plate (70 % black) with a 1 px AA
+   DrawRoundRect highlight under the icon, but only where the icon actually
+   overlaps the pattern (`IconBackdrop && x < patternW`), and only while
+   StripesBehindText is on. Radius and padding scale with the icon (pad =
+   clamp(h/5, 2, 4)), so it stays a chip and never becomes a box at 40 px bars.
+   IconBackdrop = false takes it away. Evidence: def_bar.png / tall_bar.png.
+
+d) "the form must not resize to nothing"
+   ApplyMinimumSize() derives a floor from the chrome itself - the three buttons
+   + four text gaps + 80 px of pattern, and the bar + 40 px of content, plus the
+   painted border twice - and is called from LayoutBar, ApplyFrame and the three
+   Show*Button setters, so it follows every chrome change instead of being a
+   constant. It only ever raises MinimumSize, never lowers one the app set.
+   Evidence: --shrink=10 logs "MinimumSize={Width=184, Height=70}
+   actual={Width=232, Height=70} barHeight=18 controls=2" and shrunk_frame1_x.png
+   photographs the window at that floor with the icon chip, the caption and all
+   three buttons intact. (232 rather than 184: a window that carries a real
+   frame gets Windows' own minimum tracking width on top of ours - still a floor,
+   just a slightly friendlier one.)
+
+e) "the form still lacks the Windows 11 animations" - see section 12.
+
+f) "the template project only opens in the code editor" - see section 13.
+
+--------------------------------------------------------------------------------
+12. The Windows 11 animations: the window now keeps a real, invisible frame
+--------------------------------------------------------------------------------
+Was:   FormBorderStyle.None, i.e. no WS_CAPTION and no WS_THICKFRAME. DWM gave
+       us rounding and a shadow (DWMWA_WINDOW_CORNER_PREFERENCE) and the
+       WM_NCHITTEST band gave us the resize grips, but minimize / restore /
+       close were hard cuts and there were no snap layouts.
+First attempt (not enough): putting WS_SYSMENU | WS_MINIMIZEBOX | WS_MAXIMIZEBOX
+       back on the window. Measured, it changed nothing - the window style went
+       0x16010000 -> 0x160B0000 and the minimize was still one frame.
+What actually works: keep WS_CAPTION | WS_THICKFRAME too, and take the whole
+       non-client strip back into the client area, so the frame exists for DWM
+       and is invisible for us:
+         CreateParams      adds WS_SYSMENU | WS_MIN | WS_MAX (+ WS_CAPTION |
+                           WS_THICKFRAME while NativeWindowFrame is true)
+         WM_NCCALCSIZE     answers "the client is the whole window rectangle"
+         WM_NCPAINT        swallowed - there is no strip left to paint
+         WM_NCACTIVATE     forwarded with lParam = -1, so a focus change cannot
+                           flash a native caption over the bar
+       That is the standard recipe, and the measurement that justified it:
+         harness\anim6.ps1 samples the window rectangle ~74x/second and prints
+         every pixel signature that changes. A minimize Windows animates shows
+         intermediate signatures; a hard cut shows one.
+           --plain  (the old styles, 0x16010000) ....... 1 change, no in-between
+           SpriteForm with only the menu bits ......... 1 change, no in-between
+           SpriteForm + NativeWindowFrame ............. 2 changes (one in-between)
+           --native (an ordinary captioned window) .... 3 changes
+       and styles.ps1 confirms the window really carries
+       0x16CF0000 = WS_CAPTION | WS_BORDER | WS_DLGFRAME | WS_THICKFRAME |
+       WS_SYSMENU | WS_MINIMIZEBOX | WS_MAXIMIZEBOX.
+Two consequences that had to be fixed on the way, both because the client area
+now equals the window rectangle:
+  * A maximized framed window is placed one invisible border OFF screen (2072 x
+    1476 at -12,-12 for a 2048 x 1452 work area), which cut the icon and the
+    buttons off. ClientInsideMonitor clamps the client rectangle back to the
+    monitor's working area - max2_tl.png / max2_tr.png show the icon at x=0 and
+    all three buttons inside the screen, and max2_br.png the taskbar still there.
+    (WM_GETMINMAXINFO was tried first and does not work: WinForms computes the
+    maximized rectangle itself from MaximizedBounds and SetWindowPos-es it, so
+    the values written into that message are ignored. Measured, not assumed.)
+  * Full screen used to be "maximized with MaximizedBounds = the monitor", and a
+    framed window can never be maximized past the working area. ToggleFullScreen
+    now places the window explicitly (Normal state, Bounds = the monitor or the
+    working area) - fs log line: Bounds={X=0,Y=0,Width=2048,Height=1536}
+    ClientSize={Width=2048, Height=1536}, identical to the old behaviour.
+NativeWindowFrame = false gives the previous fully borderless window back, so
+the trade is a switch, not a fork.
+
+--------------------------------------------------------------------------------
+13. Opening a SpriteForm-derived form in the Visual Studio designer
+--------------------------------------------------------------------------------
+Was:   SpriteForm was `internal` with the [DesignerCategory("Code")] it inherits
+       from Form. Both block the designer: the attribute is INHERITED, so VS
+       opened every derived form in the code editor, and an internal base class
+       hides every chrome property from the property grid even when the designer
+       does open.
+Now:   SpriteForm is public with [DesignerCategory("Form")], and
+       EmptySR2DFormTemplate's Form1 is `public partial` in both files (the
+       Designer.cs half has to change too, or the two halves disagree and the
+       build fails with CS0262). The chrome properties are all public with
+       Category / DefaultValue / Description, so they land in the property grid.
+       Verified by build only - there is no Visual Studio on this machine, so
+       the designer itself has to be confirmed on the dev box: open
+       EmptySR2DFormTemplate, right-click Form1.cs -> View Designer (F7 cycles
+       code and designer).
+
+--------------------------------------------------------------------------------
+14. What is intentionally still true about this chrome
+--------------------------------------------------------------------------------
+The window carries a real frame and hides it (section 12). That buys the
+animations, the shadow, the rounding and the snap layouts; what it still does
+NOT buy: the native min / max / close BUTTONS (the bar draws its own, which is
+the point of the chrome) and the caption Windows would have painted there.
+A maximized window's client is clamped to the working area, so a taskbar set to
+"always on top" cannot be covered by maximize - full screen places the window
+instead. The minimum window size is a floor derived from the chrome, and a
+framed window adds Windows' own tracking minimum on top of it.
+
+--------------------------------------------------------------------------------
+15. Round six: resizing flickered
+--------------------------------------------------------------------------------
+Was:   every step of a drag rebuilt the bar's whole pixel pattern and let Windows
+       erase the form's background before the paint. Measured over 20 grow + 20
+       shrink steps with the shipped switch (harness --msg=1500 --smooth=0/1,
+       counters inside the engine, see SpriteForm.ResetChromeCounters):
+         barRebuild 20 -> 0      formBackgroundPaint 80 -> 39
+       WM_SIZE (40) and WM_PAINT (39) are the same on both sides, so the message
+       traffic did not change - only what happens per paint.
+Now:   SmoothChrome (default true) does two things. SetStyle(OptimizedDoubleBuffer
+       | AllPaintingInWmPaint) makes the form fill its background in the buffer
+       instead of erasing on screen - that is the 80 -> 39, one fill per WM_PAINT
+       rather than erase plus paint. And the bar's pixel buffer is allocated
+       oversized (1.5x the strip, capped at 4096 px) and left-anchored, so
+       dragging the edge paints into buffer that already holds the pattern instead
+       of re-rendering it - that is the 20 -> 0.
+       Compat: SmoothChrome = false is the previous path, a rebuild per step.
+
+--------------------------------------------------------------------------------
+16. Round six: losing focus turned the chrome into "default form graphics"
+--------------------------------------------------------------------------------
+Was:   on deactivation the bar was replaced by a grey native caption with three
+       native buttons. Round five had concluded that WM_NCACTIVATE must be
+       forwarded to DefWindowProc with lParam = -1, because that lParam is
+       documented as "do not redraw the non-client area".
+Found: on this Windows build (10.0.26100) that is not what the default handler
+       does with an invisible frame. It repaints exactly the strip
+       WM_NCCALCSIZE had given back to the client, i.e. the whole bar. The
+       measurement is the A/B switch SpriteForm.NcActivateProbe: 0 replays the
+       pre-fix answer verbatim, 1/2 refuse the message. Same window, same
+       arguments, focused shot vs blurred shot, DPI-aware screen grabs of the
+       live window compared with harness/pdiff.ps1:
+         --ncprobe=0   40833 differing pixels of 472160   (the caption is back)
+         --ncprobe=2       3 differing pixels of 472160   (edge noise; identical)
+Now:   WM_NCACTIVATE is answered without passing the activation change down
+       (m.Result = 1) and the bar is marked dirty. The window still gets its
+       WM_ACTIVATE, still minimizes / maximizes / snaps, and the chrome no longer
+       changes when something else takes the foreground.
+
+--------------------------------------------------------------------------------
+17. Round six: the BackColor set in the designer never reached the screen
+--------------------------------------------------------------------------------
+Was:   "I changed the form colour in the designer, at runtime it is the same dark
+       grey." ApplyFrame() painted the border band by writing the FORM's BackColor
+       to the border colour, and it ran after InitializeComponent - so whatever
+       colour was set in the designer was overwritten before the first paint.
+       The template's designer file even looked innocent: its BackColor is
+       Color.FromArgb(46, 52, 60), which is the same 2E343C the border colour
+       defaults to, so the lost value and the surviving one were indistinguishable.
+Now:   ApplyFrame only sets Padding; the band is painted in OnPaintBackground from
+       BorderColor (section: the border is the form's own painting since round
+       four). The A/B is SpriteForm.BackColorProbe: 0 replays the old write, 1 is
+       shipped. Harness --backprobe=0/1 --backcol=20A020 --nolabel, same window,
+       client-area patch compared: 59800 of 59800 pixels differ - with the old
+       path the whole client reads 2E343C (the border colour), with the shipped
+       path it reads 20A020 (the requested colour).
+       End to end: EmptySR2DFormTemplate's Form1.Designer.cs was set to
+       BackColor = Color.FromArgb(32, 160, 32), built and photographed with
+       harness/extshot.ps1 - the client area is green at runtime (then reverted).
+       Note what this does NOT change: a docked child that paints its own
+       background still covers the form's. That is normal WinForms, and the
+       template's client area is empty by design.
+
+--------------------------------------------------------------------------------
+18. Round six: the SR2D controls were not in the toolbox
+--------------------------------------------------------------------------------
+Was:   "in a form-template project the SR2D controls do not show in the toolbox,
+       they did show in an empty-form project where I added the cs files".
+Found: the toolbox only lists PUBLIC Control types. SpriteBox and every control
+       derived from it were internal, so they were never candidates - the case
+       that appeared to work was an empty-form project where the classes were
+       compiled into the same assembly and used from code, not dragged.
+Now:   the whole surface a designer can touch is public: SpriteBox,
+       SpriteControlBase, SpriteClickable, SpriteRangeControl, all 25 controls,
+       Sprite, SpriteFont, PixelFont, Effects, SR2D, RenderEventArgs, ControlText,
+       TextRun and the ~50 enums in their public signatures - 44 files, 258 type
+       declarations. CS0050/CS0051/CS0053 (a public member cannot use a less
+       accessible type) is what closed the list, and the loop that applied it is
+       harness/publicize.sh: build, take the type named left of "is less
+       accessible", flip it, repeat until the build is clean.
+       Two things stayed internal on purpose: SpriteForm.Point (an engine pixel
+       helper that no public signature needs) and every [Browsable(false)]
+       property, which is still a public type but not a designer entry.
+       Warning learned the hard way: run that loop ONCE. Two concurrent passes of
+       perl -pi deleted three cs files and left two temp files behind; the tree
+       came back from a copy, and publicize.sh now holds a mkdir lock.
+
+--------------------------------------------------------------------------------
+19. Round six: the colour bars got the rest of their surface
+--------------------------------------------------------------------------------
+       StripeOffset (int, -2048..2048) slides the whole pattern along the bar.
+       StripeAlignment (Left / Center / Right, + WithText since round nine)
+       anchors the pattern, so a pattern
+       shorter than the bar can sit at either end or in the middle.
+       StripeBrightness (int, 0..300 %) scales every bar colour in place; it is
+       applied to the palette, so it also multiplies a custom colour list.
+       StripeColorList (string, "FF3B82F6,FFEF4444,Red" - the designer-visible
+       entry) and StripeColors (int[], [Browsable(false)], the same as pixels)
+       replace the random palette; StripeSeed still decides the order and the
+       random case, and an empty list restores it. The string takes the same
+       forms ArgbColorConverter accepts (AARRGGBB, #RRGGBB, 0x..., a 6-digit
+       value gets an opaque alpha) plus System.Drawing colour names; a token that
+       is neither is skipped rather than turning into black.
+       The getter of that property is a bug that only the designer could hit, and
+       it is worth writing down: it was string.Join(",", int[]), i.e. DECIMAL
+       ("-13749188" for FF2E343C), while the setter parses HEX. Visual Studio
+       reads the value, writes it into InitializeComponent, and the next load
+       dropped every colour - the palette silently vanished after one save. The
+       getter now emits the 8-digit hex the setter reads. Measured with
+       harness --design, which does set -> get -> set on five inputs through
+       TypeDescriptor (the same path the designer uses) and prints stable=True
+       for each; the old decimal form, fed through the same setter, keeps 0 of
+       2 colours. And --pal (the int[] path) vs --pallist (the string path)
+       produce byte-identical screen grabs, so the two entry points are the same
+       pixels.
+       StripeMode.CaptionLength and .AllTitleTextLength now measure the TEXT IN
+       PIXELS, not characters: the pattern stops at the right edge of the last
+       glyph, so the last bar reaches the last symbol (the old behaviour counted
+       characters against the pixel font's fixed cell, which drifted as soon as a
+       real font or a tag was involved).
+       TitleTextDarken (None / Smooth / PerStripe) with TitleTextDarkenStrength
+       (0..100) and TitleTextDarkenFeather (0..256 px): where the caption sits on
+       the pattern, the bars lose brightness - Smooth as a gradient across the
+       text rectangle, PerStripe one decision per bar so each bar stays flat.
+       All of these are in the bar's cache signature, so setting one repaints.
+       Photographed per variant in harness/shots.sh -> variants.png (17 rows:
+       base, offset, align center / right, brightness 40 / 200, palette as int[]
+       / as string / as names, caption length, all-text length, darken smooth /
+       per stripe, a real caption font, and the three BackColor A/B shots).
+
+--------------------------------------------------------------------------------
+20. Round six: colour and font dialogs in the property grid, and what a bitmap
+    of this window actually shows
+--------------------------------------------------------------------------------
+Every chrome colour is one 0xAARRGGBB int, which the grid would otherwise show as
+a signed decimal. cs/ChromeDesign.cs adds ArgbColorConverter (hex display, hex
+input: "FF2E343C", "#2E343C", "0x20A020", bare "2E343C" = opaque) and
+ArgbColorEditor (the "..." button -> the standard colour dialog, alpha preserved
+because a picker cannot express "invisible"). TitleBarColor, TitleTextColor,
+TitleTextShadowColor and BorderColor carry both.
+Harness --design prints what the grid will see, without needing VS:
+  TitleBarColor / TitleTextColor / TitleTextShadowColor / BorderColor
+                     conv=ArgbColorConverter  editor=ArgbColorEditor  Appearance
+  BackColor          conv=ColorConverter      editor=ColorEditor      Appearance
+  TitleTextFont      conv=FontConverter       editor=FontEditor       Appearance
+  StripeOffset / StripeBrightness  Int32Converter, StripeMode / StripeAlignment /
+  TitleTextDarken  EnumConverter dropdowns, StripeColorList  StringConverter,
+  StripeColors  [Browsable(false)] behind StripeColorList.
+TitleTextFont is a System.Drawing.Font, so the grid's own font dialog appears
+with no extra attribute; it writes TitleTextFontFamily + TitleTextFontSize (the
+size converted from the dialog's unit to device pixels, FontToPixels) and is
+[Browsable]-visible but not serialized, so the two real properties stay in the
+generated code. Style travels in the family name ("Segoe UI Semibold").
+Proof the round trip works in VS: after the designer was driven on this machine,
+Form1.Designer.cs contains "TitleBarColor = 32144123;" - the grid accepted a hex
+entry and code generation wrote the int back. (32144123 = 0x01EA0C1B: alpha 1.
+Type the alpha you mean; FF for opaque.)
+
+CAVEAT, and it affects tooling more than apps: DrawToBitmap / PrintWindow on a
+window that keeps an invisible real frame (NativeWindowFrame, section 12) renders
+a NATIVE caption into the strip - harness --frame=1 vs --frame=0 on the same
+window proves it is the capture path, not the screen. Anything that asks the
+window to print itself (taskbar thumbnails, window previews, this repo's older
+winshot.ps1) can show chrome the user never sees. Read the screen instead:
+CopyFromScreen over the window rectangle, from a DPI-aware process, with the
+window actually on top - harness --live --grabfront does exactly that, holds the
+window in the topmost band while it reads, and retries until the grabbed pixels
+are its own bar (it counts the bar-colour pixels and logs barPx=).
+Getting a window above one that owns the foreground needs foreground rights,
+which a process without them does not have: a synthetic ALT tap first
+(keybd_event VK_MENU down/up) buys them. Measured the hard way, that tap BLOCKS
+until the current foreground thread takes the key event - from a UI-thread timer
+on a busy desktop it froze a probe at 100 % CPU, so anything that only needs the
+Z-order asks for it off the UI thread (harness RaiseOffThread).
+
+ANOTHER MEASUREMENT TRAP, this one in the build gate: an INCREMENTAL
+`dotnet build` does not re-run the analyzers over unchanged files, so it reports
+"0 warnings" for a project whose clean rebuild reports hundreds. The chrome files
+are genuinely clean (0 warnings for SpriteForm.cs and ChromeDesign.cs in a
+`--no-incremental` build of demo, against the engine's pre-existing baseline of
+326 - 278 CA1051 visible fields, 24 CA1725, 14 CA1720, 6 CA1708, 4 CA2211), but
+only that number is a gate. ChromeDesign.cs's first draft did add 6 CA1310
+(locale `StartsWith`) and 1 CA1865 (string where a char overload exists), which
+is what a clean build is for.
+
+--------------------------------------------------------------------------------
+Re-running the checks on this machine (2026-10-05)
+--------------------------------------------------------------------------------
+  dotnet build demo -c Release                   0 warnings, 0 errors
+  dotnet build template -c Release               0 warnings, 0 errors
+  dotnet build EmptySR2DFormTemplate -c Release  0 warnings, 0 errors
+  (all three with -p:EnableNETAnalyzers=true -p:AnalysisLevel=latest-recommended)
+  tests/cs/ctlrun    the three shadow pins pass with the reordered background:
+                     "the text itself is unchanged (80 vs 80 px)",
+                     "the shadow is there only with the colour set (40 vs 0 px)",
+                     "the box covers the shadow (24x16 vs 22x14)".
+                     The suite's LAST pin is red for an environment reason only:
+                     "ControlFonts resolves DejaVu Sans regular + bold" - DejaVu
+                     is a Linux font and the previous agent's box had it. Not a
+                     regression; install the font or skip that one pin.
+                     Note: ctlrun writes its dumps to /home/user/.cache/ctlrun
+                     (hardcoded), so on Windows it needs that path to exist.
+  tests/cs/benchrun  green, exit 0 (the engine half, incl. all text rendering).
+  python tests/cs/projchk.py cannot run here (no python installed); its rules
+  were applied by hand - all 69 cs/*.cs are still listed in demo/SR2DDemo.csproj
+  (no cs file was added or removed), template/ is untouched, the README check
+  table is unchanged, and this delivery's CHANGELOG entry names both
+  cs/SpriteForm.cs and cs/Sprite.Text.cs.
+  Live windows: SR2DDemo.exe (maximized, bar shows 9 skewed bars + icon +
+  "SR2D demo" + two tags, all shadowed) and EmptySR2DFormTemplate.exe
+  (800x450, empty client area, full chrome) were captured with PrintWindow.
+
+Round two (the six items in sections 11-13), same machine, same harness:
+
+  dotnet build -c Release            demo, template, EmptySR2DFormTemplate,
+                                     apps/SpriteBox, tests/cs/benchrun,
+                                     tests/cs/vecrun  - all 0 warnings, 0 errors
+                                     with AnalysisLevel=latest-recommended
+                                     (benchrun and vecrun compile SpriteForm.cs)
+  tests/cs/ctlrun                    162 pins ok, 1 red: the same
+                                     "ControlFonts resolves DejaVu Sans" font pin
+                                     as before, environment only. It needs
+                                     D:\home\user\.cache\ctlrun to exist and
+                                     SR2D64.dll next to the exe.
+  styles.ps1  --plain (old styles)   0x16010000
+            --native (reference)     0x16CF0000
+            SpriteForm, menu bits    0x160B0000   - still not animated
+            SpriteForm, NativeWindowFrame 0x16CF0000
+  anim6.ps1 (74 samples/s over the window rect, minimize on a timer)
+            --plain                       1 visible change   (hard cut)
+            SpriteForm --frame=0          1 visible change   (hard cut)
+            SpriteForm --frame=1          2 (one in-between frame)
+            --native                      3
+  hit.ps1   all eight HT codes still come back (13 14 16 17 corners, 12 15 10 11
+            edges), inside is HTCLIENT - unchanged by the frame.
+  dbl.ps1   double click on the bar: 120,120 700x400 -> -12,-12 2072x1476 window
+            with the client clamped to the work area -> back to 120,120 700x400.
+  --shrink=10  MinimumSize={184,70} actual={232,70} barHeight=18 controls=2, and
+            the grab of that window (shrunk_frame1) still shows icon chip, bars,
+            caption and all three buttons.
+  --fs      Bounds={0,0,2048,1536} ClientSize={2048,1536} screen={0,0,2048,1536}
+            - the same full-screen geometry the borderless window produced.
+  grab.png  of EmptySR2DFormTemplate.exe (tpl.png): 18 px bar, icon in its chip,
+            bars, "Form1", three buttons, rounded corners and shadow, and no
+            native caption strip anywhere.
+  Not verifiable here: the Visual Studio designer itself (section 13) - no
+  Visual Studio is installed on this machine.
+  (Superseded: Visual Studio 2026 was installed for round six and the designer
+  path has since been exercised - see section 20 and the round six block.)
+
+--------------------------------------------------------------------------------
+Round six (the six reports + the five new knobs), same machine, 2026-10-05/06
+--------------------------------------------------------------------------------
+Visual Studio Community 2026 is now installed (D:\ProgramsHDD\VisualStudioCommunity),
+which is what made items 18-20 verifiable at all. Display still 175% DPI, 2048x1536.
+
+  dotnet build -c Release       tests/cs/ctlrun, benchrun, vecrun, selchk, autochk,
+                                codechk, fontchk, demo, EmptySR2DFormTemplate
+                                - all 9 green, 0 errors.
+  tests/cs/ctlrun               162 pins ok, 1 red: the same "ControlFonts resolves
+                                DejaVu Sans regular + bold" environment pin as in
+                                every previous round. Needs SR2D64.dll next to the
+                                exe (it is copied by the build) and writes its
+                                dumps to D:\home\user\.cache\ctlrun.
+
+  RESIZE FLICKER  harness --msg=1500 --smooth=0 then --smooth=1, counters read from
+                  inside the engine over 20 grow + 20 shrink steps:
+                          WM_SIZE  WM_PAINT  barRebuild  formBackgroundPaint
+                    old      40        39         20              80
+                    new      40        39          0              39
+                  Same message traffic; the pattern is never re-rendered during a
+                  drag and the background is filled once per paint instead of twice.
+
+  FOCUS LOSS      harness --blur=1200 --blurback=1600 --grabfull --ncprobe=0/2, four
+                  DPI-aware screen grabs of the live window, compared with pdiff.ps1:
+                    --ncprobe=0  focused vs blurred: 40833 differing px of 472160
+                    --ncprobe=2  focused vs blurred:     3 differing px of 472160
+                  Cropped to the button corner (ncactionate.png) the old answer shows
+                  a native caption with native buttons over the bar; the shipped one
+                  is pixel-for-pixel the focused window.
+
+  BACKCOLOR       --backprobe=0 vs --backprobe=1 with --backcol=20A020 --nolabel,
+                  client-area patch: 59800 of 59800 px differ (2E343C -> 20A020).
+                  End to end through the designer: Form1.Designer.cs BackColor set to
+                  (32,160,32), built, grabbed with extshot.ps1 -> green client, then
+                  reverted.
+
+  VARIANTS        harness/shots.sh photographs 17 chrome variants from a live window
+                  (--live --grabfront --seed=7) and stacks the bar strips:
+                    base, off=80, align=center, align=right, bright=40, bright=200,
+                    pal=FF3B82F6,FFEF4444,FF22C55E,FFEAB308,
+                    pallist=the same four as the designer string,
+                    pallist="Red, Gold, SeaGreen, notacolor", mode=caption,
+                    mode=alltext --tags=Build|Help, mode=caption --dark=smooth,
+                    mode=caption --dark=stripe, --capfontdlg="Segoe UI" --capsize=18,
+                    and the three --backprobe / --backcol windows.
+                  CaptionLength / AllTitleTextLength stop at the last glyph in both
+                  the pixel font and a real font; the darken modes are visible against
+                  the same window with darkening off.
+
+  PALETTE PATHS   v_pal.png (StripeColors, int[]) and v_palstr.png (StripeColorList,
+                  the designer string) are byte-identical (same md5), so the two entry
+                  points really are the same pixels; v_palname.png shows the name form
+                  and that an unknown token is skipped instead of painting black.
+                  The set -> get -> set round trip of section 19 is harness --design.
+
+  STILL GREEN     hit.ps1: all eight HT codes (13 14 16 17 corners, 12 15 10 11
+                  edges), inside HTCLIENT - unchanged by the WM_NCACTIVATE answer.
+                  dbl.ps1: double click on the bar maximizes to -12,-12 2072x1476 with
+                  the client clamped to the work area.
+                  anim6.ps1 --min=8000: the chrome minimizes in 2 recorded pixel
+                  steps, and so does the reference (--native, an ordinary captioned
+                  window) in 1 - on this box window animations are switched OFF at the
+                  shell level (HKCU Control Panel\Desktop UserPreferencesMask first
+                  byte 0x18, MinAnimate absent), so the animation meter cannot
+                  separate the two here. What it does show is that the new
+                  WM_NCACTIVATE answer costs nothing: the chrome is no worse than a
+                  plain WinForms form.
+
+  CAPTURE PITFALLS found while measuring, all now handled in the harness:
+                  - the Release exe is not what a bare "dotnet build" refreshes (it
+                    builds Debug), and a batch of screenshots taken from a stale
+                    binary looks exactly like "the knob does nothing". shots.sh
+                    builds first.
+                  - a screen grab of a rectangle is a grab of whatever is on top
+                    there: 7 of 14 variants photographed the IDE until the grab held
+                    the window in the topmost band and re-checked the pixels.
+                  - asking for that Z-order from the UI thread can block the whole
+                    probe (keybd_event waits for the foreground thread); the blur
+                    probe now raises on its own background thread.
+
+Round seven (the window still blinks out during a resize drag + the stripe length re-check),
+same machine, 2026-10-06
+--------------------------------------------------------------------------------
+THE REPORT, AFTER THE ROUND-SIX FIX: "form still flickering upon resize (blinking in and out of
+existence visually very quickly, revealing what's behind)".
+
+Round six's SmoothChrome took the per-step bar rebuild and the double background erase out of the
+drag, and it is still right for what it measured. It is not this bug. This one is the whole window:
+for a frame at a time the client area shows the desktop / the IDE behind it.
+
+  MEASURING IT      harness --burst=<ms> (BurstProbe). A background thread grabs the whole window
+                    rectangle off the screen every ~4 ms and counts how many of its 24x12 client
+                    sample points differ from the settled client colour. The drags are real:
+                    harness/drag.ps1 puts the cursor on the window's own edge, presses the left
+                    button, moves it in 22 ms steps and releases - nothing is sent to the window,
+                    which is the only way a "revealing what's behind" report can be answered.
+                    burst.sh runs five of them (right +240, right -240, bottom +180, corner
+                    +200/+140, top -120); matrix.sh runs burst.sh over the four cells of the A/B
+                    and keeps the offender frames under harness/burstshots/<cell>/.
+  WHAT IT SEES      21 of the 136 grabs taken while the size was changing show a client that is not
+                    the client at all. burst_N_o100.png is literally the IDE behind the window, with
+                    only the bar's three child buttons still drawn (child HWNDs keep painting while
+                    the parent's surface is empty).
+  THE CAUSE         WM_NCPAINT was swallowed - "there is no non-client strip left to paint", the
+                    round-five reasoning, which is true of the strip and wrong of the message.
+                    WM_NCPAINT is the paint that validates the surface the resize loop hands the
+                    window; with nobody answering it only the invalid part of that surface gets
+                    painted and the rest stays empty, so the compositor shows what is behind.
+  THE FIX           cs/SpriteForm.cs, HideFrame: WM_NCPAINT goes to the default handler like any
+                    other window. The old swallow stays reachable as NcPaintProbe = 0 (harness
+                    --ncpaint=0) so the A/B can be re-run against it.
+  THE TABLE         five real drags per cell; every cell resized 5 of 5 times with 0-1 dropped grabs:
+                        WM_NCPAINT         class styles    sizing grabs   blanked frames
+                        swallowed (old)    none (old)            136            21
+                        swallowed (old)    CS_*REDRAW            130             2
+                        forwarded (fix)    none                  131             0
+                        forwarded (fix)    CS_*REDRAW            135             0
+                    Answering WM_NCPAINT is the fix on its own. CS_HREDRAW | CS_VREDRAW
+                    (CreateParams.ClassStyle, ResizeRedrawProbe) stay as the second line of defence:
+                    they measurably soften the old path and cost nothing - harness --msg over 20 grow
+                    + 20 shrink steps gives WM_SIZE 40 / WM_PAINT 39 / barPaint 39 / barRebuild 0
+                    either way, 1289 vs 1293 ms, and only WM_ERASEBKGND moves (60 -> 80 of paints
+                    that AllPaintingInWmPaint swallows anyway).
+  BY A SECOND       The burst probe lives inside the window it measures, so it was checked against an
+  INSTRUMENT          instrument that knows nothing about it: harness/blank.ps1 puts a flat green
+                    borderless topmost window on the desktop, harness/record.ps1 (a separate process)
+                    grabs the target's own rectangle ~500 times a second and counts the frames where
+                    the green is there at all. bash harness/e2e.sh app|demo|harness_old|harness_new
+                    drives one target through the same five real drags.
+                          old answer (--ncpaint=0 --rrprobe=0)   20 of 674 grabs green, worst 100 %
+                          shipped answer                        0 of 692
+                          SR2DApp (template app, no knobs)      0 of 655
+                          SR2DDemo                              0 of 497
+                    rec_2_o100_1112x520.png from the old run is the report in one picture: the whole
+                    window rectangle is the backdrop, with only the three caption buttons drawn,
+                    because the child HWNDs keep painting while the parent's surface is empty.
+                    Note that harness_old used to be run without --rrprobe=0, which is the mitigated
+                    cell of the table above rather than the old code; that is why an earlier e2e run
+                    read 0 green frames for it. Both instruments now agree on both cells.
+  WHAT IT COSTS     Nothing visible. The settled window is pixel-identical between the two answers:
+                    --ncpaint=0 vs --ncpaint=1 grabs of the normal window (908x520) and of the
+                    maximized one (2080x1476) come out byte-identical by md5, and the blurred-focus
+                    grabs differ by 0 px of 65376 (pdiff.ps1). The caption-over-the-bar problem is
+                    WM_NCACTIVATE's, and that answer is unchanged, so a form that loses the focus is
+                    still our chrome.
+  STILL MEASURED    the leading edge of a drag paints one frame late. The watch probe (harness
+                    --watch) re-reads the pixels 3 px past the old edge once the window settles and
+                    reports "14 of 96 newly uncovered pixels were unpainted when they appeared"
+                    (FF3A414C -> FF2E343C, the border band). A few pixels for one frame, at the edge
+                    the cursor is dragging - not the window, and the burst probe no longer finds a
+                    single foreign client frame. Left as is, documented so the next round does not
+                    mistake it for the reported bug.
+  PROBLEMS WITH THE PROBE, all found by it lying first:
+                    - a DllImport wrapper renamed for clarity (SetWindowPosStatic) needs an
+                      EntryPoint: without one it throws EntryPointNotFoundException at the first
+                      call. On the UI thread it surfaced as a modal exception dialog that made every
+                      later drag miss, while the probe kept reporting "0 blinks" from a window it
+                      could not see; on a background thread it kills the process.
+                    - the drop path of a capture loop must sleep too. An early continue that skipped
+                      Sleep(4) spun 182 million times in 26 s and starved the resize loop.
+                    - filtering grabs on GetForegroundWindow() == Handle throws away every frame
+                      taken while another app holds the foreground - which is all of them the moment
+                      the IDE reactivates itself - and reports a clean run. Now the window is held in
+                      the topmost band and each grab checks that WindowFromPoint still answers its
+                      own HWND at the grid corners and the centre; a frame that fails is dropped and
+                      counted, never classified.
+                    - the reference colour has to come from a frame that is itself flat: a reference
+                      learned from one contaminated frame (107 of 288 samples) made every later frame
+                      "foreign" and the run read 693 blinks of 693 grabs.
+                    - drag.ps1's bottom and corner branches had x and y swapped, so a "bottom drag"
+                      grabbed whatever window happened to be at that point and resized it. The
+                      coordinates are per edge now and the script refuses to run at all unless the
+                      grab point belongs to the target (exit 3) and the size really changed (exit 4).
+                    - a target that opens maximized has no resize band, so all five drags abort and
+                      the recorder prints a spotless 0 frames for a window that never resized. SR2D
+                      Demo opens that way; e2e.sh now calls restore.ps1 before it drags anything,
+                      and prints "restored: True/False" so a run that resized nothing is visible.
+  STRIPE LENGTH     re-checked with the new chrome, unchanged: harness/geom.sh runs one --geom plan
+                    per layout, and caplen / alltext / realfont / noicon / off80 all report
+                    "off by 0 px" - the last bar ends exactly where the mirrored text ends, in the
+                    pixel font and in a real one. behind0 and alignc print the text's own span by
+                    design (the run sits elsewhere), and --barw=6 is an explicit width, so it stops
+                    short of the text instead of matching it.
+  REGREEN           dotnet build -c Release: tests/cs/ctlrun, benchrun, vecrun, selchk, autochk,
+                    codechk, fontchk, demo, EmptySR2DFormTemplate, apps/SpriteBox - all green.
+                    ctlrun 162 ok / the same 1 known-red DejaVu pin. hit.ps1: all eight HT codes and
+                    HTCLIENT. dbl.ps1: double click on the bar maximizes to -12,-12 2072x1476.
+                    shots.sh: 17 of 17 chrome variants grabbed from a live window.
+
+
+Round eight (the form template's stripe is still longer than the caption + the designer colour
+dialog + the height of the darkened band), same machine, 2026-10-06
+--------------------------------------------------------------------------------
+FOUR REPORTS, one of them a question: "number of bars still results in stripe being larger than form
+caption / it seems fine in Demo project, but it have shorter title", "in demo there is additional text
+in title with different color, i couldn't find how it done", "can you for designer, add color selecting
+dialogue, in properties with color? currently there is text field for HEX value", "for stripe darkening
+around text ... can you also add height of darkening".
+
+  WHICH PROJECT     The "sr2d form template project" is EmptySR2DFormTemplate (the SpriteForm-derived
+                    VS project template), NOT template/ - that one is SR2DApp, a plain WinForms Form
+                    with a native caption and no chrome at all. The first grab aimed at "the template"
+                    photographed SR2DApp and showed a white title bar with no colour pixels anywhere,
+                    which read like a chrome regression and was nothing of the kind: a stale SR2DApp
+                    from an earlier round was still running, and the exe in the template bin was from
+                    16:54 while Form1.Designer.cs had been edited at 21:25. Rebuild, then re-grab, and
+                    check which project a report means before believing a picture of it.
+
+  WHAT THE TEMPLATE ASKED FOR   Form1.Designer.cs as the user left it: Text = " Test form testing
+                    testing caption. Test test test" (46 characters), StripeMode left at its default
+                    CaptionLength, StripeBarWidth = 10, StripeBarCount = 5, TitleTextDarken =
+                    PerStripe, TitleTextDarkenFeather = 1. Two of those numbers are the bug: in
+                    CaptionLength the COUNT comes from the caption (46), not from StripeBarCount
+                    (5, ignored), and a positive StripeBarWidth was taken literally in every mode.
+                    46 x 10 = 460 px of colour, plus the skew overhang of 9 px, over a 305 px caption.
+                    Grab tplC_bar.png: the bars run to x=514 while the last glyph is at x=335.
+                    Changing the bar count changed the length, which is what the report says, and the
+                    Demo only looked right because its caption is four characters long.
+
+  THE FIX, AND THE OLD PATH     PlanBar now splits the two jobs. SkewBudgetProbe (harness
+                    --skewbudget=0) is the overhang: with an auto width the run slant is paid out of
+                    the length it mirrors, so the silhouette - what the eye reads as where the colour
+                    ends - stops at the last glyph instead of skew px past it. WidthCapProbe (harness
+                    --widthcap=0) is the width: in the two text-mirror modes a positive
+                    StripeBarWidth is a MAXIMUM, and the bars are narrowed to their share of the text
+                    when count x width would pass the last glyph. FixedCount is the uncapped mode in
+                    both - there the count is the user's own, so the length is theirs too.
+                          geom tpl_nocap (--widthcap=0)   base +173 px, silhouette +182, painted +180
+                          geom tpl (shipped)              base -9 px,  silhouette 0,   painted -2
+                          geom fixed20_w10 (control)      silhouette +128, by design
+                    -2 px is the same answer the auto-width cases give; it is the grab's own rounding,
+                    not a systematic shortfall. tplD_bar.png is the template app itself after the fix:
+                    colour 15..332 against a caption that ends at 335.
+
+  WHY NOT JUST CLIP  the other candidate - paint the run and cut it at the text - throws away whole
+                    bars and leaves a bar sliced diagonally at the end. Narrowing keeps every bar,
+                    keeps the count the mode asked for, and keeps the pattern's rhythm. A user who wants
+                    literal pixels wants FixedCount, which is one dropdown away.
+
+  THE QUESTION      "the additional text in the title with a different colour" is SetTitleTags, and it
+                    is code-only on purpose: TitleTags carries [Browsable(false)] because a list of
+                    objects with fonts in them is not something the property grid edits usefully.
+                    demo/MainForm.cs:974 is the working example:
+                          SetTitleTags(new TitleTag(rel, col),
+                                       new TitleTag("kernels: " + Caps.SimdName + " · " + api,
+                                                    unchecked((int)0xFF8A94A6)));
+                    TitleTag (cs/SpriteForm.cs:99) takes Text, Color (0xAARRGGBB), and optionally
+                    FontFamily / FontSize / Shadow / ShadowColor. Each tag is measured and laid out
+                    after the caption with a gap; StripeMode AllTitleTextLength makes the bars mirror
+                    caption + all tags, CaptionLength mirrors the caption alone - which is why the
+                    demo's bars stop after "SR2D" while the grey tag text carries on past them.
+                    Nothing to fix; the answer belongs in the template's README, and it is now there.
+
+  THE COLOUR DIALOG  Already true for the four single-colour int properties (TitleBarColor,
+                    BorderColor, TitleTextColor, TitleTextShadowColor): [Editor(typeof(ArgbColorEditor),
+                    typeof(UITypeEditor))] plus [TypeConverter(typeof(ArgbColorConverter))], so the grid
+                    shows a hex field AND a "..." button, and PaintValue gives it the swatch a native
+                    Color property has. The plain text box the report is about is StripeColorList, a
+                    comma-separated hex list, which has no single colour to pick. It now has
+                    StripePaletteEditor: a list of swatch + AARRGGBB rows with Add / Edit / Remove over
+                    the standard Windows colour dialog, returning the same string the box used to
+                    demand by hand. Proved through the property descriptor rather than by assumption:
+                    harness --colordlg=<property> asks TypeDescriptor for the editor the attribute
+                    names and calls EditValue the way the grid does, then photographs the modal window.
+                          TitleBarColor:   editor=ArgbColorEditor editStyle=Modal paintsSwatch=True
+                                           FF2E343C -> FF2E343C after the dialog closed  (cdlg.png)
+                          StripeColorList: editor=StripePaletteEditor editStyle=Modal
+                                           <FF2E343C,FF20A020,FFFF4444> unchanged on Cancel
+                    cdlg.png is the OS picker with the property's colour already in it (46/52/60 =
+                    0x2E343C), so "like it with native colors" is literally what it is.
+
+  A LAYOUT BUG THE PHOTOGRAPH CAUGHT    The palette dialog's first picture (paldlg.png) showed both
+                    button rows cut in half. Cause: the dialog is built in code, so its literal sizes
+                    get no designer scaling, while the FONT is DPI-scaled - at 175 % the buttons are
+                    ~40 px tall inside FlowLayoutPanels pinned to Height 34 and 38, and the Fill list
+                    box painted over what stuck out. Fixed with AutoSize rows (a row is as tall as what
+                    it holds) and every literal run through Dpi(v) = v * DeviceDpi / 96, including the
+                    swatch rectangle and ItemHeight. Re-photographed at the window's real size: 490x595,
+                    all five colours, both button rows whole (pal_new2.png).
+                    Four probe traps found on the way, all worth remembering:
+                    - grabbing Form.Location/Form.Size and CopyFromScreen mixes a DPI-scaled number
+                      with device pixels. dlgshot.ps1 now resolves the dialog by title and grabs its
+                      GetWindowRect, and PaletteProbe logs both numbers side by side.
+                    - a P/Invoke of GetWindowTextW without CharSet = CharSet.Unicode marshals a wide
+                      string as ANSI, so every window title comes back as its first character and a
+                      -like "*Stripe colours*" match finds nothing. wins.ps1 has the same flaw and has
+                      been reporting single-letter titles all along.
+                    - the Controls.Add order for a docked Fill control is NOT the bug here: list first
+                      (front of the Z-order, laid out last) is correct, and "fixing" the overlap by
+                      reversing it made the list run under both rows instead. The heights were wrong.
+                    - the harness arg parser is fine but the probe names are easy to guess wrong:
+                      --mode=caplen silently became StripeBarsMode.None (the accepted words are
+                      caption / all / alltext / fixed / none) and the case reported a 0 px run for a
+                      caption of 46 characters. A probe that measures nothing must fail loudly.
+
+  THE DARKENING HEIGHT    TitleTextDarkenHeight (1..100, default 100 = the whole stripe, which is what
+                    it always did) picks how tall the dark band behind the text is, centred on the bar.
+                    DarkenBand(h) returns the (Y, Height) pair; DimUnderText fills the gradient only in
+                    that band, and for FullBars + PerStripe the bars are drawn twice - the dimmed set in
+                    the band, the plain set outside it - because the per-bar dimming lives in the bar
+                    colours, not in an overlay. Measured on the current build, same seed, --dark=stripe
+                    --darkamt=70 --darkfeather=2, pdiff of full-window grabs:
+                          100 vs 45: 774 px differ   45 vs 20: 216 px differ   100 vs 20: 990 px
+                    and dh_band.png shows the three: a full-height dark band, a middle band, a slit
+                    through the text. The gradient stays horizontal, so any row band clips safely.
+
+  REGREEN           dotnet build -c Release: demo, apps/SpriteBox, template (SR2DApp),
+                    EmptySR2DFormTemplate, harness - 0 errors. tests/cs/ctlrun: 162 ok, the same one
+                    known-red DejaVu font pin. harness/geom.sh: caplen / alltext / realfont / noicon
+                    still SILHOUETTE off by 0 px planned and -2 px painted; behind0 / alignc / off80 /
+                    barw6 unchanged in kind. shots.sh: 17 of 17 variants. SR2DDemo grabbed after the
+                    change (demo_r8.png): bars end at the caption, grey tag text runs past them, as
+                    before - the cap only touches a width the demo never sets.
+
+--------------------------------------------------------------------------------
+Round nine (the bar width is still not the width in the property + centre the run on
+the text + colour cells like a native Color + controls inherit the form's background),
+same machine, 2026-10-07
+--------------------------------------------------------------------------------
+
+  WHAT THE REPORT SAID   "with stripe mode = caption length, width of bars not equal of width that
+                    set up in property", and then the model the user wanted, spelled out: the number
+                    of bars is whatever covers icon + caption (or icon + all the texts), the whole
+                    coloured stripe can be centred on that icon + text block, and the two pairings -
+                    custom width / auto amount and custom amount / auto width ("mode caption length,
+                    I set up number of bars 10, width of 1 bar = length / number_of_bars").
+                    Round eight answered the length complaint by capping the WIDTH: in the two
+                    text-mirror modes a positive StripeBarWidth became a maximum and the bars were
+                    narrowed to their share. The template's own saved values (CaptionLength +
+                    StripeBarWidth = 10 over a 46-character caption) therefore painted 50 bars of
+                    6,54 px - the right run, the wrong bar - and this is the report. The two rounds
+                    are the same argument seen from the two ends: the length and the width cannot
+                    both be honoured against a mirrored text, so one of them has to be derived. The
+                    user's answer is that the WIDTH is the number he typed, so the COUNT moves.
+
+  PLANBAR NOW   StripeBarWidth is literal in every mode. In CaptionLength / AllTitleTextLength the
+                    count is ceil(budget / width); with the width at 0 the budget is divided between
+                    the mode's count instead (BarCount: one bar per caption / per every-text
+                    character). FixedCount is the mode where both numbers are the user's own and
+                    nothing is derived - the escape hatch for "I want exactly N bars of exactly W px
+                    even if it runs past the text". WidthCapProbe (harness --widthcap=1) is the A/B
+                    that reproduces round eight; the shipped default flipped to 0, so the probe now
+                    has to be asked for explicitly, and --widthcap=1 prints exactly the old plan:
+                          plan, template caption, StripeBarWidth=10   shipped:  count=32 barW=10 runW=329
+                                                                        probe 1:  count=50 barW=6  runW=327
+                    The budget is not the glyph run any more: blockW = (icon + gap when a chip is
+                    drawn) + the texts the mode counts, and with StripeAlignment Left the run also
+                    has to reach past the block's own 8 px margin. --geom measures the result off a
+                    screen grab, glyph by glyph:
+                          mirrored block 8..327, run 8..327, painted silhouette off by 0 px
+                          --mode=fixed --count=10                    count=10 barW=32, "one bar per 32,70 px of text"
+                    Note that the -2 px of the earlier cells is the grab's own rounding at the bar
+                    rows this caption lands on, not a systematic shortfall - tpl / tpl_wt show the
+                    same plan painted at 0 px off.
+
+  CENTRED ON THE BLOCK   StripeBarsAlign.WithText. Left pins the run to the bar's corner (so it
+                    reads as growing out of the corner and reaches the last glyph); Center / Right
+                    place it in the bar, which is what made it drift away from the text on a wide
+                    window; WithText centres it on the block, the same margin past the icon as past
+                    the last glyph. With StripesBehindText off the texts sit AFTER the pattern, so
+                    the two are laid out as one centred group instead. Measured, same caption:
+                          block 8..327 (centre 167), run 8..327 (centre 167): centre delta 0 px,
+                          0 px of colour left of the icon, 0 px right of the last glyph
+                    --align=center on the same window is centre delta 242 px - that is the difference
+                    the new value is for, and it is why the default stays Left.
+
+  THE GRID'S COLOUR CELLS   "when i edit form in the designer, BackColor / ForeColor have this color
+                    rectangle thingy and the R G B values, and pressing arrow down opens a list of
+                    colors - but other color properties like BorderColor have just a HEX text field".
+                    BorderColor always had the "..." dialog; what it did not have was the CELL.
+                    ArgbColorConverter (cs/ChromeDesign.cs) now answers the three questions the
+                    property grid asks a converter, so an int ARGB property is drawn and edited like a
+                    System.Drawing.Color one: GetPaintValueSupported (the swatch),
+                    GetStandardValuesSupported (the drop-down arrow) with the named-colour list and
+                    GetStandardValuesExclusive = false (pick from it, or keep typing), and ConvertTo
+                    returning what a Color returns - the name when the value has one, otherwise
+                    "[A=255, R=46, G=52, B=60]". Reading back accepts that display text plus every
+                    other spelling, so nothing you can see is untypeable:
+                          FF2E343C / #2E343C / 0x2E343C / 2E343C -> FF2E343C
+                          4278190080 -> FF000000    4294901760 -> FFFF0000   (decimal ARGB)
+                          Red -> FFFF0000   SteelBlue -> FF4682B4   Transparent -> 00FFFFFF
+                          [A=255, R=46, G=52, B=60] / [R=46, G=52, B=60] / Color [R=46, ...] -> FF2E343C
+                    The grid is on another machine, so this is proved through the same descriptor the
+                    grid reads (harness --gridprops), which prints converter / dropdown count /
+                    exclusive / swatch / editor / the text the cell shows for all six properties.
+                    BackColor itself reports converter=ColorConverter dropdown=175 swatch=True - the
+                    numbers to compare the int properties against are now 157 and True, and the one
+                    difference left is the 18 named colours that only exist as SystemColors roles.
+
+  THE PALETTE IS ALREADY INT-CACHED   "except StripeColorList ... would be nice if i could use
+                    integers and HEX, but cache it to ints for performance, if it's not yet". It was:
+                    the setter parses the string into StripeColors (int[]) and the paint code reads
+                    only that array, so a resize or a frame costs no conversions; the string is the
+                    editor's text and the getter's round trip (the decimal-getter bug of round six is
+                    what made that worth writing down). What it could not do was take a plain integer
+                    per entry - ParseColors delegated to ArgbColorConverter, which read hex only - so
+                    it does now, same TryParse as every other colour field, and the documentation says
+                    so instead of promising hex only. --gridprops shows both halves:
+                          "255, FF3B82F6, #20A020, Red, 4294901760, Transparent, nonsense" -> 6 ints
+                          StripeColorList = "FF112233,FF445566" -> StripeColors = -15654349,-12298906
+
+  CONTROLS INHERIT THE FORM NOW   "controls added to the form (as example sr2d controls) don't
+                    inherit colors from form ... they don't inherit background color. i assume
+                    controls should". They did not, for a reason that is in the constructor:
+                    SpriteControlBase sets BackColor = DefaultBack (0x202428) so a knob stays dark on
+                    a light form, and a WinForms control that has had BackColor set stops being
+                    ambient - the chain broke at our own line. The container case was already handled
+                    (_backExplicit / AdoptBackColor / ChildBackColor / PushBackColor), the FORM case
+                    was not, and the designer made it permanent: InitializeComponent writes
+                    "BackColor = Color.FromArgb(32, 36, 40)" - exactly that default - for every
+                    control you drop, so even the container path could not reach it afterwards.
+                    Three pieces fix it: SpriteForm hands its colour to the SpriteControls parented
+                    directly on it (OnBackColorChanged), a control asks the window it is put on when
+                    its parent changes, and the SR2D default no longer counts as a choice -
+                    ShouldSerializeBackColor returns false for it, so the grid stops writing the line
+                    at all, and ResetBackColor clears the flag so the property menu puts the control
+                    back on the ambient colour. An untouched form hands out NOTHING (its BackColor is
+                    still SystemColors.Control): a form nobody coloured must not turn every dark
+                    control on it light. Harness --inherit walks the matrix:
+                          untouched form      plain / designer-default 0x202428, explicit Red stays
+                          form -> 2E343C      plain, designer-default, panel all follow; the label
+                                              inside a sunken panel takes the panel's face (35,40,46)
+                          form -> 14 5A 1E    everything follows again
+                          form -> Control     the controls revert to 0x202428, Red never moved
+
+  WHY AN INTERFACE, NOT THE TYPE   The obvious implementation was `if (Parent is SpriteForm f)`, and
+                    it does not compile: tests/cs/ctlrun builds its own file list and leaves
+                    SpriteForm.cs out, standing in for WinForms with hand-written shim types in
+                    Fake.cs. So the hook is internal IControlFaceSource { Color? ControlFaceColor; }
+                    declared in cs/SpriteControls.cs and implemented by SpriteForm, which keeps the
+                    control file independent of the chrome (in ctlrun nothing implements it and the
+                    test form's ambient colour simply never applies - the headless suite is not where
+                    this behaviour is checked). The same shim is why SpriteControlBase.ResetBackColor
+                    needed Fake.Control to declare the member at all (CS0115 there, CS0507 against
+                    real WinForms, where it is public virtual): the fake API surface has to match the
+                    real one for an override to bind, and adding the declaration is the fix, not
+                    dropping the override.
+
+  MEASURE, NOT ASSUMED   Every number above came off a probe on the shipped build: --geom (plan
+                    arithmetic plus a pixel scan of a DPI-correct screen grab), --gridprops (the
+                    TypeDescriptor data the grid consumes), --inherit (the adoption matrix),
+                    --widthcap=1 (round eight on demand, the old path kept alive as a probe rather
+                    than commented out). Two of the probes were added this round precisely because
+                    the claims are about designer behaviour we cannot screenshot.
+
+  REGREEN           dotnet build -c Release --no-incremental: demo, template (SR2DApp),
+                    apps/SpriteBox, EmptySR2DFormTemplate, harness, tests/cs/ctlrun - 0 errors.
+                    ctlrun: 162 ok, 1 fail - the same known-red DejaVu Sans font pin (the font is not
+                    installed on this machine), unchanged from round eight. geom.sh on the final
+                    build: caplen / alltext / realfont / noicon / barw6 / wt / wt10 silhouette off by
+                    0 px planned, -2 px painted; tpl off by +2 planned, 0 painted; tpl_r8
+                    (--widthcap=1) the old 50-bar plan; tpl_cnt count=10 barW=32 covering the block.
+                    Nothing in the demo or SpriteBox app changes colour: the demo's form BackColor IS
+                    SpriteControlBase.DefaultBack, and SpriteBox's direct children are a SpriteBox
+                    subclass and plain WinForms strips, which are not in the adoption chain.

@@ -20,7 +20,7 @@ namespace Sr2d64CSport
     //   * everything is done in premultiplied 16-bit fixed point, so transparent
     //     pixels do not bleed their (usually black) colour into the edges.
     // ------------------------------------------------------------------------
-    internal unsafe partial class Sprite
+    public unsafe partial class Sprite
     {
         /// <summary>
         /// Draws <paramref name="Src"/> blurred, with its top-left corner at (x, y). The blur
@@ -84,7 +84,7 @@ namespace Sr2d64CSport
         public void Blur(int Radius, BlurQuality Quality)
         {
             if (Radius <= 0 || meRight <= meLeft || meBottom <= meTop) return;
-            bool premul = Op == SR2D.Op.AlphaOver;
+            bool premul = Op == SR2D.Op.AlphaOver || Premultiplied;             // hand-premultiplied pixels must blur in premultiplied space (like DrawBlurred)
             int flags = (premul ? 1 : 0) | QualityFlags(Quality);
             // in place: DRAW_BLUR consumes the whole source before its first write. Paint copies the
             // premultiplied result (alpha included), op 12 the straight-alpha one.
@@ -106,7 +106,7 @@ namespace Sr2d64CSport
         {
             if (Radius < 0) Radius = 0; if (Radius > 512) Radius = 512;
             Margin = Radius * BlurPasses(Quality);
-            bool premul = Op == SR2D.Op.AlphaOver;
+            bool premul = Op == SR2D.Op.AlphaOver || Premultiplied;             // hand-premultiplied pixels must blur in premultiplied space (like DrawBlurred)
             Sprite r = new Sprite(meWidth + 2 * Margin, meHeight + 2 * Margin);   // zero-initialised
             int flags = (premul ? 1 : 0) | QualityFlags(Quality);
             _ = SR2D.Native.DrawBlur(pBuf, meWidth, meHeight, r.pBuf, r.meWidth, 0, 0, r.meWidth, r.meHeight, Margin, Margin,

@@ -39,6 +39,21 @@ namespace Sr2d64CSport
         /// <summary>Forgets everything (both directions).</summary>
         public void Clear() { _undo.Clear(); _redo.Clear(); MemoryBytes = 0; }
 
+        long EntryBytes(Entry e) => e.Bytes + (e.After != null ? e.AfterBytes : 0L);
+        /// <summary>Drops the redo tail, subtracting what those entries were charged (they keep their captured After state).</summary>
+        void ClearRedo()
+        {
+            foreach (var e in _redo) MemoryBytes -= EntryBytes(e);
+            _redo.Clear();
+        }
+        [System.Diagnostics.Conditional("DEBUG")]
+        void CheckBytes()
+        {   // the account must always equal the sum of the per-entry charges - a drift would silently
+            // evict valid history or let it grow past the cap
+            long sum = 0; foreach (var e in _undo) sum += EntryBytes(e); foreach (var e in _redo) sum += EntryBytes(e);
+            System.Diagnostics.Debug.Assert(sum == MemoryBytes, $"EditHistory byte accounting drifted: tracked {MemoryBytes}, actual {sum}");
+        }
+
         readonly List<Entry> _undo = new(), _redo = new();
 
         /// <summary>
@@ -53,10 +68,10 @@ namespace Sr2d64CSport
             if (rect.IsEmpty) return Rectangle.Empty;
             var before = new int[rect.Width * rect.Height];
             CopyOut(target, rect, before);
-            _redo.Clear();
+            ClearRedo();
             var e = Entry.SpriteEntry(rect, before, target.Width, target.Height);
             _undo.Add(e); MemoryBytes += before.Length * 4L;
-            Trim();
+            Trim(); CheckBytes();
             return rect;
         }
 
@@ -74,10 +89,10 @@ namespace Sr2d64CSport
             var before = new Voxel[(x1 - x0) * (y1 - y0) * (z1 - z0)];
             int k = 0;
             for (int z = z0; z < z1; z++) for (int y = y0; y < y1; y++) for (int x = x0; x < x1; x++) before[k++] = target[x, y, z];
-            _redo.Clear();
+            ClearRedo();
             var e = Entry.VoxelEntry(new Rectangle(x0, y0, x1 - x0, y1 - y0), z0, z1 - z0, before, target.Width, target.Height, target.Depth);
             _undo.Add(e); MemoryBytes += before.Length * VoxelBytes;
-            Trim();
+            Trim(); CheckBytes();
             return true;
         }
 
@@ -92,11 +107,10 @@ namespace Sr2d64CSport
             var r = e.Rect;
             var after = new int[r.Width * r.Height];
             CopyOut(target, r, after);
-            e.After = after; MemoryBytes += after.Length * 4L;
+            e.After = after; MemoryBytes += after.Length * 4L;   // the entry is now charged Before + After, in EITHER list
             CopyIn(target, r, (int[])e.Before);
-            _undo.RemoveAt(_undo.Count - 1); _redo.Add(e);
-            MemoryBytes -= ((int[])e.Before).Length * 4L;
-            Trim();
+            _undo.RemoveAt(_undo.Count - 1); _redo.Add(e);       // moving between the lists does not change the charge
+            Trim(); CheckBytes();
             return true;
         }
 
@@ -107,9 +121,8 @@ namespace Sr2d64CSport
             var e = _redo[^1];
             if (e.IsVoxels || e.After is not int[] px || e.W != target.Width || e.H != target.Height) return false;
             CopyIn(target, e.Rect, px);
-            _redo.RemoveAt(_redo.Count - 1); _undo.Add(e);
-            MemoryBytes += ((int[])e.Before).Length * 4L;
-            Trim();
+            _redo.RemoveAt(_redo.Count - 1); _undo.Add(e);       // the charge stays Before + After wherever the entry lives
+            Trim(); CheckBytes();
             return true;
         }
 
@@ -127,8 +140,7 @@ namespace Sr2d64CSport
             e.After = after; MemoryBytes += after.Length * VoxelBytes;
             CopyVoxIn(target, e, (Voxel[])e.Before);
             _undo.RemoveAt(_undo.Count - 1); _redo.Add(e);
-            MemoryBytes -= ((Voxel[])e.Before).Length * VoxelBytes;
-            Trim();
+            Trim(); CheckBytes();
             return true;
         }
 
@@ -140,8 +152,7 @@ namespace Sr2d64CSport
             if (!e.IsVoxels || e.After is not Voxel[] vx || e.W != target.Width || e.H != target.Height || e.D != target.Depth) return false;
             CopyVoxIn(target, e, vx);
             _redo.RemoveAt(_redo.Count - 1); _undo.Add(e);
-            MemoryBytes += ((Voxel[])e.Before).Length * VoxelBytes;
-            Trim();
+            Trim(); CheckBytes();
             return true;
         }
 
@@ -153,9 +164,9 @@ namespace Sr2d64CSport
                 var list = _redo.Count > 0 ? _redo : _undo;
                 var old = list[0];
                 list.RemoveAt(0);
-                MemoryBytes -= old.Bytes;
-                if (old.After != null) MemoryBytes -= old.AfterBytes;
+                MemoryBytes -= EntryBytes(old);                  // exactly the entry's full charge (Before + After)
             }
+            CheckBytes();
         }
 
         static void CopyOut(Sprite s, Rectangle r, int[] dst)

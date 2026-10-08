@@ -23,7 +23,7 @@ using System.Runtime.InteropServices;
 namespace Sr2d64CSport
 {
     /// <summary>How <see cref="VoxelGrid.Merge(VoxelGrid,int,int,int,VoxelMerge,string?)"/> combines the other grid's cells with ours.</summary>
-    internal enum VoxelMerge
+    public enum VoxelMerge
     {
         /// <summary>Solid cells of the other grid overwrite ours; its empty cells change nothing.</summary>
         Over,
@@ -38,7 +38,7 @@ namespace Sr2d64CSport
     }
 
     /// <summary>A named set of cells in a <see cref="VoxelGrid"/> (see VoxelGrid.Objects.cs for the two kinds).</summary>
-    internal sealed class VoxelObject : IDisposable
+    public sealed class VoxelObject : IDisposable
     {
         public string Name;
         /// <summary>Material tag (1..255) when the object is the set of cells with that <see cref="Voxel.Material"/>; 0 = selection-backed.</summary>
@@ -64,7 +64,7 @@ namespace Sr2d64CSport
         }
     }
 
-    internal unsafe partial class VoxelGrid
+    public unsafe partial class VoxelGrid
     {
         // ---- merging --------------------------------------------------------------------------------------------
 

@@ -17,7 +17,7 @@ namespace Sr2d64CSport
     /// Sizes are in pixels (em height). A SpriteFont is safe to share between sprites; it is not thread-safe for concurrent draws
     /// (use one SpriteFont per thread with DrawParallel, or lock).
     /// </summary>
-    internal sealed partial class SpriteFont : IDisposable, IFallbackFont
+    public sealed partial class SpriteFont : IDisposable, IFallbackFont
     {
         readonly GlyphFont prog;
         readonly Dictionary<long, Glyph?> glyphs = new Dictionary<long, Glyph?>();

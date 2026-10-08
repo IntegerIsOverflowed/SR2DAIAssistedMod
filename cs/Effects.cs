@@ -22,6 +22,8 @@ namespace Sr2d64CSport
     // Stage order matters and is the order you add them: Blur then Distort smears first
     // and wobbles the smeared picture; Distort then Blur wobbles the sharp one and softens.
     //
+    //   fx.MotionBlur(20, 12)                      motion blur: direction 20 deg, 12 px trail
+    //   fx.MotionBlurPath(arc, 2f)                 the trail follows a polyline (scaled x2)
     //   fx.Shadow(4, 4, 6)                         drop shadow (black 60 %, blur 6, offset 4,4)
     //   fx.Glow(8, 0xFFFFD700)                     additive glow (colours are int ARGB, as everywhere in SR2D;
     //   fx.Outline(2, 0xFFFFFFFF)                  System.Drawing.Color overloads exist for convenience)
@@ -38,7 +40,7 @@ namespace Sr2d64CSport
 
     /// <summary>Procedural distortion patterns for <see cref="Effects.Distort"/>.</summary>
     /// <summary>How a blur trades quality for speed (see <see cref="Effects.Blur(int, BlurQuality, int)"/>).</summary>
-    internal enum BlurQuality : int
+    public enum BlurQuality : int
     {
         /// <summary>Three box passes (Gaussian-like profile). The default; identical to the previous <c>Blur(r)</c>.</summary>
         Gaussian = 0,
@@ -49,7 +51,7 @@ namespace Sr2d64CSport
     }
 
     /// <summary>How <see cref="Effects.Diffuse"/> combines the picked pixel with the original.</summary>
-    internal enum DiffuseMode : int
+    public enum DiffuseMode : int
     {
         /// <summary>The picked neighbour replaces the pixel (Photoshop "Normal").</summary>
         Normal = 0,
@@ -59,7 +61,7 @@ namespace Sr2d64CSport
         LightenOnly = 2,
     }
 
-    internal enum Distortion : int
+    public enum Distortion : int
     {
         /// <summary>Sine wave: rows (or the given direction) shift back and forth. Flag / heat shimmer.</summary>
         Wave = 0,
@@ -76,7 +78,7 @@ namespace Sr2d64CSport
     /// every frame - it is a plain list of structs, no native resources) and pass it to
     /// <c>Sprite.DrawFx*</c>. Every builder method returns <c>this</c> for chaining.
     /// </summary>
-    internal sealed class Effects
+    public sealed class Effects
     {
         // native SR2D_FxStage, 80 bytes
         [StructLayout(LayoutKind.Sequential)]
@@ -90,7 +92,7 @@ namespace Sr2d64CSport
             public int Pad0, Pad1;
         }
 
-        internal const int KindBlur = 1, KindDistortMap = 2, KindDistort = 3, KindColor = 4, KindMorph = 5, KindShadow = 6, KindDiffuse = 7;
+        internal const int KindBlur = 1, KindDistortMap = 2, KindDistort = 3, KindColor = 4, KindMorph = 5, KindShadow = 6, KindDiffuse = 7, KindMotion = 8;
         internal const int FlagPost = 8, FlagPremul = 16, FlagOpaque = 32;
         const int FBlurFast = 1, FBlurBox = 2, FMapAlpha = 1, FWaveLong = 1, FWaveCross = 2, FInvert = 1, FSampleNearest = 0x100, FSampleBicubic = 0x200;
         const int FDisabled = 0x400, FMorphErode = 1, FMorphSquare = 2, FShadowGlow = 1, FShadowOnly = 2, FShadowFast = 4, FShadowBox = 8;
@@ -100,6 +102,14 @@ namespace Sr2d64CSport
 
         internal readonly List<Stage> Stages = new List<Stage>();
         readonly List<Sprite?> maps = new List<Sprite?>();   // keeps DISTORT_MAP sprites alive / pinned by reference
+        readonly List<IntPtr> bufs = new();                  // MotionBlurPath point arrays (native copies, freed in Clear / ~Effects)
+
+        ~Effects() => FreeBufs();
+        void FreeBufs()
+        {
+            for (int i = 0; i < bufs.Count; i++) { if (bufs[i] != IntPtr.Zero) Marshal.FreeHGlobal(bufs[i]); }
+            bufs.Clear();
+        }
 
         /// <summary>
         /// Run the stages after the transform, at screen resolution (see the class remarks).
@@ -117,13 +127,26 @@ namespace Sr2d64CSport
         public int Version { get; private set; }
 
         public int Count => Stages.Count;
-        public Effects Clear() { if (Stages.Count > 0) { Stages.Clear(); maps.Clear(); Version++; } return this; }
+        public Effects Clear() { if (Stages.Count > 0 || bufs.Count > 0) { Stages.Clear(); maps.Clear(); FreeBufs(); Version++; } return this; }
 
         /// <summary>Appends a copy of every stage of <paramref name="Other"/> (its enabled/disabled state included).</summary>
         public Effects Append(Effects Other)
         {
             if (Other == null || Other.Stages.Count == 0) return this;
-            Stages.AddRange(Other.Stages); maps.AddRange(Other.maps); Version++;
+            Stages.AddRange(Other.Stages); maps.AddRange(Other.maps);
+            for (int i = 0; i < Other.Stages.Count; i++)           // path buffers are OWNED per chain: the append gets its own copy
+            {
+                IntPtr b = Other.bufs[i];
+                Stage os = Other.Stages[i];
+                if (b != IntPtr.Zero && os.Kind == KindMotion)
+                {
+                    int bytes; IntPtr nb;
+                    unsafe { bytes = os.I[1] * 8; nb = Marshal.AllocHGlobal(bytes); Buffer.MemoryCopy((void*)b, (void*)nb, bytes, bytes); }
+                    bufs.Add(nb);                                   // the append gets its own copy of the path points
+                }
+                else bufs.Add(IntPtr.Zero);
+            }
+            Version++;
             return this;
         }
         /// <summary>Independent copy of the chain (stages, DistortMap references, Post).</summary>
@@ -295,6 +318,55 @@ namespace Sr2d64CSport
         public Effects Grayscale() => Color(Saturation: 0);
         public Effects Invert() => Color(Invert: true);
 
+        // ------------------------------------------------------------------ motion blur
+        /// <summary>
+        /// Motion blur: the picture averaged over <paramref name="Samples"/> taps along a straight trail
+        /// (<paramref name="Degree"/> in degrees, 0 = right, 90 = down; <paramref name="Strength"/> = trail
+        /// length in px - the first tap sits on the pixel, the last that far away). Samples 0 = automatic
+        /// from the strength (2..32). Sampling is bilinear (<paramref name="Sampling"/> override). The trail
+        /// is part of the draw's margin, nothing is cut off.
+        /// </summary>
+        public unsafe Effects MotionBlur(float Degree, float Strength, int Samples = 0, SR2D.Filter Sampling = SR2D.Filter.Bilinear)
+        {
+            if (!(Strength > 0) || Samples == 1) return this;
+            int n = Samples <= 0 ? Math.Clamp((int)MathF.Ceiling(Strength) + 1, 2, 32) : Math.Clamp(Samples, 2, 64);
+            Stage s = default; s.Kind = KindMotion;
+            s.I[0] = n; s.F[0] = Degree; s.F[1] = Strength;
+            s.I[2] = BitConverter.SingleToInt32Bits(Strength);   // trail extent for the managed Margin mirror
+            s.Flags = SampleFlag(Sampling);
+            return Add(s, null);
+        }
+
+        /// <summary>
+        /// Motion blur along a custom path: <paramref name="Path"/> is a polyline of relative trail offsets
+        /// in pixels (2..32 points), walked uniformly and scaled by <paramref name="Strength"/> (1 = the
+        /// points as given). The points are COPIED at call time - the array can be reused afterwards.
+        /// <paramref name="Samples"/> 0 = automatic from the path extent (2..32).
+        /// </summary>
+        public unsafe Effects MotionBlurPath(System.Drawing.PointF[] Path, float Strength = 1f, int Samples = 0, SR2D.Filter Sampling = SR2D.Filter.Bilinear)
+        {
+            if (Path == null || Path.Length < 2 || Path.Length > 32 || !(Strength > 0)) return this;
+            float extent = 0;
+            for (int i = 0; i < Path.Length; i++) extent = MathF.Max(extent, MathF.Sqrt(Path[i].X * Path[i].X + Path[i].Y * Path[i].Y) * Strength);
+            IntPtr p = Marshal.AllocHGlobal(Path.Length * 8);
+            float* f = (float*)p;
+            for (int i = 0; i < Path.Length; i++) { f[i * 2] = Path[i].X; f[i * 2 + 1] = Path[i].Y; }
+            int n = Samples <= 0 ? Math.Clamp((int)MathF.Ceiling(extent) + 1, 2, 32) : Math.Clamp(Samples, 2, 64);
+            Stage s = default; s.Kind = KindMotion;
+            s.I[0] = n; s.I[1] = Path.Length; s.F[1] = Strength;
+            s.I[2] = BitConverter.SingleToInt32Bits(extent);
+            s.Flags = SampleFlag(Sampling);
+            return Add(s, null, p);
+        }
+        /// <summary>Path as x / y pairs (an even count of floats, 2..32 points), see the PointF overload.</summary>
+        public unsafe Effects MotionBlurPath(float[] PointsXY, float Strength = 1f, int Samples = 0, SR2D.Filter Sampling = SR2D.Filter.Bilinear)
+        {
+            if (PointsXY == null || PointsXY.Length < 4 || PointsXY.Length > 64 || (PointsXY.Length & 1) != 0) return this;
+            var pts = new System.Drawing.PointF[PointsXY.Length / 2];
+            for (int i = 0; i < pts.Length; i++) pts[i] = new System.Drawing.PointF(PointsXY[i * 2], PointsXY[i * 2 + 1]);
+            return MotionBlurPath(pts, Strength, Samples, Sampling);
+        }
+
         // ------------------------------------------------------------------ outline / morphology
         /// <summary>
         /// Grows the sprite's shape by <paramref name="Radius"/> px (dilate): every pixel takes the
@@ -410,13 +482,28 @@ namespace Sr2d64CSport
         public bool IsEnabled(int Index) => (Stages[Index].Flags & FDisabled) == 0;
         /// <summary>Index of the stage added last (for <see cref="Enable"/>): <c>fx.Blur(4); int blur = fx.LastIndex;</c></summary>
         public int LastIndex => Stages.Count - 1;
-        /// <summary>Removes the last stage.</summary>
-        public Effects RemoveLast() { if (Stages.Count > 0) { Stages.RemoveAt(Stages.Count - 1); maps.RemoveAt(maps.Count - 1); Version++; } return this; }
+        /// <summary>Removes the last stage, with its native scratch buffer: <see cref="bufs"/> must stay parallel to
+        /// <see cref="Stages"/>, or a later <see cref="Clear"/> would see a non-empty buffer list and bump the version
+        /// of an already-empty chain (and the buffer would leak until the final free).</summary>
+        public Effects RemoveLast()
+        {
+            if (Stages.Count == 0) return this;
+            Stages.RemoveAt(Stages.Count - 1);
+            maps.RemoveAt(maps.Count - 1);
+            if (bufs.Count > 0)
+            {
+                int last = bufs.Count - 1;
+                if (bufs[last] != IntPtr.Zero) Marshal.FreeHGlobal(bufs[last]);
+                bufs.RemoveAt(last);
+            }
+            Version++;
+            return this;
+        }
 
         // ------------------------------------------------------------------ internals
-        unsafe Effects Add(Stage s, Sprite? map)
+        unsafe Effects Add(Stage s, Sprite? map, IntPtr buf = default)
         {
-            Stages.Add(s); maps.Add(map); Version++;
+            Stages.Add(s); maps.Add(map); bufs.Add(buf); Version++;
             return this;
         }
 
@@ -448,6 +535,12 @@ namespace Sr2d64CSport
                         float a = Math.Abs(s.F[1]);
                         if (s.Kind == KindDistort && s.I[0] == (int)Distortion.Wave && (s.Flags & FWaveCross) != 0) a *= 1.5f;
                         if (!(a <= 2048f)) a = 2048f;                       // also NaN / infinity
+                        m += (int)Math.Ceiling(a) + ((s.Flags & FSampleBicubic) != 0 ? 2 : 1);
+                    }
+                    else if (s.Kind == KindMotion)
+                    {
+                        float a = BitConverter.Int32BitsToSingle(s.I[2]);   // the trail extent stored by the builder
+                        if (!(a <= 2048f)) a = 2048f;
                         m += (int)Math.Ceiling(a) + ((s.Flags & FSampleBicubic) != 0 ? 2 : 1);
                     }
                 }
@@ -484,13 +577,14 @@ namespace Sr2d64CSport
                     if (m.Width <= 0 || m.Height <= 0) { s.Kind = 0; }
                     else { s.Map = m.PixelPtr; s.Mw = m.Width; s.Mh = m.Height; }
                 }
+                else if (bufs[i] != IntPtr.Zero) s.Map = (int*)bufs[i];   // MotionBlurPath's point array
                 dst[i] = s;
             }
             return Stages.Count;
         }
     }
 
-    internal unsafe partial class Sprite
+    public unsafe partial class Sprite
     {
         /// <summary>Raw pixel pointer (for Effects map stages).</summary>
         internal int* PixelPtr => pBuf;
@@ -610,5 +704,107 @@ namespace Sr2d64CSport
             fx.Clear();
             return fx.Opacity(o);
         }
+
+        // ------------------------------------------------------------------ motion blur for real time (multi-tap)
+        // Per thread, like VectorRender's scratch: the bench renders parallel bands and both surfaces are
+        // written by every call.
+        [ThreadStatic] static Sprite? tTrailAcc, tTrailTap;
+
+        /// <summary>
+        /// Motion blur for real-time rendering: the sprite drawn <paramref name="Taps"/> times along
+        /// <paramref name="Path"/> with the copies AVERAGED instead of piled up - each tap is added in
+        /// premultiplied space at 1/<paramref name="Taps"/> into a reused surface that covers the sprite plus
+        /// the trail, and that single average is composited here. <see cref="Effects.MotionBlur"/> instead
+        /// resamples every pixel of that same sprite-plus-trail image once per tap, so its cost grows with
+        /// the trail length; this one stays at Taps passes over the sprite whatever the trail is.
+        /// <paramref name="Path"/> is the polyline of relative trail offsets in pixels that
+        /// <see cref="Effects.MotionBlurPath"/> takes (the first point is the sprite's own position), sampled
+        /// here at Taps places uniformly along the points and rounded to whole pixels.
+        /// Deterministic - the same inputs give the same picture, so it works for a still object, for
+        /// screenshots and at any frame rate, unlike <see cref="MotionEcho"/>. It is an approximation: a tap
+        /// is a WHOLE copy of the sprite, so a long trail with few taps shows separate ghosts rather than a
+        /// smooth sweep, and a sprite that changes shape along the trail is averaged, not swept. Taps is
+        /// clamped to 2..32; fewer than 2 path points is a plain draw. Both surfaces are reused per thread,
+        /// so nothing is allocated once they are big enough for the sprite and the trail.
+        /// </summary>
+        public void DrawMotionTaps(Sprite Src, int x, int y, ReadOnlySpan<PointF> Path, int Taps = 8)
+        {
+            if (Src.pBuf == null || Src.meWidth <= 0 || Src.meHeight <= 0) return;
+            int n = Math.Clamp(Taps, 2, 32);
+            if (Path.Length < 2) { Draw(Src, x, y); return; }
+            Span<int> ox = stackalloc int[n], oy = stackalloc int[n];
+            int minX = 0, maxX = 0, minY = 0, maxY = 0;
+            for (int k = 0; k < n; k++)
+            {   // uniform along the points: the path is already a resampled trail, so index order = time order
+                float s = (float)k / (n - 1) * (Path.Length - 1);
+                int i = Math.Min((int)s, Path.Length - 2);
+                float f = s - i;                         // relative to the clamped segment - at s = the last index i is one short, so the fraction is 1 and the FINAL point is reached (a fraction taken off the unclamped floor repeats the last-but-one point and never draws the head of the trail)
+                ox[k] = (int)MathF.Round(Path[i].X + (Path[i + 1].X - Path[i].X) * f);
+                oy[k] = (int)MathF.Round(Path[i].Y + (Path[i + 1].Y - Path[i].Y) * f);
+                minX = Math.Min(minX, ox[k]); maxX = Math.Max(maxX, ox[k]);
+                minY = Math.Min(minY, oy[k]); maxY = Math.Max(maxY, oy[k]);
+            }
+            int aw = Src.meWidth + maxX - minX, ah = Src.meHeight + maxY - minY;
+            Sprite? acc = tTrailAcc;
+            if (acc == null || acc.Width < aw || acc.Height < ah)
+            {   // AlphaOver = the surface is premultiplied by convention, which is what the taps add into
+                acc?.Dispose();
+                acc = tTrailAcc = new Sprite(Math.Max(aw, acc?.Width ?? 0), Math.Max(ah, acc?.Height ?? 0), SR2D.Op.AlphaOver);
+            }
+            Sprite? tap = tTrailTap;
+            if (tap == null || tap.Width < Src.meWidth || tap.Height < Src.meHeight)
+            {
+                tap?.Dispose();
+                tap = tTrailTap = new Sprite(Math.Max(Src.meWidth, tap?.Width ?? 0), Math.Max(Src.meHeight, tap?.Height ?? 0));
+            }
+            // One scaled copy (premultiplied, then 1/n) is blitted n times - scaling the sprite once per
+            // frame beats an opacity pass on every tap, and the sum of n taps is exactly the trail mean
+            // (premultiplied colour and alpha both add, and n x 1/n never saturates).
+            tap.SetLockRectXY(0, 0, Src.meWidth, Src.meHeight);
+            tap.Premultiplied = false;
+            tap.ClearBuffer(0);
+            tap.Draw(Src, 0, 0, SR2D.Op.Paint);
+            if (Src.Premultiplied) tap.Premultiplied = true; else tap.Premultiply();
+            tap.Fade(1f / n);
+            acc.SetLockRectXY(0, 0, aw, ah);
+            acc.ClearBuffer(0);
+            for (int k = 0; k < n; k++) acc.Draw(tap, ox[k] - minX, oy[k] - minY, SR2D.Op.Add);
+            Draw(acc, x + minX, y + minY, SR2D.Op.AlphaOver);
+        }
+    }
+
+    /// <summary>
+    /// Real-time friendly motion blur ("echo"): instead of re-sampling a trail every frame, a persistent
+    /// accumulator keeps the previous frames - each <see cref="Step"/> fades the accumulator by
+    /// <see cref="Persistence"/> and draws the new frame over it. Two whole-surface passes whatever the
+    /// trail length, so it stays cheap while <see cref="Effects.MotionBlur"/>'s resampling grows with
+    /// the trail. Feed EVERY rendered frame through <see cref="Step"/> and present the returned sprite:
+    /// moving objects leave a decaying trail (feedback motion blur, the classic racing-game ghost).
+    /// Not frame-rate independent - Persistence applies per step, tie it to your fixed update rate.
+    /// The accumulator is a straight-alpha sprite; draw it onto the target with AlphaBlend / AlphaOver.
+    /// </summary>
+    internal sealed class MotionEcho : IDisposable
+    {
+        /// <summary>The accumulated frames (what you draw to the screen).</summary>
+        public readonly Sprite Accumulator;
+        float persistence;
+        /// <summary>How much of the accumulator survives each step (0..0.99; 0 = no trail, higher = longer ghost).</summary>
+        public float Persistence { get => persistence; set => persistence = Math.Clamp(value, 0f, 0.99f); }
+
+        /// <summary>An empty accumulator of the given size (straight alpha, transparent).</summary>
+        public MotionEcho(int width, int height) { Accumulator = new Sprite(width, height); Persistence = 0.9f; }
+
+        /// <summary>Fades the accumulator and blends <paramref name="Frame"/> over it. Returns <see cref="Accumulator"/>.</summary>
+        public Sprite Step(Sprite Frame)
+        {
+            if (persistence > 0) Accumulator.Fade(persistence); else Accumulator.ClearBuffer(0);
+            Accumulator.Draw(Frame, 0, 0, SR2D.Op.AlphaOver);
+            return Accumulator;
+        }
+
+        /// <summary>Throws the trail away (the next Step starts from an empty accumulator).</summary>
+        public void Reset() => Accumulator.ClearBuffer(0);
+
+        public void Dispose() { Accumulator.Dispose(); GC.SuppressFinalize(this); }
     }
 }

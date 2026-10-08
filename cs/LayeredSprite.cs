@@ -273,8 +273,11 @@ namespace Sr2d64CSport
 
                 int T = threads == 0 ? Environment.ProcessorCount : threads;
                 if (T > 64) T = 64;
-                // batch = a few layers per thread (fewer fork/join points), bounded by 64 MB of scratch
-                int B = T <= 1 ? 1 : (int)Math.Clamp(Math.Min(4L * T, (64L << 20) / Math.Max(1L, 4L * composite.Width * composite.Height)), T, 64);
+                // batch = a few layers per thread (fewer fork/join points), bounded by 64 MB of scratch.
+                // The budget must be allowed to bind: clamping the result UP to T made the 64 MB term dead code
+                // and let a huge composite allocate T x composite-size scratches (hundreds of MB).
+                int cap = (int)Math.Clamp((64L << 20) / Math.Max(1L, 4L * (long)composite.Width * composite.Height), 1, 64);
+                int B = T <= 1 ? 1 : Math.Max(1, Math.Min(4 * T, cap));
                 for (int i = first; i < n; )
                 {
                     if (T <= 1 || n - i < 2) { DrawLayer(layers[i]); Composed(i, n); i++; continue; }

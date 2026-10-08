@@ -6,8 +6,8 @@
     <Nullable>enable</Nullable>
     <ImplicitUsings>disable</ImplicitUsings>
     <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
-    <BaseOutputPath>/home/user/.cache/codechk/bin/</BaseOutputPath>
-    <BaseIntermediateOutputPath>/home/user/.cache/codechk/obj/</BaseIntermediateOutputPath>
+    <BaseOutputPath Condition="Exists('/home/user/.cache')">/home/user/.cache/codechk/bin/</BaseOutputPath>
+    <BaseIntermediateOutputPath Condition="Exists('/home/user/.cache')">/home/user/.cache/codechk/obj/</BaseIntermediateOutputPath>
   </PropertyGroup>
   <ItemGroup>
     <Compile Include="../../../demo/CodeView.cs;Stubs.cs;Program.cs" />

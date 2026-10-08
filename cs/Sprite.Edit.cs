@@ -19,7 +19,7 @@ namespace Sr2d64CSport
     //  * All return this, so edits chain: s.FlipX().Rotate(15).Trim().
     //  * Op and Premultiplied are kept. Rotations / rescales of a straight-alpha sprite sample it
     //    premultiplied and write it back straight (no dark fringes at soft edges).
-    internal unsafe partial class Sprite
+    public unsafe partial class Sprite
     {
         // ------------------------------------------------------------------ buffer replacement
         // Replaces the pixels with a W x H buffer (64-byte aligned, ours to free). Plain sprites

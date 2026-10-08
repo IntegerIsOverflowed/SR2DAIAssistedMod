@@ -242,7 +242,12 @@ struct K
     struct OpBlend
     {   // all 4 bytes: d = (d*(256-k) + s*k) >> 8
         T wk, winv;
-        explicit OpBlend(int k) : wk(V::set1_16((short)(k & 255))), winv(V::set1_16((short)(256 - (k & 255)))) {}
+        explicit OpBlend(int k)
+        {   // the domain is 0..256 INCLUSIVE (256 = full source): clamp, never mask - 256 & 255 == 0 would blend nothing
+            int kk = k < 0 ? 0 : k > 256 ? 256 : k;
+            wk = V::set1_16((short)kk);
+            winv = V::set1_16((short)(256 - kk));   // largest lane product 255 * 256 = 65280 - still exact in mullo16
+        }
         SR2D_INLINE T operator()(T s, T d) const
         {
             T lo = V::add16(V::mullo16(V::lo8to16(d), winv), V::mullo16(V::lo8to16(s), wk));
@@ -2252,7 +2257,9 @@ struct K
         // dash modes: dotlen > 0 && gaplen > 0 -> pattern measured along the line (pixels);
         //             dotlen < 0             -> "dot step": 1 pixel on, (-dotlen) major steps off
         const int  stepGap = dotlen < 0.0f ? (int)(-dotlen + 0.5f) : 0;
-        const int  mode = stepGap > 0 ? 1 : (dotlen > 0.0f && gaplen > 0.0f) ? 2 : 0;
+        // a sub-pixel dot+gap period would make the dash enumeration span ~2^64 iterations (and the flr/cil
+        // casts of those quotients are UB) - a degenerate pattern means solid
+        const int  mode = stepGap > 0 ? 1 : (dotlen > 0.0f && gaplen > 0.0f && (double)dotlen + (double)gaplen >= 1e-4) ? 2 : 0;
         const double period = mode == 2 ? (double)dotlen + (double)gaplen : 1.0;
 
         double sx = fx0 + fdx * t0, sy = fy0 + fdy * t0;           // clipped start
@@ -2275,11 +2282,17 @@ struct K
         auto fx  = [](double v) -> int64_t { return (int64_t)(v * 65536.0 + (v >= 0 ? 0.5 : -0.5)); };
         const bool horiz = adx >= ady;
         const int ms = horiz ? rnd(sx) : rnd(sy), me = horiz ? rnd(ex) : rnd(ey);
-        const int n = me - ms; if (n < 0) return;
+        // A degenerate (zero-length) segment has p[i] == 0 on ALL four Liang-Barsky axes, so the +/-0.5
+        // acceptance slack applies to the major axis too and rnd() can land one pixel outside the clip rect
+        // (a write past the buffer). Clamp the major axis the same way the walk clamps the minor one.
+        const int majLo = horiz ? clipL : clipT, majHi = horiz ? clipR - 1 : clipB - 1;
+        if (me < majLo || ms > majHi) return;
+        int msc = ms < majLo ? majLo : ms, mec = me > majHi ? majHi : me;
+        const int n = mec - msc; if (n < 0) return;
         const double amaj = horiz ? adx : ady;
         const double omaj = horiz ? ox : oy;
         const double slope = amaj > 0 ? (horiz ? wdy / wdx : wdx / wdy) : 0.0;
-        const int64_t minFx = fx((horiz ? oy : ox) + (ms - omaj) * slope);
+        const int64_t minFx = fx((horiz ? oy : ox) + (msc - omaj) * slope);
         const int64_t dmin  = fx(slope);
         const int skip = skipEnd ? (rev ? 0 : n) : -1;
         const ptrdiff_t majStep = horiz ? 1 : dw, minStep = horiz ? dw : 1;
@@ -2291,14 +2304,14 @@ struct K
         {
             const double len = _mm_cvtsd_f64(_mm_sqrt_sd(_mm_setzero_pd(), _mm_set_sd(fdx * fdx + fdy * fdy)));   // no CRT
             const double dper = amaj > 0 ? len / amaj : 0.0;                    // line pixels per major step
-            const double d0 = (ms - omaj) * dper;                               // distance of step 0 from the walk origin
+            const double d0 = (msc - omaj) * dper;                              // distance of step 0 from the walk origin
             P0 = (rev ? len - d0 : d0) - (double)phase;                         // measured from the caller's start
             dpat = rev ? -dper : dper;
         }
         else if (mode == 1)
         {   // counter anchored at the caller's lower-major endpoint (like the original, but unclipped)
             const int startMaj = rnd(omaj);
-            int off = (ms - startMaj) % (stepGap + 1); if (off < 0) off += stepGap + 1;
+            int off = (msc - startMaj) % (stepGap + 1); if (off < 0) off += stepGap + 1;
             cnt0 = off == 0 ? 0 : stepGap + 1 - off;                            // steps until the next "on"
             cnt0 = (stepGap + 1 - cnt0) % (stepGap + 1);                        // -> counter value at step 0
         }

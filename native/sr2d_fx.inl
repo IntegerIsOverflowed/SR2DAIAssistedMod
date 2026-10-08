@@ -411,6 +411,49 @@ static void fx_distort_mode(int mode, const int* in, int* out, int W, int H, int
     else                fx_distort<0>(in, out, W, H, x0, y0, x1, y1, ox, oy, gen);
 }
 
+// ------------------------------------------------------------ motion blur
+// out(x, y) = the average of n taps of `in` along the trail: sample k at (x - offs[2k], y - offs[2k+1]).
+// offs = n float pairs precomputed by the dispatch (straight direction or a walked polyline), sample 0
+// sits ON the pixel, so the sharp picture is part of the average. Bytes are premultiplied - the
+// average of premultiplied pixels is premultiplied again, so the trail fades correctly over transparency.
+template<int MODE>
+static void fx_motion(const int* in, int* out, int W, int H, int x0, int y0, int x1, int y1, const float* offs, int n)
+{
+    typedef typename V::F F;
+    SR2D_ALIGN(32) int lane_i[8] = { 0, 1, 2, 3, 4, 5, 6, 7 };
+    const F lanes = V::cvt_i2f(V::loadu(lane_i));
+    const F half = V::set1f(0.5f), inv = V::set1f(1.0f / (float)n);
+    const T m255 = V::set1_32(255);
+    SR2D_ALIGN(32) int tmp[8];
+    for (int y = y0; y < y1; ++y)
+    {
+        const F sy = V::addf(V::set1f((float)y), half);
+        int* o = out + (size_t)y * W;
+        for (int x = x0; x < x1; x += N)
+        {
+            const F fx = V::addf(V::set1f((float)x), lanes);
+            // per-channel accumulators: summing PACKED bytes would carry 0x100 into the next channel
+            T aa = V::zero(), rr = V::zero(), gg = V::zero(), bb = V::zero();
+            for (int k = 0; k < n; ++k)
+            {
+                const T s = warp_sample<MODE>(in, W, H, V::subf(V::addf(fx, half), V::set1f(offs[k * 2])),
+                                                               V::subf(sy, V::set1f(offs[k * 2 + 1])));
+                aa = V::add32(aa, V::template srli32<24>(s));
+                rr = V::add32(rr, V::and_(V::template srli32<16>(s), m255));
+                gg = V::add32(gg, V::and_(V::template srli32<8>(s), m255));
+                bb = V::add32(bb, V::and_(s, m255));
+            }
+            const T a = V::cvtt_f2i(V::addf(V::mulf(V::cvt_i2f(aa), inv), half));
+            const T r = V::cvtt_f2i(V::addf(V::mulf(V::cvt_i2f(rr), inv), half));
+            const T g = V::cvtt_f2i(V::addf(V::mulf(V::cvt_i2f(gg), inv), half));
+            const T b = V::cvtt_f2i(V::addf(V::mulf(V::cvt_i2f(bb), inv), half));
+            const T res = V::or_(V::or_(V::template slli32<24>(a), V::template slli32<16>(r)), V::or_(V::template slli32<8>(g), b));
+            if (x + N <= x1) V::storeu(o + x, res);
+            else { V::storeu(tmp, res); for (int i = 0; i < x1 - x; ++i) o[x + i] = tmp[i]; }
+        }
+    }
+}
+
 static SR2D_INLINE int fx_sample_mode(int flags)
 {
     if (flags & SR2D_FXF_SAMPLE_BICUBIC) return 2;
@@ -845,10 +888,11 @@ static void fx_fold_lut(int* lut, int n)
     int* L = lut + 64; const int pp = 2 * n - 2;
     for (int i = -64; i < n + 64; ++i) { int f = i; while (f < 0 || f >= n) f = f < 0 ? -f : pp - f; L[i] = f; }
 }
-static void fx_diffuse(const int* in, int* out, int W, int H, int x0, int y0, int x1, int y1,
+static void fx_diffuse(const int* in, int* out, int W, int /*H*/, int x0, int y0, int x1, int y1,
                        int px0, int py0, int px1, int py1, int r, uint32_t seed, int mode, int iox, int ioy)
 {   // iox, ioy: world (sprite or screen) coordinate of work pixel (0, 0) - the pattern is hashed in world
     // coordinates so it does not depend on the clip rect / work image placement (DrawParallel bands, POST)
+    // (H is unused: the hash mixes x / y world coordinates directly)
     SR2D_ALIGN(32) int lane_i[8] = { 0, 1, 2, 3, 4, 5, 6, 7 };
     SR2D_ALIGN(32) int xlut[208], ylut[208];
     SR2D_ALIGN(32) int tmp[8];
@@ -948,6 +992,34 @@ static void fx_blur_downscaled(int* img, int W, int H, int x0, int y0, int x1, i
 static SR2D_INLINE int fx_iabs(int v) { return v < 0 ? -v : v; }
 static SR2D_INLINE int fx_shadow_shift(float v)           // offset in whole pixels, |v| <= 1024, NaN -> 0
 { if (!(v > -1024.0f)) v = v < 0 ? -1024.0f : 0.0f; if (v > 1024.0f) v = 1024.0f; return (int)(v < 0 ? v - 0.5f : v + 0.5f); }
+// scalar sqrt through the vector op (this file keeps away from libm, everything stays flavour-identical)
+static SR2D_INLINE float fx_sqrt1(float v)
+{
+    SR2D_ALIGN(32) float tmp[8];
+    V::storeu(tmp, V::casti(V::sqrtf_(V::set1f(v))));
+    return tmp[0];
+}
+
+// the largest distance a motion-blur trail reaches from a pixel (drives the work image margin)
+static float fx_motion_extent(const SR2D_FxStage& s)
+{
+    if (s.i[1] >= 2 && s.map != nullptr)
+    {
+        const int pts = fx_clampi(s.i[1], 2, 32);
+        const float* p = (const float*)s.map;
+        const float str = fx_fabs(fx_fin(s.f[1]));
+        float mx = 0;
+        for (int k = 0; k < pts; ++k)
+        {
+            const float x = fx_fin(p[k * 2]), y = fx_fin(p[k * 2 + 1]);
+            const float d = fx_sqrt1(x * x + y * y) * str;
+            if (d > mx) mx = d;
+        }
+        return mx;
+    }
+    return fx_fabs(fx_fin(s.f[1]));
+}
+
 static int fx_margin(const SR2D_FxStage& s)
 {
     if (s.flags & SR2D_FXF_DISABLED) return 0;
@@ -970,6 +1042,12 @@ static int fx_margin(const SR2D_FxStage& s)
         const int r = br * passes + (k > 1 ? k : 0) + fx_clampi(s.i[1], 0, 256);
         const int ax = fx_iabs(fx_shadow_shift(s.f[1])), ay = fx_iabs(fx_shadow_shift(s.f[2]));
         return r + (ax > ay ? ax : ay);
+    }
+    case SR2D_FX_MOTION:
+    {
+        float amp = fx_motion_extent(s);
+        if (!(amp <= 2048.0f)) amp = 2048.0f;          // also catches NaN / inf (comparison false)
+        return fx_ceil(amp) + (fx_sample_mode(s.flags) == 2 ? 2 : 1);
     }
     case SR2D_FX_DISTORT:
     case SR2D_FX_DISTORT_MAP:
@@ -1000,7 +1078,9 @@ static int DRAW_FX(int* src, int sw, int sh, int* dst, int dw, int clipL, int cl
     for (int i = 0; i < nstages; ++i)
     {
         M += fx_margin(stages[i]);
-        if (stages[i].kind == SR2D_FX_DISTORT_MAP && (!stages[i].map || stages[i].mw <= 0 || stages[i].mh <= 0)) return 0;
+        // only an ENABLED map stage may reject the draw - a disabled one is skipped like every other pass skips it
+        if (!(stages[i].flags & SR2D_FXF_DISABLED) && stages[i].kind == SR2D_FX_DISTORT_MAP &&
+            (!stages[i].map || stages[i].mw <= 0 || stages[i].mh <= 0)) return 0;
     }
     // The margin can never usefully exceed the clip rect's extent (+ the sprite) - beyond that
     // the padded area is invisible - and the whole work set must stay within a sane budget:
@@ -1064,7 +1144,7 @@ static int DRAW_FX(int* src, int sw, int sh, int* dst, int dw, int clipL, int cl
     {
         const SR2D_FxStage& s = stages[i];
         if (s.flags & SR2D_FXF_DISABLED) continue;
-        if (s.kind == SR2D_FX_DISTORT || s.kind == SR2D_FX_DISTORT_MAP || s.kind == SR2D_FX_MORPH || s.kind == SR2D_FX_DIFFUSE) need_b = true;
+        if (s.kind == SR2D_FX_DISTORT || s.kind == SR2D_FX_DISTORT_MAP || s.kind == SR2D_FX_MORPH || s.kind == SR2D_FX_DIFFUSE || s.kind == SR2D_FX_MOTION) need_b = true;
         if (s.kind == SR2D_FX_SHADOW) { need_b = true; if (s.i[1] > 0) need_c = true; }
         if (s.kind == SR2D_FX_DISTORT_MAP) gmap_bytes += (((size_t)(s.mw + 2) * (s.mh + 2) * sizeof(int)) + 63) & ~(size_t)63;
         if (s.kind == SR2D_FX_BLUR || s.kind == SR2D_FX_SHADOW)
@@ -1245,6 +1325,48 @@ static int DRAW_FX(int* src, int sw, int sh, int* dst, int dw, int clipL, int cl
             else      fx_shadow_merge<false>(cur, shp, cur, W, H, ax0, ay0, ax1, ay1, dx, dy, only, (int*)misc);
             // the shape buffer is scratch: clear what we used so the next stage sees a clean 'oth' / C
             for (int y = gy0; y < gy1; ++y) memset(shp + (size_t)y * W + gx0, 0, (size_t)(gx1 - gx0) * sizeof(int));
+            break;
+        }
+        case SR2D_FX_MOTION:
+        {
+            const int n = fx_clampi(s.i[0], 2, 64);
+            float offs[128];                                   // 64 samples x (dx, dy)
+            if (s.i[1] >= 2 && s.map != nullptr)
+            {   // polyline: walk it uniformly per segment, scaled by f[1] (the trail shape is the path)
+                const int pts = fx_clampi(s.i[1], 2, 32);
+                const float* p = (const float*)s.map;
+                const float str = fx_fin(s.f[1]);
+                for (int k = 0; k < n; ++k)
+                {
+                    const float t = (float)k * (pts - 1) / (float)(n - 1);
+                    int seg = (int)t; if (seg > pts - 2) seg = pts - 2;
+                    const float fr = t - seg;
+                    offs[k * 2] = (p[seg * 2] + (p[seg * 2 + 2] - p[seg * 2]) * fr) * str;
+                    offs[k * 2 + 1] = (p[seg * 2 + 1] + (p[seg * 2 + 3] - p[seg * 2 + 1]) * fr) * str;
+                }
+            }
+            else
+            {   // straight trail: direction in degrees (0 = +x, 90 = down), the last sample at f[1] px
+                const float len = fx_fin(s.f[1]);
+                // cos/sin of the direction: scalar via the vector routine (no libm, see GenWave)
+                SR2D_ALIGN(32) float tr[8];
+                const typename V::F a = V::set1f(fx_fin(s.f[0]) * (3.141592653589793f / 180.0f));
+                V::storeu(tr, V::casti(fx_sin(V::addf(a, V::set1f(1.5707963267948966f)))));   // cos
+                const float cs = tr[0];
+                V::storeu(tr, V::casti(fx_sin(a)));                                           // sin
+                const float sn = tr[0];
+                const float dx = cs * len, dy = sn * len;
+                for (int k = 0; k < n; ++k)
+                {
+                    const float t = n > 1 ? (float)k / (float)(n - 1) : 0.0f;
+                    offs[k * 2] = dx * t; offs[k * 2 + 1] = dy * t;
+                }
+            }
+            const int mode = fx_sample_mode(s.flags);
+            if (mode == 2)      fx_motion<2>(cur, oth, W, H, ax0, ay0, ax1, ay1, offs, n);
+            else if (mode == 1) fx_motion<1>(cur, oth, W, H, ax0, ay0, ax1, ay1, offs, n);
+            else                fx_motion<0>(cur, oth, W, H, ax0, ay0, ax1, ay1, offs, n);
+            int* t2 = cur; cur = oth; oth = t2;
             break;
         }
         default: break;

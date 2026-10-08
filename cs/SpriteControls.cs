@@ -26,7 +26,12 @@ namespace Sr2d64CSport
     /// (<see cref="AccentColor"/>, <see cref="TrackColor"/>, <see cref="ThumbColor"/>), <see cref="TextScale"/>, hover /
     /// pressed state, and the text helpers. Rendering goes through <see cref="PaintControl"/> on the SpriteBox surface.
     /// </summary>
-    internal abstract partial class SpriteControlBase : SpriteBox
+    /// <summary>Implemented by the window an SR2D control is dropped on (<see cref="SpriteForm"/>, in the file the
+    /// control tests do not compile): the face colour the app chose for it, or null. An interface rather than the
+    /// type keeps this file independent of the chrome.</summary>
+    internal interface IControlFaceSource { Color? ControlFaceColor { get; } }
+
+    public abstract partial class SpriteControlBase : SpriteBox
     {
         int _textScale;
         // the palette defaults (Color, because the properties are Color for the designer; the paint code reads them as ints once per paint)
@@ -87,8 +92,7 @@ namespace Sr2d64CSport
         {
             TabStop = true;
             AccessibleRole = DefaultAccessibleRole;     // screen readers: role + name (synced with the Text below) describe the owner-drawn control
-            BackColor = DefaultBack;
-            _backExplicit = false;                      // the default is "ambient": a container (panel, group box, tab page) may replace it
+            BackColor = DefaultBack;              // the setter leaves it "not explicit": a parent (a panel, a group box, a coloured form) may replace it
             ForeColor = Color.White;
             // the arrow by default: only controls whose value MOVES with the mouse (knob, slider, wheel) show the hands - see
             // SpriteRangeControl; buttons, toggles, radios, lists, tabs are clicked and keep the arrow like native controls
@@ -97,24 +101,54 @@ namespace Sr2d64CSport
 
         // ------------------------------------------------------------------ ambient background
         // WinForms controls inherit BackColor from the parent until it is set; SpriteControls set theirs in the constructor
-        // (so a knob on a light form stays dark), which would break that. This restores it among SpriteControls: a control
-        // whose BackColor was never set by the user takes the colour of a SpriteControl container it is dropped into
-        // (a sunken SpritePanel, a SpriteTabPage) and follows it when the container's colour changes.
+        // (so a knob on a light form stays dark), which would break that. This restores it: a control whose BackColor is
+        // still the SR2D default takes the colour of its parent - the face of a SpriteControl container it is dropped into
+        // (a sunken SpritePanel, a SpriteTabPage), or a SpriteForm's own BackColor - and follows it when that changes.
+        // "Still the default" is the value, not the setter call: the designer writes BackColor = the default into the
+        // generated code for every control you drop, which would otherwise pin the colour before you ever set the form's.
         /// <summary>Background colour (the face of most controls). Set it explicitly to stop a container from overriding it.</summary>
         [DesignerSerializationVisibility(DesignerSerializationVisibility.Visible)]
-        public override Color BackColor { get => base.BackColor; set { base.BackColor = value; _backExplicit = true; } }
-        /// <summary>True when BackColor was set by user code / the designer (false = the default or a container's colour).</summary>
+        public override Color BackColor { get => base.BackColor; set { base.BackColor = value; _backExplicit = value != DefaultBack; } }
+        /// <summary>True when BackColor is something other than the SR2D default (so no parent colour applies).</summary>
         [Browsable(false)] public bool BackColorIsExplicit => _backExplicit;
+        /// <summary>The designer asks this before it writes a BackColor line into the form's code. Only a colour the
+        /// app chose goes in: the SR2D default (which the designer used to pin for every control you dropped, so the
+        /// form's own background never reached it) and a container's adopted face both stay un-written.</summary>
+        public bool ShouldSerializeBackColor() => _backExplicit;
+        public override void ResetBackColor() { _backExplicit = false; base.BackColor = DefaultBack; }
         internal void AdoptBackColor(Color c) { if (!_backExplicit && base.BackColor != c) base.BackColor = c; }
+        /// <summary>The colour the window a control sits on hands out, or null while that window has not been given
+        /// one: inheriting an untouched light grey form would turn every dark SR2D control on it into a light one
+        /// with light text, so an untouched form hands out nothing and the control keeps its own default.</summary>
+        internal void AdoptFormBackColor(Color? formColor) => AdoptBackColor(formColor ?? DefaultBack);
         /// <summary>Colour a child control should adopt (containers override this to hand out their face colour).</summary>
         protected virtual Color ChildBackColor => BackColor;
         protected override void OnParentChanged(EventArgs e)
         {
             base.OnParentChanged(e);
-            if (Parent is SpriteControlBase p) AdoptBackColor(p.ChildBackColor);
+            // Plain containers (TableLayoutPanel, FlowLayoutPanel, ...) have no face of their own to hand out, so the
+            // walk keeps going up through them: a knob two panels deep inside a sunken SpritePanel still gets its colour.
+            for (Control? c = Parent; c != null; c = c.Parent)
+            {
+                if (c is SpriteControlBase p) { AdoptBackColor(p.ChildBackColor); return; }
+                if (c is IControlFaceSource f) { AdoptFormBackColor(f.ControlFaceColor); return; }
+            }
         }
-        /// <summary>Pushes <see cref="ChildBackColor"/> to every child that has no explicit colour of its own.</summary>
-        protected void PushBackColor() { foreach (Control c in Controls) if (c is SpriteControlBase sc) sc.AdoptBackColor(ChildBackColor); }
+        /// <summary>Pushes <see cref="ChildBackColor"/> down to every SpriteControl below that has no explicit colour of its
+        /// own. Plain containers are descended through; a nested SR2D container hands out its OWN face from there on.</summary>
+        protected void PushBackColor() => PushBackColor(ChildBackColor, this);
+        static void PushBackColor(Color face, Control parent)
+        {
+            foreach (Control c in parent.Controls)
+            {
+                if (c is SpriteControlBase sc)
+                {
+                    sc.AdoptBackColor(face);
+                    if (sc.Controls.Count > 0) PushBackColor(sc.ChildBackColor, sc);
+                }
+                else if (c.Controls.Count > 0) PushBackColor(face, c);
+            }
+        }
 
         /// <summary>Pixel size of the text font (1 = 5x7 px glyphs, 2 = 10x14 ...); 0 = 1 (the smallest size). Text that would not fit drops one size.</summary>
         [Category("Appearance"), DefaultValue(0), Description("Pixel size of the text font (1 = 5x7 px glyphs, 2 = 10x14 ...); 0 = 1 (the smallest size). Text that would not fit drops one size.")]
@@ -209,7 +243,7 @@ namespace Sr2d64CSport
         /// <summary>Largest scale &lt;= <paramref name="want"/> at which <paramref name="text"/> fits into <paramref name="width"/> px (never below 1). Uses the control's font (<see cref="T"/>).</summary>
         protected int FitScale(string text, int width, int want) => T.FitScale(text, width, want);
         /// <summary>Shortens <paramref name="text"/> with an ellipsis so it fits <paramref name="width"/> px at <paramref name="scale"/>.</summary>
-        protected string FitText(string text, int width, int scale) => T.FitText(text, width, scale);
+        protected string FitText(string text, int width, int scale, int weight = 0) => T.FitText(text, width, scale, weight);
         /// <summary>Height of a text row with breathing space (pixel font: 9 * scale + 2).</summary>
         protected int LineHeight(int scale) => T.RowHeight(scale);
         /// <summary>Height of one text line as <see cref="ControlText.Draw"/> stacks them.</summary>
@@ -295,12 +329,70 @@ namespace Sr2d64CSport
         }
     }
 
-    internal abstract class SpriteRangeControl : SpriteControlBase
+    /// <summary>Shared snapping helpers for the discrete-value mode of the range controls (Values / PowersOfTwo).</summary>
+    internal static class Discrete
+    {
+        /// <summary>The most decimals any entry of a discrete list needs (0..3): the value text of a slider snapped
+        /// to 0 / 0.5 / 1.5 / 3 must show "1.5", not the rounded "2" the integer default produced.</summary>
+        public static int DecimalsOf(double[]? v)
+        {
+            int d = 0;
+            if (v == null) return 0;
+            foreach (double x in v)
+                for (int k = 0; k <= 3; k++)
+                    if (Math.Abs(x * Math.Pow(10, k) - Math.Round(x * Math.Pow(10, k))) < 1e-9) { d = Math.Max(d, k); break; }
+            return d;
+        }
+        /// <summary>Sorted, de-duplicated copy of a value list (null when empty).</summary>
+        public static double[]? Norm(double[]? v)
+        {
+            if (v is not { Length: > 0 }) return null;
+            var c = (double[])v.Clone(); Array.Sort(c);
+            int n = 0;
+            for (int i = 0; i < c.Length; i++) if (n == 0 || c[i] != c[n - 1]) c[n++] = c[i];
+            return n == c.Length ? c : c[..n];
+        }
+        /// <summary>The index of the entry equal to <paramref name="v"/> (the list is sorted: binary search), or the nearest one when there is no exact match.</summary>
+        public static int IndexOf(double[] list, double v)
+        {
+            int i = Array.BinarySearch(list, v);
+            if (i >= 0) return i;
+            i = ~i;
+            if (i <= 0) return 0;
+            if (i >= list.Length) return list.Length - 1;
+            return Math.Abs(list[i] - v) < Math.Abs(list[i - 1] - v) ? i : i - 1;
+        }
+        /// <summary>The list entry nearest to <paramref name="v"/>.</summary>
+        public static double Nearest(double[] list, double v)
+        {
+            double best = list[0];
+            foreach (double x in list) if (Math.Abs(x - v) < Math.Abs(best - v)) best = x;
+            return best;
+        }
+        /// <summary>The neighbouring entry of <paramref name="v"/> in direction <paramref name="dir"/> (+1 / -1); v itself at the ends of the list (so a wheel never gets stuck between two entries).</summary>
+        public static double Next(double[] list, double v, int dir)
+        {
+            double best = v;
+            foreach (double x in list)
+                if ((dir > 0 && x > v + 1e-9 && (best == v || x < best)) || (dir < 0 && x < v - 1e-9 && (best == v || x > best))) best = x;
+            return best;
+        }
+        /// <summary>The powers of two inside min..max (e.g. 8 16 32 64 128 256 for 8..256).</summary>
+        public static double[] Pow2(double min, double max)
+        {
+            var list = new System.Collections.Generic.List<double>();
+            for (double p = 1; p <= max; p *= 2) if (p >= min) list.Add(p);
+            return list.ToArray();
+        }
+    }
+
+    public abstract class SpriteRangeControl : SpriteControlBase
     {
         double _min, _max = 100, _value, _step = 1, _reset;
         int _decimals;
         bool _showValue = true, _snap, _bipolar, _dragging;
         string _unit = "";
+        double[]? _values; bool _pow2;
 
         protected SpriteRangeControl() { Cursor = SpriteCursors.HandOpen; }   // "drag me": the open hand while hovering, the fist while dragging
 
@@ -310,16 +402,30 @@ namespace Sr2d64CSport
         public event EventHandler? ValueChanged;
 
         [Category("Behavior"), DefaultValue(0.0), Description("Lower end of the range.")]
-        public double Minimum { get => _min; set { if (_min == value) return; _min = value; if (_max < _min) _max = _min; SetValue(_value, false); Redraw(); } }
+        public double Minimum { get => _min; set { if (_min == value) return; _min = value; if (_max < _min) _max = _min; SyncPow2(); SetValue(_value, false); Redraw(); } }
 
         [Category("Behavior"), DefaultValue(100.0), Description("Upper end of the range.")]
-        public double Maximum { get => _max; set { if (_max == value) return; _max = value; if (_min > _max) _min = _max; SetValue(_value, false); Redraw(); } }
+        public double Maximum { get => _max; set { if (_max == value) return; _max = value; if (_min > _max) _min = _max; SyncPow2(); SetValue(_value, false); Redraw(); } }
 
         [Category("Behavior"), DefaultValue(0.0), Description("Current value (clamped to Minimum..Maximum; snapped to Step when Snap is set).")]
         public double Value { get => _value; set => SetValue(value, false); }
 
         [Category("Behavior"), DefaultValue(1.0), Description("Increment for the mouse wheel and the arrow keys; also the snapping grid when Snap is set.")]
         public double Step { get => _step; set { _step = value <= 0 ? 1 : value; } }
+
+        /// <summary>Discrete values the control snaps to: sorted and de-duplicated automatically, every input (drag, wheel, keys, typed, code) picks the nearest entry, and the wheel / arrow keys move one entry at a time. When set, Snap / Step are ignored.</summary>
+        [Category("Behavior"), Description("Discrete values to snap to (e.g. 2 4 6 8 10 12, or any predetermined set). Every value picks the nearest entry; the wheel and the arrow keys step through the list.")]
+        public double[]? Values { get => _values; set { _values = Discrete.Norm(value); SetValue(_value, false); Redraw(); } }
+        [Browsable(false)] public bool ShouldSerializeValues() => _values != null;
+        /// <summary>Snap to the powers of two inside Minimum..Maximum (2 4 8 16 ...); the list follows range changes. Equivalent to assigning <see cref="Values"/>.</summary>
+        [Category("Behavior"), DefaultValue(false), Description("Snap to the powers of two inside Minimum..Maximum (2 4 8 16 ...) instead of a continuous range.")]
+        public bool PowersOfTwo
+        {
+            get => _pow2;
+            set { _pow2 = value; _values = value ? Discrete.Pow2(_min, _max) : null; SetValue(_value, false); Redraw(); }
+        }
+        /// <summary>Rebuilds the powers-of-two list after a range change.</summary>
+        void SyncPow2() { if (_pow2) _values = Discrete.Pow2(_min, _max); }
 
         [Category("Behavior"), DefaultValue(false), Description("Round the value to multiples of Step (relative to Minimum).")]
         public bool Snap { get => _snap; set { _snap = value; SetValue(_value, false); } }
@@ -343,14 +449,58 @@ namespace Sr2d64CSport
         [Browsable(false)]
         public bool IsDragging => _dragging;
 
-        /// <summary>0..1 position of the value inside the range.</summary>
-        protected double Fraction => _max > _min ? (Shown - _min) / (_max - _min) : 0;
+        /// <summary>0..1 position of the value inside the range. With a discrete <see cref="Values"/> list the entries are spread EVENLY (position by index, not by value).</summary>
+        protected double Fraction => DiscreteFractionOf(Shown);
         /// <summary>0..1 position where the bipolar fill starts (0 when zero is outside the range).</summary>
         protected double ZeroFraction => !_bipolar ? 0 : (_min < 0 && _max > 0 ? -_min / (_max - _min) : 0.5);
-        protected double FromFraction(double t) => _min + Math.Clamp(t, 0, 1) * (_max - _min);
+        protected double FromFraction(double t) => DiscreteValueAt(t);
+        /// <summary>The 0..1 position of <paramref name="v"/> (even spacing between the entries of a <see cref="Values"/> list).</summary>
+        protected double DiscreteFractionOf(double v)
+        {
+            if (_max <= _min) return 0;
+            if (_values is { Length: > 1 })
+            {
+                int idx = Discrete.IndexOf(_values, v);
+                return idx / (double)(_values.Length - 1);
+            }
+            return (v - _min) / (_max - _min);
+        }
+        /// <summary>The value at 0..1 position <paramref name="t"/> (the nearest entry of a <see cref="Values"/> list; the list spacing is even).</summary>
+        protected double DiscreteValueAt(double t)
+        {
+            if (_values is { Length: > 1 })
+            {
+                int idx = Math.Clamp((int)Math.Round(Math.Clamp(t, 0, 1) * (_values.Length - 1)), 0, _values.Length - 1);
+                return _values[idx];
+            }
+            return _min + Math.Clamp(t, 0, 1) * (_max - _min);
+        }
+        /// <summary>The notch values to draw (the discrete list; otherwise the Snap + Step grid, capped): null = no notches.</summary>
+        protected double[]? NotchValues()
+        {
+            if (_values is { Length: > 0 }) return _values;
+            if (_snap && _step > 0 && (_max - _min) / _step is var n && n >= 1 && n <= 64)
+            {
+                var list = new double[(int)n + 1];
+                for (int i = 0; i < list.Length; i++) list[i] = _min + i * _step;
+                return list;
+            }
+            return null;
+        }
+        /// <summary>Show a tick for every discrete value (the <see cref="Values"/> list, or the Snap + Step grid).</summary>
+        [Category("Appearance"), DefaultValue(false), Description("Show a tick for every discrete value (the Values list, or the Snap + Step grid when no list is set).")]
+        public bool ShowNotches { get => _showNotches; set { _showNotches = value; Redraw(); } }
+        bool _showNotches;
+        /// <summary>Print the value next to every notch (too dense marks are skipped automatically).</summary>
+        [Category("Appearance"), DefaultValue(false), Description("Print the value next to every notch (the notches that would overlap the numbers are skipped).")]
+        public bool NotchLabels { get => _notchLabels; set { _notchLabels = value; Redraw(); } }
+        bool _notchLabels;
 
         /// <summary>The value text as drawn (Decimals + Unit) - the pending value while a deferred drag is on.</summary>
-        public string ValueText => Shown.ToString("F" + _decimals, System.Globalization.CultureInfo.InvariantCulture) + _unit;
+        public string ValueText => Shown.ToString("F" + EffectiveDecimals, System.Globalization.CultureInfo.InvariantCulture) + _unit;
+        /// <summary>Decimals the value text shows: the explicit <see cref="Decimals"/>, or - for a discrete control -
+        /// what the value list actually needs ("1.5" must not read as "2").</summary>
+        protected int EffectiveDecimals => _values is { Length: > 0 } ? Discrete.DecimalsOf(_values) : _decimals;
 
         // ------------------------------------------------------------------ deferred commit
         bool _commitOnRelease; double _pending = double.NaN;
@@ -376,7 +526,7 @@ namespace Sr2d64CSport
         /// <summary>The value to paint (pending during a deferred drag, else the value).</summary>
         protected double Shown => double.IsNaN(_pending) ? _value : _pending;
         /// <summary>0..1 position of <see cref="Value"/> (the committed one) inside the range.</summary>
-        protected double CommittedFraction => _max > _min ? (_value - _min) / (_max - _min) : 0;
+        protected double CommittedFraction => DiscreteFractionOf(_value);
         /// <summary>True while <see cref="SetValue"/> applies the value of a finished deferred drag (the picture already followed the mouse).</summary>
         protected bool IsCommittingDrag { get; private set; }
         /// <summary>Wheel-type controls wrap the value round the range instead of clamping (Maximum folds onto Minimum).</summary>
@@ -389,7 +539,8 @@ namespace Sr2d64CSport
         /// <summary>Snap / clamp (or wrap) a raw value the way <see cref="SetValue"/> does.</summary>
         protected double Constrain(double v)
         {
-            if (_snap && _step > 0) v = _min + Math.Round((v - _min) / _step) * _step;
+            if (_values is { Length: > 0 }) v = Discrete.Nearest(_values, v);          // the discrete list wins over the Step grid
+            else if (_snap && _step > 0) v = _min + Math.Round((v - _min) / _step) * _step;
             if (Wraps && _max > _min) { double span = _max - _min; v = _min + (v - _min) - Math.Floor((v - _min) / span) * span; if (v >= _max) v = _min; return v; }
             return Math.Clamp(v, _min, Math.Max(_min, UpperLimit));
         }
@@ -505,8 +656,8 @@ namespace Sr2d64CSport
         {
             base.OnMouseWheel(e);
             if (_dragging) return;                                     // no mixing with a drag in progress
-            double s = (ModifierKeys & Keys.Shift) != 0 ? _step / 10 : _step;
-            SetValue(_value + Math.Sign(e.Delta) * s, true);
+            if (_values is { Length: > 0 }) SetValue(Discrete.Next(_values, _value, Math.Sign(e.Delta)), true);
+            else { double s = (ModifierKeys & Keys.Shift) != 0 ? _step / 10 : _step; SetValue(_value + Math.Sign(e.Delta) * s, true); }
             if (e is HandledMouseEventArgs h) h.Handled = true;    // do not scroll the parent
         }
         protected override bool IsInputKey(Keys keyData) => (keyData & Keys.KeyCode) switch
@@ -523,8 +674,8 @@ namespace Sr2d64CSport
             double s = e.Shift ? _step / 10 : _step, page = (_max - _min) / 10;
             switch (e.KeyCode)
             {
-                case Keys.Left: case Keys.Down: SetValue(_value - s, true); break;
-                case Keys.Right: case Keys.Up: SetValue(_value + s, true); break;
+                case Keys.Left: case Keys.Down: SetValue(_values is { Length: > 0 } ? Discrete.Next(_values, _value, -1) : _value - s, true); break;
+                case Keys.Right: case Keys.Up: SetValue(_values is { Length: > 0 } ? Discrete.Next(_values, _value, 1) : _value + s, true); break;
                 case Keys.PageDown: SetValue(_value - page, true); break;
                 case Keys.PageUp: SetValue(_value + page, true); break;
                 case Keys.Home: SetValue(_min, true); break;
@@ -537,7 +688,7 @@ namespace Sr2d64CSport
     }
 
     /// <summary>How <see cref="SpriteKnob"/> maps a drag to a value.</summary>
-    internal enum KnobDragMode
+    public enum KnobDragMode
     {
         /// <summary>
         /// The pointer IS the value: the knob turns to face the mouse, pressing jumps there, the further from the centre the
@@ -553,7 +704,7 @@ namespace Sr2d64CSport
     }
 
     /// <summary>The value display drawn around a <see cref="SpriteKnob"/> - independent of how the knob is dragged.</summary>
-    internal enum KnobGauge
+    public enum KnobGauge
     {
         /// <summary>270-degree C-shaped arc (7 o'clock over the top to 5 o'clock) filled from the start (or from zero when Bipolar) to the value.</summary>
         Arc,
@@ -568,7 +719,7 @@ namespace Sr2d64CSport
     }
 
     /// <summary>How the pointer (handle) of a <see cref="SpriteKnob"/> behaves.</summary>
-    internal enum KnobPointer
+    public enum KnobPointer
     {
         /// <summary>The pointer shows the value: it stops at Minimum / Maximum (Angular: on the gauge; Endless: at the end of the last turn).</summary>
         Bounded,
@@ -582,7 +733,7 @@ namespace Sr2d64CSport
     /// mouse turns it), <see cref="Gauge"/> (how the value is shown) and <see cref="Pointer"/> (whether the pointer stops at the ends).
     /// </summary>
     [ToolboxBitmap(typeof(SpriteKnob), "SpriteKnob.bmp")]
-    internal sealed class SpriteKnob : SpriteRangeControl
+    public sealed class SpriteKnob : SpriteRangeControl
     {
         protected override AccessibleRole DefaultAccessibleRole => AccessibleRole.Slider;
         KnobDragMode _mode = KnobDragMode.Angular;
@@ -612,7 +763,7 @@ namespace Sr2d64CSport
         public double ValuePerTurn { get => _perTurn; set { _perTurn = Math.Max(0, value); Redraw(); } }
 
         double PerTurn => _perTurn > 0 ? _perTurn : (Maximum - Minimum) / _turns;
-        double FractionOf(double v) => Maximum > Minimum ? (v - Minimum) / (Maximum - Minimum) : 0;
+        double FractionOf(double v) => DiscreteFractionOf(v);               // even spacing between the entries of a Values list
         double EndlessAngleOf(double v) => (v - Minimum) / PerTurn * 2 * Math.PI;
         /// <summary>Endless: total pointer angle (radians, 0 = 12 o'clock, clockwise) that represents the shown value.</summary>
         double EndlessAngle => EndlessAngleOf(Shown);
@@ -842,6 +993,28 @@ namespace Sr2d64CSport
             {   // tick at 12 o'clock = start of every turn
                 s.DrawWideLine(cx, cy - br - 1, cx, cy - br + Math.Max(3f, br * 0.15f), Mix(BackColor, ThumbColor, 0.8f), Math.Max(1f, r * 0.04f), true);
             }
+            var notches = ShowNotches ? NotchValues() : null;
+            if (notches is { Length: > 1 })
+            {   // a tick around the body per discrete value (at the value's angle), optional numbers outside
+                int tick = Mix(BackColor, AccentRaw, 0.35f);
+                float inner = br + 2f, outer = br + 2f + Math.Max(3f, r * 0.1f);
+                bool labels = NotchLabels;
+                int ls = 1;                                                        // the smallest pixel font, printed INSIDE the body (nothing clips outside the control)
+                float lr = br * 0.78f;
+                float lastLabelAng = -999f;
+                for (int i = 0; i < notches.Length; i++)
+                {
+                    float na = (float)AngleOf(notches[i]);
+                    bool edge = i == 0 || i == notches.Length - 1;
+                    s.DrawWideLine(cx + MathF.Cos(na) * inner, cy + MathF.Sin(na) * inner, cx + MathF.Cos(na) * (edge ? outer + 2 : outer), cy + MathF.Sin(na) * (edge ? outer + 2 : outer), tick, 1f, true);
+                    if (labels && Math.Abs(na - lastLabelAng) > 0.3f)                  // ~17 degrees at scale 1: skip marks that would overlap
+                    {
+                        string txt = notches[i].ToString("0.###", System.Globalization.CultureInfo.InvariantCulture);
+                        T.Draw(s, (int)(cx + MathF.Cos(na) * lr), (int)(cy + MathF.Sin(na) * lr), txt, Mix(Fore, BackColor, 0.15f), 0, ls, 0, 0, SR2D.LineOp.Set, 128, TextAnchor.Center);
+                        lastLabelAng = na;
+                    }
+                }
+            }
             // texts
             if (capH > 0) { int cs = FitScale(Text, ClientSize.Width - 2, ts); T.Draw(s, (int)cx, 1 + (capH - LineHeight(cs)) / 2, FitText(Text, ClientSize.Width - 2, cs), Fore, 0, cs, 0, 0, SR2D.LineOp.Set, 128, TextAnchor.TopCenter); }
             if (valH > 0) { int vs = FitScale(ValueText, ClientSize.Width - 2, ts); T.Draw(s, (int)cx, ClientSize.Height - 1, ValueText, HasPendingValue ? Accent : Fore, 0, vs, 0, 0, SR2D.LineOp.Set, 128, TextAnchor.BottomCenter); }
@@ -854,7 +1027,7 @@ namespace Sr2d64CSport
     /// value text. Same interaction model as <see cref="SpriteKnob"/>: the thumb is always exactly under the pointer.
     /// </summary>
     [ToolboxBitmap(typeof(SpriteSlider), "SpriteSlider.bmp")]
-    internal class SpriteSlider : SpriteRangeControl
+    public class SpriteSlider : SpriteRangeControl
     {
         protected override AccessibleRole DefaultAccessibleRole => AccessibleRole.Slider;
         Orientation _orient = Orientation.Horizontal;
@@ -920,6 +1093,29 @@ namespace Sr2d64CSport
                     else s.DrawWideLine(m + tr + 1, q, m + tr + 4, q, tick, 1f, true);
                 }
             }
+            var notches = ShowNotches ? NotchValues() : null;
+            if (notches is { Length: > 0 })
+            {
+                int tick = Mix(BackColor, AccentRaw, 0.35f);
+                float gap = (b - a) / Math.Max(1, notches.Length - 1);
+                int ls = 1;                                                        // the smallest pixel font - labels must never dwarf the track
+                bool labels = NotchLabels && gap >= 5 * 3;                         // at scale 1 a digit is ~5 px wide: skip marks that would overlap
+                if (labels && hz && m + tr + 5 + LineHeight(ls) > ClientSize.Height) labels = false;    // never paint outside the box
+                if (labels && !hz && m + tr + 5 + 3 * 4 > ClientSize.Width) labels = false;
+                for (int i = 0; i < notches.Length; i++)
+                {
+                    float q = a + (b - a) * (float)DiscreteFractionOf(notches[i]);
+                    bool edge = i == 0 || i == notches.Length - 1;
+                    if (hz) s.DrawWideLine(q, m + tr + 1, q, m + tr + (edge ? 4 : 3), tick, 1f, true);
+                    else s.DrawWideLine(m + tr + 1, q, m + tr + (edge ? 4 : 3), q, tick, 1f, true);
+                    if (labels)
+                    {
+                        string txt = notches[i].ToString("0.###", System.Globalization.CultureInfo.InvariantCulture);
+                        if (hz) T.Draw(s, (int)q, (int)(m + tr + 4), txt, Mix(Fore, AccentRaw, 0.4f), 0, ls, 0, 0, SR2D.LineOp.Set, 128, TextAnchor.TopCenter);
+                        else T.Draw(s, (int)(m + tr + 4), (int)q, txt, Mix(Fore, AccentRaw, 0.4f), 0, ls, 0, 0, SR2D.LineOp.Set, 128, TextAnchor.MiddleLeft);
+                    }
+                }
+            }
             // thumb: disc with rim (brighter while dragging), small accent dot. A deferred drag lifts it off the track
             // (shadow below-right, a little bigger) and leaves a ghost ring at the committed value; release drops it back.
             float lift = Lift, tx = hz ? tq : m, ty = hz ? m : tq;
@@ -938,9 +1134,12 @@ namespace Sr2d64CSport
             // texts
             if (hz)
             {
-                int vw = ShowValue ? T.Measure(ValueText, ts).Width + 8 : 0;
+                // the value fits its half of the strip BY CONSTRUCTION (FitScale, like the knob draws it) - a long
+                // value or a narrow control scales it down instead of colliding with the caption or the edge
+                int vs = ShowValue ? Math.Max(1, FitScale(ValueText, Math.Max(30, ClientSize.Width / 3), ts)) : ts;
+                int vw = ShowValue ? T.Measure(ValueText, vs).Width + 8 : 0;
                 if (!string.IsNullOrEmpty(Text)) { int cs = FitScale(Text, ClientSize.Width - 4 - vw, ts); T.Draw(s, 2, textArea.Top + 1, FitText(Text, ClientSize.Width - 4 - vw, cs), Fore, 0, cs); }
-                if (ShowValue) T.Draw(s, ClientSize.Width - 2, textArea.Top + 1, ValueText, HasPendingValue ? Accent : Fore, 0, ts, 0, 0, SR2D.LineOp.Set, 128, TextAnchor.TopRight);
+                if (ShowValue) T.Draw(s, ClientSize.Width - 2, textArea.Top + 1, ValueText, HasPendingValue ? Accent : Fore, 0, vs, 0, 0, SR2D.LineOp.Set, 128, TextAnchor.TopRight);
             }
             else
             {

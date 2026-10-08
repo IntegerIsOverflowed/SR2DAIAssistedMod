@@ -8,7 +8,7 @@ using Timer = System.Windows.Forms.Timer;   // ImplicitUsings also brings System
 namespace Sr2d64CSport
 {
     /// <summary>Mouse / keyboard navigation of a viewed <see cref="SpriteBox"/>.</summary>
-    internal enum SpriteNavigation
+    public enum SpriteNavigation
     {
         /// <summary>No built-in navigation: the mouse is yours (the context menu, scroll bars and the Zoom / Pan properties still work).</summary>
         None,
@@ -23,7 +23,7 @@ namespace Sr2d64CSport
     // inertia, client <-> image mapping, scroll bars, context menu and Photoshop-like navigation. Everything here is inactive
     // while SizeMode == None (the classic control: surface == client area).
     // ------------------------------------------------------------------------------------------------------------------------
-    internal partial class SpriteBox
+    public partial class SpriteBox
     {
         readonly SpriteView _view = new();
         SpriteSizeMode _sizeMode = SpriteSizeMode.None;
@@ -435,7 +435,7 @@ namespace Sr2d64CSport
         protected override void OnMouseUp(MouseEventArgs e)
         {
             base.OnMouseUp(e);
-            if (e.Button == MouseButtons.Right && Viewed && _viewMenu && ContextMenuStrip == null && _drag == DragKind.None) { Menu.Show(this, e.Location); return; }
+            if (e.Button == MouseButtons.Right && Viewed && _viewMenu && ContextMenuStrip == null && _drag == DragKind.None) { Menu.Show(this, e.Location, e.Button); return; }
             if (!Viewed || _drag == DragKind.None) return;
             var kind = _drag; _drag = DragKind.None; Capture = false;
             if (kind == DragKind.Hand)
@@ -523,7 +523,7 @@ namespace Sr2d64CSport
         public override Cursor Cursor
         {
             get => base.Cursor;
-            set { if (_cursorOwned) { _userCursor = value ?? Cursors.Default; UpdateCursor(); } else { base.Cursor = value; } }
+            set { if (_cursorOwned) { _userCursor = value ?? Cursors.Default; UpdateCursor(); } else { base.Cursor = value ?? Cursors.Default; } }
         }
         void UpdateCursor()
         {

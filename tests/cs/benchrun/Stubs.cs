@@ -1,7 +1,12 @@
 using System;
-namespace System.Windows.Forms { public class Control { } }
+namespace System.Windows.Forms { public class Control { public bool Visible; public int Right; } }
 namespace Sr2d64CSport {
   // the controls strip needs WinForms controls; the headless runner only needs the values
+  internal static class TangentTools { public static Curve Motion = new(); public static System.Windows.Forms.Control BuildEditor() => new System.Windows.Forms.Control(); }
+  internal static class OffsetTools { public static System.Windows.Forms.Control Strip() => new System.Windows.Forms.Control(); public static void SyncAccent(int tool) { } }
+  internal static class DiscreteDemo { public static double Steps, Pow2, List, Num, NumV = 32; public static string Last = "-"; public const int StripHeight = 132; public static System.Windows.Forms.Control Build() => new System.Windows.Forms.Control(); }
+  internal static class MotionStrip { public static System.Windows.Forms.Control Build() => new System.Windows.Forms.Control(); }
+  internal static class ColorDemo { public const int StripHeight = 210; public static int ViewBack = unchecked((int)0xFF101418); public static int PickerArgb = unchecked((int)0xFF40A0FF); public static string LastAction = "none"; public static int Edits; public static System.Windows.Forms.Control? ColorOverlay; public static System.Windows.Forms.Control Build() => new System.Windows.Forms.Control(); }
   internal static class ControlsDemo { public static double AngleDeg, Offset, ScalePct = 100, Blend = 128, Brite = 100; public static int Events; public static string LastSource = "", OffsetMode = ""; public static double Hue = 200, Level = 1; public const int StripHeight = 318, ButtonsStripHeight = 330; public static double Progress; public static bool Running, Spin = true, Bilinear = true, Backdrop, Grid; public static int OpChoice, SizeChoice = 1; public static System.Windows.Forms.Control Build() => new System.Windows.Forms.Control(); public static System.Windows.Forms.Control BuildButtons() => new System.Windows.Forms.Control(); }
   internal static class SwapDemo
   {   // Tests.cs reads Pair / Pairs / Names; the strip lives in the WinForms shell - keep values in sync with demo/FractalLayout.cs
@@ -20,6 +25,37 @@ namespace Sr2d64CSport {
   internal static class FormDemo { public static string Caption = "SR2D"; public static int Copies = 3, Spacing = 24, Layout = 0; public static double Tint = 200; public static bool TintOn, Frame = true, Shadow; public static readonly System.Collections.Generic.List<string> Picked = new(); public static string Status = "idle"; public static int Events; public static string LastSource = ""; public const int StripHeight = 300; public static System.Windows.Forms.Control Build() => new System.Windows.Forms.Control(); }
   internal static class FontDemo { public const int StripHeight = 118; public static string Text = "The quick brown fox jumps over the lazy dog. 0123456789 fi fl AV To"; public static double Bold; public static bool UseCache = true; public static SpriteFont? Get() => DemoFont.Get(); public static System.Windows.Forms.Control Build() => new System.Windows.Forms.Control(); }
   internal static class VoxelDemo { public const int StripHeight = 560; public static string State = "", Hit = ""; public static System.Windows.Forms.Control Build() => new System.Windows.Forms.Control(); }
+  /// <summary>Headless stand-in for demo/OutputDemo.cs: the four output routes need real windows (a PictureBox,
+  /// SpriteBoxes, a fullscreen Form), so headlessly only the bench SCENE is drawn on the canvas - the same gradient
+  /// and the same orbiting sprites, drawn the same way - which keeps the test body exercising Sprite.Draw.</summary>
+  internal static class OutputDemo {
+    public const int StripHeight = 292;
+    public static int Copies = 12;
+    public static System.Windows.Forms.Control Build() => new System.Windows.Forms.Control();
+    static Sprite? col, alpha;
+    public static void Canvas(Ctx c)
+    {
+      var t = c.Canvas; int w = t.Width, h = t.Height;
+      if (w < 8 || h < 8) return;
+      if (col == null) { col = Resized(c.A.Color, 64); alpha = Resized(c.A.Alpha, 64); }
+      var s = col; var al = alpha!;
+      t.ClearBuffer(unchecked((int)0xFF101418));
+      for (int y = 0; y < h; y += 2) { int v = 0x16 + (y * 0x2E) / h; t.FillRect(0, y, w, 2, unchecked((int)(0xFF000000u | ((uint)v << 16) | ((uint)(v >> 1) << 8) | 0x24))); }
+      float cx = w * 0.5f, cy = h * 0.5f + 6f, rx = w * 0.34f, ry = h * 0.30f;
+      int n = Math.Max(1, Copies) * 3;
+      for (int i = 0; i < n; i++)
+      {
+        double a = c.Time * (0.55 + 0.09 * (i % 5)) + i * (Math.PI * 2 / n);
+        int x = (int)(cx + (float)Math.Cos(a) * rx) - s!.Width / 2;
+        int y = (int)(cy + (float)Math.Sin(a * 1.7) * ry) - s.Height / 2;
+        if ((i & 3) == 3) t.Draw(al, x, y, SR2D.Op.AlphaBlend); else t.Draw(s, x, y, SR2D.Op.Paint);
+      }
+      t.DrawRect(0, 0, w - 1, h - 1, unchecked((int)0xFF485868));
+      c.Info("headless benchrun: the four output panes need real windows - only the bench scene is drawn here");
+    }
+    static Sprite Resized(Sprite src, int edge) => src.Width == edge && src.Height == edge ? Clone(src) : new Sprite(src, SR2D.Transform.None, edge, edge);
+    static Sprite Clone(Sprite src) { var z = new Sprite(src.Width, src.Height); src.Pixels.CopyTo(z.Pixels); return z; }
+  }
   internal static class LightsDemo {
     public sealed class Lamp { public double Hue; public int Strength = 15; public bool On = true; public int Color => HueToArgb(Hue); }
     public static readonly Lamp[] Lamps = { new Lamp { Hue = 40 }, new Lamp { Hue = 200 }, new Lamp { Hue = 320 } };

@@ -18,7 +18,7 @@ namespace Sr2d64CSport
     /// ms per op. "Run suite" times every test headlessly and writes a CSV you can
     /// diff between DLL builds.
     /// </summary>
-    internal sealed class MainForm : Form
+    internal sealed class MainForm : SpriteForm
     {
         // --- render surface ------------------------------------------------------
         sealed class Surface : Control
@@ -29,20 +29,25 @@ namespace Sr2d64CSport
             public Action<Graphics>? Painter;
         }
 
+        System.Windows.Forms.Panel? settingsHost;                // the test's extra settings control (e.g. the curve editor), shown in the Test tab
         readonly Dictionary<DemoTest, Dictionary<Param, int>> savedParams = new Dictionary<DemoTest, Dictionary<Param, int>>();
         static readonly Dictionary<Param, int> GenericDefaults = new Dictionary<Param, int>
         {
             [Param.Count] = 1, [Param.Angle] = 0, [Param.Scale] = 100, [Param.Blend] = 128, [Param.Brite] = 100, [Param.Z] = 120, [Param.DotStep] = 0,
             [Param.Op] = 0, [Param.Smooth] = 0, [Param.NotMask] = 0, [Param.Xor] = 0, [Param.Mouse] = 0, [Param.MaskBits] = 1, [Param.Time] = 1,
+            [Param.Grid] = 64, [Param.Speed] = 6, [Param.GridOn] = 1, [Param.OffsetX] = 0, [Param.OffsetY] = 0,
         };
         static readonly Dictionary<Param, (int, int)> GenericRanges = new Dictionary<Param, (int, int)>
         {
             [Param.Count] = (1, 64), [Param.Angle] = (0, 360), [Param.Scale] = (5, 400), [Param.Blend] = (0, 255), [Param.Brite] = (-200, 200), [Param.Z] = (1, 600), [Param.DotStep] = (0, 8),
+            [Param.Grid] = (8, 256), [Param.Speed] = (1, 100), [Param.OffsetX] = (-256, 256), [Param.OffsetY] = (-256, 256),
         };
         // animation clock: advances only while "Animate" is ticked; Ctx.Time is 0 when it is off (so the Angle slider is absolute)
         double animTime;
         // orbit camera (voxel tests): left drag = yaw / pitch, middle drag = pan, wheel = zoom (Scale slider)
         float camYaw = 0.8f, camPitch = 0.55f, camPanX, camPanY; bool orbiting, panning; int lastMx, lastMy;
+        // PaintByMouse tests: the pen paints while the left button is down (ctx.PenDown / PenX / PenY)
+        bool painting; int penX, penY;
         // resizable object (DrawScaled): edge being dragged: bit 1 = left, 2 = right, 4 = top, 8 = bottom
         int edgeDrag; float scaleY = 1f;
         float pivotX = -1, pivotY = -1;                 // rotation pivot in object units (source pixels, or the test's ObjectSize units; -1 = centre) for MouseRotates tests
@@ -111,7 +116,6 @@ namespace Sr2d64CSport
         readonly SpriteTextBox txtFilter = new SpriteTextBox { Dock = DockStyle.Fill };      // search filter over the test list (name, group, description)
         readonly SpriteLabel lblFilterHint = new SpriteLabel { Style = LabelStyle.Muted, AutoSize = false, Width = 58, Dock = DockStyle.Right, TextAlign = ContentAlignment.MiddleRight };
         readonly SpriteTextView lblDesc = new SpriteTextView { WordWrap = true, Dock = DockStyle.Bottom, Height = 170 };
-        readonly SpriteLabel lblDll = new SpriteLabel { Dock = DockStyle.Top, Height = 22, AutoSize = false, Padding = new Padding(6, 0, 0, 0) };
         readonly SpriteTextView log = new SpriteTextView { Dock = DockStyle.Bottom, Height = 150, MaxLines = 4000 };
         // "Code" view: the selected test's C# (lifted from the embedded Tests.cs) shown in place of the canvas
         readonly SpritePanel codePanel = new SpritePanel { Style = PanelStyle.Flat, Padding = Padding.Empty, Visible = false, Dock = DockStyle.Fill };
@@ -123,9 +127,9 @@ namespace Sr2d64CSport
 
         // parameters: SpriteSlider (ParamSlider keeps the integer Value / Minimum / Maximum the bench uses), SpriteCombo,
         // SpriteToggle in the check-box style, SpriteRadio / SpriteToggle for the bit boxes
-        readonly ParamSlider tbCount = new ParamSlider(), tbAngle = new ParamSlider(), tbScale = new ParamSlider(), tbBlend = new ParamSlider(), tbBrite = new ParamSlider(), tbZ = new ParamSlider(), tbDot = new ParamSlider();
+        readonly ParamSlider tbCount = new ParamSlider(), tbAngle = new ParamSlider(), tbScale = new ParamSlider(), tbBlend = new ParamSlider(), tbBrite = new ParamSlider(), tbZ = new ParamSlider(), tbDot = new ParamSlider(), tbGrid = new ParamSlider(), tbSpeed = new ParamSlider(), tbOffX = new ParamSlider(), tbOffY = new ParamSlider();
         readonly SpriteCombo cbOp = new SpriteCombo(), cbCanvas = new SpriteCombo(), cbSprite = new SpriteCombo(), cbSimd = new SpriteCombo(), cbAssets = new SpriteCombo();
-        readonly SpriteToggle chkSmooth = Tick(), chkNot = Tick(), chkXor = Tick(), chkFollow = Tick(), chkAnim = Tick(), chkClear = Tick(), chkVsync = Tick(), chkPresent = Tick(), chkGdi = Tick(), chkPar = Tick(), chkRealFont = Tick();
+        readonly SpriteToggle chkSmooth = Tick(), chkNot = Tick(), chkXor = Tick(), chkFollow = Tick(), chkAnim = Tick(), chkClear = Tick(), chkVsync = Tick(), chkPresent = Tick(), chkGdi = Tick(), chkPar = Tick(), chkRealFont = Tick(), chkGridLines = Tick();
         static SpriteToggle Tick() => new SpriteToggle { Style = ToggleStyle.CheckBox, Size = new Size(280, 24) };
         // bit boxes (mask bits / lighting tier / projection views ...): rebuilt per test, check boxes or radio buttons
         readonly List<SpriteClickable> bitBoxes = new List<SpriteClickable>();
@@ -167,8 +171,8 @@ namespace Sr2d64CSport
 
         public MainForm()
         {
-            Text = "SR2D Demo";
-            ClientSize = new Size(1500, 900);
+            Text = "SR2D demo";
+            WindowState = FormWindowState.Maximized;        // starts maximised as a window (the taskbar stays); the sprite title bar is the base class's
             MinimumSize = new Size(1100, 700);
             StartPosition = FormStartPosition.CenterScreen;
             DoubleBuffered = true;
@@ -183,7 +187,13 @@ namespace Sr2d64CSport
             ReloadTests();
             RebuildAssets();
             _ = timeBeginPeriod(1);
-            Shown += (_, _) => RebuildCanvas();          // "fit to window" needs the final layout size
+            Shown += (_, _) =>
+            {
+                RebuildCanvas();          // "fit to window" needs the final layout size
+                if (ShotsDir == null) return;
+                try { RunShots(ShotsDir); } catch (Exception ex) { Log("shots failed: " + ex); }
+                Close();
+            };
             // classic "render while the message queue is empty" game loop - no timer granularity limits. A moving mouse
             // used to starve it completely: WM_MOUSEMOVE / WM_SETCURSOR arrive at the mouse poll rate (up to 1000/s), the
             // queue never emptied and the fps fell to the message rate while the pointer was over the canvas. Now only
@@ -213,9 +223,11 @@ namespace Sr2d64CSport
         void BuildUi()
         {
             SuspendLayout();
-            // ---- header: which DLL / kernels
-            lblDll.Text = Caps.Summary;
-            lblDll.ForeColor = Caps.HasWarp ? Color.FromArgb(0x70, 0xE0, 0x90) : Color.FromArgb(0xFF, 0xB0, 0x50);
+            // ---- header: which DLL / kernels - lives in the title bar now (SpriteForm.SetTitleTags);
+            // the FULL path goes to the log, the bar shows the path relative to the exe
+            Log("dll: " + Caps.Summary);
+            try { TitleIcon = System.Drawing.Icon.ExtractAssociatedIcon(Application.ExecutablePath); } catch { }
+            UpdateTitleTags();
 
             // ---- left: filter + test list + description
             var left = new SpritePanel { Style = PanelStyle.Flat, Padding = new Padding(4, 2, 2, 4), Dock = DockStyle.Left, Width = 340 };
@@ -229,7 +241,10 @@ namespace Sr2d64CSport
                 if (e.KeyCode == Keys.Escape) { txtFilter.Text = ""; e.SuppressKeyPress = true; }
                 else if (e.KeyCode == Keys.Enter || e.KeyCode == Keys.Down) { lstTests.Focus(); e.SuppressKeyPress = true; }
             };
-            filterRow.Controls.Add(txtFilter); filterRow.Controls.Add(lblFilterHint);
+            var btnFilterClear = new SpriteButton { Text = "\u00d7", Shape = ButtonShape.Square, Size = new Size(24, 24), Dock = DockStyle.Right, Enabled = false };
+            btnFilterClear.Click += (_, _) => { txtFilter.Text = ""; txtFilter.Focus(); };
+            txtFilter.TextChanged += (_, _) => btnFilterClear.Enabled = txtFilter.Text.Length > 0;   // nothing to clear while empty
+            filterRow.Controls.Add(txtFilter); filterRow.Controls.Add(lblFilterHint); filterRow.Controls.Add(btnFilterClear);
             lstTests.SelectedIndexChanged += (_, _) => SelectTest();
             lstTests.Margin = new Padding(0, 2, 0, 2);
             left.Controls.Add(lstTests); left.Controls.Add(filterRow); left.Controls.Add(lblDesc);   // the Fill control first: docking runs back to front
@@ -239,7 +254,7 @@ namespace Sr2d64CSport
             surf.Dock = DockStyle.Fill; surf.BackColor = Color.Black; surf.Painter = _ => { };
             surf.MouseMove += (_, e) => SurfaceMove(e);
             surf.MouseDown += (_, e) => SurfaceDown(e);
-            surf.MouseUp += (_, e) => { if (e.Button == MouseButtons.Left) { dragging = false; orbiting = false; edgeDrag = 0; rotating = false; shadowDrag = false; frame.MouseUp(); } if (e.Button == MouseButtons.Middle) panning = false; };
+            surf.MouseUp += (_, e) => { if (e.Button == MouseButtons.Left) { dragging = false; orbiting = false; edgeDrag = 0; rotating = false; shadowDrag = false; painting = false; frame.MouseUp(); } if (e.Button == MouseButtons.Middle) panning = false; };
             surf.MouseWheel += (_, e) => SurfaceWheel(e);
             surf.MouseEnter += (_, _) => surf.Focus();     // wheel events go to the focused control
             surf.MouseLeave += (_, _) => { if (!dragging && !orbiting && edgeDrag == 0) surf.Cursor = Cursors.Default; };
@@ -251,6 +266,7 @@ namespace Sr2d64CSport
             codeHead.Controls.Add(btnCodeBack); codeHead.Controls.Add(btnCodeCopy); codeHead.Controls.Add(codeInfo);
             codePanel.Controls.Add(codeBox); codePanel.Controls.Add(codeHead);
             mid.Controls.Add(surf); mid.Controls.Add(codePanel); mid.Controls.Add(stripHost); mid.Controls.Add(prog);
+            ColorDemo.CanvasSurface = surf;                           // the colour test embeds its dialog on the surface
             KeyPreview = true;
             KeyDown += (_, e) =>
             {
@@ -278,15 +294,17 @@ namespace Sr2d64CSport
             Check(setupStack, chkGdi, "Canvas = GDI surface (BitBlt present)", true);
             chkGdi.CheckedChanged += (_, _) => RebuildCanvas();
             Check(setupStack, chkPar, "DrawParallel (one band per core)", false);
-            // Padding -2 cancels the panel's own 2 px frame, so the row's children line up exactly with the stack's
-            // direct children (without it every nested row sat 2 px further right - the "Limit fps to" checkbox)
-            var fpsRow = new SpriteStackPanel { Orientation = Orientation.Horizontal, Height = 26, Gap = 6, Padding = new Padding(-2, 0, -2, 0), Stretch = false };
+            // FrameInset = false puts the row's children on exactly the column of the stack's direct rows: the nested
+            // row's own 2 px frame inset used to offset the "Limit fps to" checkbox 2 px to the right, and Padding
+            // cannot cancel it (DisplayRectangle hard-codes the inset, it does not read Padding - the old
+            // negative-Padding "fix" was a no-op, which is why the misalignment survived its fix)
+            var fpsRow = new SpriteStackPanel { Orientation = Orientation.Horizontal, Height = 24, Gap = 6, Padding = new Padding(0), FrameInset = false, Stretch = false };   // 24 = the toggles' height (26 left a 2 px gap before the next row)
             chkVsync.Text = "Limit fps to"; chkVsync.Width = 110; chkVsync.Checked = false;
             fpsRow.Controls.Add(chkVsync); fpsRow.Controls.Add(numFps);
             setupStack.Controls.Add(fpsRow);
             Check(setupStack, chkRealFont, "Real font on the text panes (Segoe UI / Consolas)", true);
             chkRealFont.CheckedChanged += (_, _) => ApplyTextFonts();
-            var suiteRow = new SpriteStackPanel { Orientation = Orientation.Horizontal, Wrap = true, AutoSize = true, Gap = 4, Padding = new Padding(-2, 0, -2, 0), Stretch = false };
+            var suiteRow = new SpriteStackPanel { Orientation = Orientation.Horizontal, Wrap = true, AutoSize = true, Gap = 4, Padding = new Padding(0), FrameInset = false, Stretch = false };
             Btn(suiteRow, btnSuite, "Run suite (all tests)", (_, _) => RunSuite());
             Btn(suiteRow, btnCopy, "Copy log", (_, _) => { if (log.LineCount > 0) Clipboard.SetText(log.Text); });
             Btn(suiteRow, btnSave, "Save CSV", (_, _) => SaveCsv());
@@ -302,12 +320,18 @@ namespace Sr2d64CSport
             Slider(testStack, "Brightness (x0.01, -2..2)", tbBrite, -200, 200, 100, Param.Brite);
             Slider(testStack, "Light Z", tbZ, 1, 600, 120, Param.Z);
             Slider(testStack, "Line dot step", tbDot, 0, 8, 0, Param.DotStep);
+            Slider(testStack, "Grid cell (px)", tbGrid, 8, 256, 64, Param.Grid);
+            tbGrid.PowersOfTwo = true;                                          // 8 16 32 64 128 256 only - no leftover pixels
+            Slider(testStack, "Animation speed (x8 px/s)", tbSpeed, 1, 100, 6, Param.Speed);
+            Slider(testStack, "Offset X (px)", tbOffX, -256, 256, 0, Param.OffsetX);
+            Slider(testStack, "Offset Y (px)", tbOffY, -256, 256, 0, Param.OffsetY);
             // bit boxes (mask bits by default; tests may rename them or turn them into radio buttons); wraps onto several rows
             lblMask.Text = "Mask bits:"; titles[bitField] = "Mask bits:"; fieldTitles[bitField] = lblMask;
             bitField.Controls.Add(lblMask); bitField.Controls.Add(bitRow);
             BuildBitBoxes(MaskNames, false);
             testStack.Controls.Add(bitField); paramMain[Param.MaskBits] = bitField;
             Check(testStack, chkNot, "NotMask (invert)", false, Param.NotMask);
+            Check(testStack, chkGridLines, "Grid lines", true, Param.GridOn);
             Check(testStack, chkSmooth, "Smooth (AA / bilinear / point light)", false, Param.Smooth);
             Check(testStack, chkXor, "XOR lines", false, Param.Xor);
             Check(testStack, chkAnim, "Animate (off = time stands still at 0)", true, Param.Time);
@@ -325,8 +349,9 @@ namespace Sr2d64CSport
             log.FollowTail = true;
             ApplyTextFonts();
 
-            // dock order (WinForms docks back to front): mid fills what the edges leave
-            Controls.Add(mid); Controls.Add(rightTabs); Controls.Add(left); Controls.Add(log); Controls.Add(lblDll);
+            // the window chrome comes from SpriteForm (thin title bar: minimise / maximise / full screen / close,
+            // right click = window menu); dock order (WinForms docks back to front): mid fills what the edges leave
+            Controls.Add(mid); Controls.Add(rightTabs); Controls.Add(left); Controls.Add(log);
             ResumeLayout(true);
         }
 
@@ -381,6 +406,7 @@ namespace Sr2d64CSport
         /// </summary>
         void UpdateVisible(Param used)
         {
+            if (settingsHost != null && current != null) settingsHost.Visible = current.SettingsControl != null && (current.SettingsVisible?.Invoke(ctx) ?? true);
             Param show = current != null && current.Controls.Count > 0 ? current.Controls.Keys.Aggregate(Param.None, (a, b) => a | b) : used | staticUsed;
             if (show == shownParams) return;
             shownParams = show;
@@ -488,16 +514,16 @@ namespace Sr2d64CSport
         {
             [Param.Count] = tbCount.Value, [Param.Angle] = tbAngle.Value, [Param.Scale] = tbScale.Value, [Param.Blend] = tbBlend.Value, [Param.Brite] = tbBrite.Value,
             [Param.Z] = tbZ.Value, [Param.DotStep] = tbDot.Value, [Param.Op] = cbOp.SelectedIndex, [Param.Smooth] = chkSmooth.Checked ? 1 : 0, [Param.NotMask] = chkNot.Checked ? 1 : 0,
-            [Param.Xor] = chkXor.Checked ? 1 : 0, [Param.Mouse] = chkFollow.Checked ? 1 : 0, [Param.MaskBits] = BitMask(), [Param.Time] = chkAnim.Checked ? 1 : 0,
+            [Param.Xor] = chkXor.Checked ? 1 : 0, [Param.Mouse] = chkFollow.Checked ? 1 : 0, [Param.MaskBits] = BitMask(), [Param.Time] = chkAnim.Checked ? 1 : 0, [Param.Grid] = tbGrid.Value, [Param.Speed] = tbSpeed.Value, [Param.GridOn] = chkGridLines.Checked ? 1 : 0, [Param.OffsetX] = tbOffX.Value, [Param.OffsetY] = tbOffY.Value,
         };
         void WriteParams(DemoTest t, Dictionary<Param, int> v)
         {
             int Get(Param p) => v.TryGetValue(p, out var x) ? x : t.Defaults.TryGetValue(p, out x) ? x : GenericDefaults[p];
             void Tb(ParamSlider tb, Param p) => tb.Value = Math.Clamp(Get(p), tb.Minimum, tb.Maximum);
-            Tb(tbCount, Param.Count); Tb(tbAngle, Param.Angle); Tb(tbScale, Param.Scale); Tb(tbBlend, Param.Blend); Tb(tbBrite, Param.Brite); Tb(tbZ, Param.Z); Tb(tbDot, Param.DotStep);
+            Tb(tbCount, Param.Count); Tb(tbAngle, Param.Angle); Tb(tbScale, Param.Scale); Tb(tbBlend, Param.Blend); Tb(tbBrite, Param.Brite); Tb(tbZ, Param.Z); Tb(tbDot, Param.DotStep); Tb(tbGrid, Param.Grid); Tb(tbSpeed, Param.Speed); Tb(tbOffX, Param.OffsetX); Tb(tbOffY, Param.OffsetY);
             cbOp.SelectedIndex = Math.Clamp(Get(Param.Op), 0, cbOp.Items.Count - 1);
             chkSmooth.Checked = Get(Param.Smooth) != 0; chkNot.Checked = Get(Param.NotMask) != 0; chkXor.Checked = Get(Param.Xor) != 0;
-            chkFollow.Checked = Get(Param.Mouse) != 0; chkAnim.Checked = Get(Param.Time) != 0;
+            chkFollow.Checked = Get(Param.Mouse) != 0; chkAnim.Checked = Get(Param.Time) != 0; chkGridLines.Checked = Get(Param.GridOn) != 0;
             SetBitMask(Get(Param.MaskBits));
             scaleY = tbScale.Value / 100f;
         }
@@ -581,6 +607,11 @@ namespace Sr2d64CSport
                 else if (e.Button == MouseButtons.Right) { camPanX = camPanY = 0; }   // right click: recentre
                 return;
             }
+            if (current != null && current.PaintByMouse)
+            {
+                if (e.Button == MouseButtons.Left) { painting = true; penX = e.X; penY = e.Y; }
+                return;
+            }
             if (current != null && current.ShadowByMouse)
             {
                 if (e.Button == MouseButtons.Left) { shadowDrag = true; ShadowTowards(e.X, e.Y); surf.Cursor = Cursors.Cross; }
@@ -620,6 +651,8 @@ namespace Sr2d64CSport
                 if (!orbiting && !panning) surf.Cursor = Cursors.Default;
                 return;
             }
+            if (painting) { penX = e.X; penY = e.Y; return; }
+            if (current != null && current.PaintByMouse) { surf.Cursor = SpriteCursors.Pen; return; }
             if (shadowDrag) { ShadowTowards(e.X, e.Y); return; }
             if (current != null && current.Frame)
             {
@@ -830,6 +863,33 @@ namespace Sr2d64CSport
             staticUsed = StaticUsed(t);
             if (codeShown) LoadCode(t);
             ApplyCaptions(t);
+            surf.Cursor = t.PaintByMouse ? SpriteCursors.Pen : Cursors.Default;
+            if (settingsHost == null && t.SettingsControl != null)
+            {
+                settingsHost = new System.Windows.Forms.Panel { Dock = System.Windows.Forms.DockStyle.Bottom, AutoSize = true, AutoSizeMode = System.Windows.Forms.AutoSizeMode.GrowAndShrink, BackColor = Color.Transparent };
+                testStack.Controls.Add(settingsHost);
+                settingsHost.BringToFront();
+            }
+            if (settingsHost != null)
+            {
+                if (t.SettingsControl == null) { settingsHost.Visible = false; }
+                else if (settingsHost.Controls.Count == 0 || settingsHost.Tag != t)
+                {
+                    settingsHost.SuspendLayout();
+                    foreach (System.Windows.Forms.Control old in settingsHost.Controls) { settingsHost.Controls.Remove(old); old.Dispose(); }
+                    var ctl = t.SettingsControl();
+                    ctl.Dock = System.Windows.Forms.DockStyle.Top;
+                    settingsHost.Controls.Add(ctl);
+                    settingsHost.Height = ctl.Height + 4;
+                    settingsHost.Tag = t;
+                    settingsHost.ResumeLayout();
+                }
+            }
+            if (t.SpriteSize > 0)                                              // the test wants a fixed "Sprite size" setup (the block demos: 512)
+            {
+                for (int i = 0; i < cbSprite.Items.Count; i++)
+                    if (cbSprite.Items[i] == t.SpriteSize.ToString(System.Globalization.CultureInfo.InvariantCulture)) { if (cbSprite.SelectedIndex != i) cbSprite.SelectedIndex = i; break; }
+            }
             WriteParams(t, savedParams.TryGetValue(t, out var sp) ? sp : new Dictionary<Param, int>());
             orbiting = panning = rotating = shadowDrag = false; edgeDrag = 0; pivotX = pivotY = -1; backdropX = backdropY = 0;
             prog.Visible = false;
@@ -891,9 +951,16 @@ namespace Sr2d64CSport
             foreach (Control c in stripHost.Controls) c.Visible = c == strip;
             if (strip != null && strip.Parent != stripHost) stripHost.Controls.Add(strip);
             bool show = strip != null;
-            stripHost.Height = show ? t.StripHeight : 0;              // the canvas shrinks so every control stays visible
+            if (ColorDemo.ColorOverlay != null)                       // the colour test keeps its dialog on the canvas
+                ColorDemo.ColorOverlay.Visible = t.ControlStrip == ColorDemo.Build;
+            int rowH = show ? t.StripHeight : 0;                        // the canvas shrinks so every control stays visible
+            bool moved = rowH != stripHost.Height || stripHost.Visible != show;
+            stripHost.Height = rowH;
             stripHost.Visible = show;
-            if (show) { resizeTimer.Stop(); resizeTimer.Start(); }     // the canvas row changed height -> refit
+            // refit on BOTH transitions: hiding the row gives the canvas its old height back, and RebuildCanvas is the
+            // only thing that hands that height to the canvas sprite. A test whose strip is the first in the list used to
+            // leave every later test one strip-height too short (measured: the canvas kept 292 px of the row that went away).
+            if (moved) { resizeTimer.Stop(); resizeTimer.Start(); }
         }
 
         void ApplySimd()
@@ -901,9 +968,21 @@ namespace Sr2d64CSport
             if (!Caps.HasSimdInfo) return;
             int lvl = cbSimd.SelectedIndex;   // 0 auto, 1 sse2, 2 avx2
             var got = SR2D.SetSimdLevel((SR2D.SimdLevel)lvl);
-            lblDll.Text = Caps.Summary;
+            UpdateTitleTags();
             Log("SIMD level now: " + Caps.SimdName);
             if (lvl == 2 && got != SR2D.SimdLevel.Avx2) MessageBox.Show("CPU/OS does not support AVX2 - staying on SSE2.");
+        }
+
+        /// <summary>The DLL line as title bar tags: the path relative to the exe (full path in the log) + the kernel set.</summary>
+        void UpdateTitleTags()
+        {
+            string rel;
+            try { rel = Path.GetRelativePath(AppContext.BaseDirectory, Caps.Path); } catch { rel = Caps.Path; }
+            if (rel.Length == 0 || rel.StartsWith("..", StringComparison.Ordinal) || Path.IsPathRooted(rel)) rel = Path.GetFileName(Caps.Path);
+            string api = Caps.HasWarp && Caps.HasLine2 && Caps.HasAlphaOver && Caps.HasPoly && Caps.HasBlur ? "new API"
+                       : Caps.HasWarp || Caps.HasLine2 || Caps.HasAlphaOver || Caps.HasPoly || Caps.HasBlur ? "partial API" : "old API";
+            var col = Caps.HasWarp ? Color.FromArgb(0xFF, 0x70, 0xE0, 0x90) : Color.FromArgb(0xFF, 0xFF, 0xB0, 0x50);
+            SetTitleTags(new TitleTag(rel, col), new TitleTag("kernels: " + Caps.SimdName + " \u00b7 " + api, Color.FromArgb(0xFF, 0x8A, 0x94, 0xA6)));
         }
 
         // ------------------------------------------------------------- assets
@@ -935,7 +1014,7 @@ namespace Sr2d64CSport
             foreach (var bt in bandTemps.Values) bt.Dispose();
             bandTemps.Clear();
             canvas = new Sprite(cw, ch, chkGdi.Checked);
-            ctx = new Ctx { Canvas = canvas, Temp = temp, A = assets };
+            ctx = new Ctx { Canvas = canvas, Temp = temp, A = assets, Frame = frame };   // Frame is a process-wide field: a fresh context must not publish null to readers between the rebuild and the next selection
             mouseX = cw / 2; mouseY = ch / 2;
             surf.Invalidate();
             emaRender = -1;
@@ -949,6 +1028,7 @@ namespace Sr2d64CSport
 
         void FillCtx()
         {
+            ctx.Frame = frame;                                 // every path that fills the context hands over the same frame (the suite runs tests without a selection)
             ctx.Time = chkAnim.Checked ? (float)animTime : 0f;
             ctx.Yaw = camYaw; ctx.Pitch = camPitch; ctx.PanX = camPanX; ctx.PanY = camPanY;
             ctx.ScaleY = scaleY;
@@ -969,6 +1049,11 @@ namespace Sr2d64CSport
             ctx.NotMask = chkNot.Checked;
             ctx.Xor = chkXor.Checked;
             ctx.DotStep = tbDot.Value;
+            ctx.Grid = tbGrid.Value;
+            ctx.Speed = tbSpeed.Value;
+            ctx.PenDown = painting; ctx.PenX = penX; ctx.PenY = penY;
+            ctx.ShowGrid = chkGridLines.Checked;
+            ctx.OffsetX = tbOffX.Value; ctx.OffsetY = tbOffY.Value;
             ctx.Op = (SR2D.Op)(cbOp.SelectedIndex + 1);
             int mb = BitMask();
             ctx.MaskBits = mb == 0 && current?.BitNames == null ? 1 : mb;
@@ -979,7 +1064,12 @@ namespace Sr2d64CSport
         double lastFrameStart, nextFrameDue;
         void Frame()
         {
+            // the output bench's fullscreen form (demo/OutputDemo.cs) takes the whole window over: the bench renders
+            // nothing here while it is up, every frame of this loop goes to that form instead.
+            if (OutputDemo.FullscreenOpen) { OutputDemo.TickFullscreen(); return; }
             if (canvas == null || current == null || codeShown) { System.Threading.Thread.Sleep(5); return; }
+            for (int i = 0; i < Application.OpenForms.Count; i++)       // a modal dialog owns the message loop now; keep
+                if (Application.OpenForms[i] is { } open && open.Modal) { System.Threading.Thread.Sleep(5); return; }   // rendering behind it starved its input (the OK / Cancel clicks "came late")
             double now = clock.Elapsed.TotalMilliseconds;
             if (chkVsync.Checked)
             {
@@ -998,6 +1088,9 @@ namespace Sr2d64CSport
             lastFrameStart = now;
             if (chkAnim.Checked && frameDelta < 1000) animTime += frameDelta / 1000.0;
             RenderFrame(now, frameDelta);
+            // the "output paths" test drives its four comparison panes from here (after the canvas, so the assets
+            // it was given are still alive); it needs a frame source of its own - the strip has no timer.
+            if (current != null && current.ControlStrip == OutputDemo.Build) OutputDemo.Tick();
         }
 
         // ---- slow (non-real-time) tests: render DemoTest.SlowFrames frames after a change, then freeze and report
@@ -1263,7 +1356,7 @@ namespace Sr2d64CSport
             lastPanel = Rectangle.Empty;
             if (lines.Count == 0) return;
             int y = 8;
-            foreach (var (text, col) in lines) { var r = canvas.DrawText(8, y, text, col, unchecked((int)0xC0000000), 1, 0, 0, SR2D.LineOp.AlphaBlend); lastPanel = lastPanel.IsEmpty ? r : Rectangle.Union(lastPanel, r); y += 16; }
+            foreach (var (text, col) in lines) { var r = canvas.DrawText(8, y, text, col, unchecked((int)0xC0000000), 1, 0, 0, SR2D.LineOp.AlphaBlend, 128, TextAnchor.TopLeft, null, unchecked((int)0xFF101014), 1); lastPanel = lastPanel.IsEmpty ? r : Rectangle.Union(lastPanel, r); y += 16; }   // pixel font + drop shadow: readable over any test's background
         }
         Rectangle lastPanel;                            // where the info panel was drawn last (for a standalone status repaint)
 
@@ -1275,45 +1368,79 @@ namespace Sr2d64CSport
             if (canvas == null || inSuite) return;
             inSuite = true;
             btnSuite.Enabled = false;
-            bool present = chkPresent.Checked;
-            var sw = new Stopwatch();
-            csv.Clear();
-            csv.Add("group;test;count;ms_per_frame;ms_per_op;fps_equivalent;dll;kernels;parallel;gdi_surface");
-            Log("=== suite start: " + Caps.Summary);
-            Log($"{"test",-62} {"ms/frame",10} {"ms/op",10} {"fps",8}");
-            string dllName = Path.GetFileName(Caps.Path);
-            foreach (var t in tests)
+            try
             {
-                if (!t.Available) { Log($"{t.Name,-62} {"skipped (needs new DLL)",10}"); continue; }
-                if (t.SlowFrames > 0) { Log($"{t.Name,-62} {"skipped (slow test - run it by hand)",10}"); continue; }
-                FillCtx();
-                ctx.X = canvas.Width / 2; ctx.Y = canvas.Height / 2;      // deterministic position
-                ctx.Count = Math.Max(1, tbCount.Value);
-                // warm up
-                for (int i = 0; i < 3; i++) { if (!t.ClearsItself) canvas.ClearBuffer(0); RunTest(t); }
-                // measure: at least 300 ms or 20 frames, take median of per-frame times
-                var samples = new List<double>();
-                sw.Restart();
-                while (sw.ElapsedMilliseconds < 300 || samples.Count < 20)
+                bool present = chkPresent.Checked;
+                var sw = new Stopwatch();
+                int failed = 0;
+                csv.Clear();
+                csv.Add("group;test;count;ms_per_frame;ms_per_op;fps_equivalent;dll;kernels;parallel;gdi_surface");
+                Log("=== suite start: " + Caps.Summary);
+                Log($"{"test",-62} {"ms/frame",10} {"ms/op",10} {"fps",8}");
+                string dllName = Path.GetFileName(Caps.Path);
+                foreach (var t in tests)
                 {
-                    long a = Stopwatch.GetTimestamp();
-                    if (!t.ClearsItself) canvas.ClearBuffer(0);
-                    ctx.Time = (float)(clock.Elapsed.TotalSeconds % 1000);
-                    RunTest(t);
-                    samples.Add((Stopwatch.GetTimestamp() - a) * 1000.0 / Stopwatch.Frequency);
-                    if (samples.Count > 2000) break;
+                    if (!t.Available) { Log($"{t.Name,-62} {"skipped (needs new DLL)",10}"); continue; }
+                    if (t.SlowFrames > 0) { Log($"{t.Name,-62} {"skipped (slow test - run it by hand)",10}"); continue; }
+                    try
+                    {
+                        FillCtx();
+                        ctx.X = canvas.Width / 2; ctx.Y = canvas.Height / 2;      // deterministic position
+                        ctx.Count = Math.Max(1, tbCount.Value);
+                        // warm up
+                        for (int i = 0; i < 3; i++) { if (!t.ClearsItself) canvas.ClearBuffer(0); RunTest(t); }
+                        // measure: at least 300 ms or 20 frames, take median of per-frame times
+                        var samples = new List<double>();
+                        sw.Restart();
+                        while (sw.ElapsedMilliseconds < 300 || samples.Count < 20)
+                        {
+                            long a = Stopwatch.GetTimestamp();
+                            if (!t.ClearsItself) canvas.ClearBuffer(0);
+                            ctx.Time = (float)(clock.Elapsed.TotalSeconds % 1000);
+                            RunTest(t);
+                            samples.Add((Stopwatch.GetTimestamp() - a) * 1000.0 / Stopwatch.Frequency);
+                            if (samples.Count > 2000) break;
+                        }
+                        samples.Sort();
+                        double med = samples[samples.Count / 2];
+                        double perOp = med / ctx.Count;
+                        Log($"{t.Name,-62} {med,10:0.000} {perOp,10:0.000} {1000.0 / med,8:0.0}");
+                        csv.Add(string.Join(";", t.Group, t.Name, ctx.Count, med.ToString("0.0000", CultureInfo.InvariantCulture), perOp.ToString("0.0000", CultureInfo.InvariantCulture), (1000.0 / med).ToString("0.0", CultureInfo.InvariantCulture), dllName, Caps.SimdName, chkPar.Checked ? 1 : 0, chkGdi.Checked ? 1 : 0));
+                    }
+                    catch (Exception ex)
+                    {
+                        // one broken test must not hide the rest (and must never wedge the suite flag)
+                        failed++;
+                        Log($"{t.Name,-62} {"FAILED: " + ex.GetType().Name + " " + ex.Message,10}");
+                    }
+                    if (t.Check != null)
+                    {   // the correctness half: render one deterministic frame and ask the test to assert on it
+                        try
+                        {
+                            FillCtx();
+                            ctx.X = canvas!.Width / 2; ctx.Y = canvas.Height / 2;
+                            if (!t.ClearsItself) canvas.ClearBuffer(0);
+                            RunTest(t);
+                            var verdict = t.Check(ctx);
+                            if (verdict != null) { failed++; Log($"{t.Name,-62} {"CHECK FAILED: " + verdict,10}"); }
+                            else Log($"{t.Name,-62} {"check ok",10}");
+                        }
+                        catch (Exception ex)
+                        {
+                            failed++;
+                            Log($"{t.Name,-62} {"CHECK THREW: " + ex.GetType().Name + " " + ex.Message,10}");
+                        }
+                    }
+                    if (present) Present();
+                    Application.DoEvents();
                 }
-                samples.Sort();
-                double med = samples[samples.Count / 2];
-                double perOp = med / ctx.Count;
-                Log($"{t.Name,-62} {med,10:0.000} {perOp,10:0.000} {1000.0 / med,8:0.0}");
-                csv.Add(string.Join(";", t.Group, t.Name, ctx.Count, med.ToString("0.0000", CultureInfo.InvariantCulture), perOp.ToString("0.0000", CultureInfo.InvariantCulture), (1000.0 / med).ToString("0.0", CultureInfo.InvariantCulture), dllName, Caps.SimdName, chkPar.Checked ? 1 : 0, chkGdi.Checked ? 1 : 0));
-                if (present) Present();
-                Application.DoEvents();
+                Log(failed == 0 ? "=== suite done" : $"=== suite done: {failed} FAILED");
             }
-            Log("=== suite done");
-            btnSuite.Enabled = true;
-            inSuite = false;
+            finally
+            {
+                btnSuite.Enabled = true;
+                inSuite = false;
+            }
         }
 
         void SaveCsv()
@@ -1321,6 +1448,130 @@ namespace Sr2d64CSport
             if (csv.Count < 2) { MessageBox.Show("Run the suite first."); return; }
             using var dlg = new SaveFileDialog { Filter = "CSV|*.csv", FileName = $"sr2d_{Caps.SimdName}_{DateTime.Now:yyyyMMdd_HHmmss}.csv" };
             if (dlg.ShowDialog(this) == DialogResult.OK) File.WriteAllLines(dlg.FileName, csv, Encoding.UTF8);
+        }
+
+        /// <summary>Set from the command line (<c>--shots &lt;dir&gt;</c>): writes one PNG per test and exits.</summary>
+        internal string? ShotsDir;
+
+        /// <summary>
+        /// The instrument of the make-sense audit: every test is selected through the real UI path (captions, start
+        /// parameters, strip, sprite size), rendered for one deterministic frame and saved as a single PNG with its
+        /// control strip above the canvas, so the strip demos are photographed too. Plain WinForms children of a
+        /// strip (a native TrackBar) have no SR2D picture and are not in the shot; the manifest says so.
+        /// </summary>
+        void RunShots(string dir)
+        {
+            Directory.CreateDirectory(dir);
+            resizeTimer.Stop();          // a resize during the walk would rebuild the canvas under a running shot
+            var man = new List<string> { "index\tgroup\ttest\tfile\tstatus\tstrip\tcolors\tingk_px\thash\tnote" };
+            var seen = new Dictionary<long, string>();
+            int n = 0, shots = 0;
+            foreach (var t in tests)
+            {
+                n++;
+                string file = "", status, strip = "none", note = t.Desc.Length > 60 ? $"desc {t.Desc.Length} chars" : "";
+                long hash = 0; int colors = 0, ink = 0;
+                if (!t.Available) status = "SKIP-DLL";
+                else if (t.FileFilter != null && t.FilePath == null) status = "SKIP-NOFILE";
+                else
+                {
+                    try
+                    {
+                        current = null;
+                        lstTests.SelectedIndex = listItems.IndexOf(t);
+                        // Selecting a test rebuilds the strip and shortens / lengthens the canvas below it, and that
+                        // layout only settles when the queue is pumped. Without this the canvas kept the height the
+                        // previous test's strip left it at, so every test after a strip test was shot at a different
+                        // size between runs (measured: 1380x1144 vs 1380x1276 for the tests after the VoxelBox strip).
+                        Application.DoEvents();
+                        // The refit itself lives in the 150 ms resize timer, and this tight loop never gives it 150 ms, so
+                        // a strip that appeared or went away left the canvas SPRITE one strip-height too short: every test
+                        // after the first strip test lost 292 px of picture (measured: 1380x1276 -> 1380x984 once the
+                        // output bench became test 1). Refit directly here; RebuildCanvas keeps the old sprite when the
+                        // settled layout did not change the size, so this is cheap for the long runs of same-sized tests.
+                        RebuildCanvas();
+                        FillCtx();
+                        ctx.X = canvas!.Width / 2; ctx.Y = canvas.Height / 2;
+                        ctx.Time = 0.25f;                     // the same frame every run: shots must be comparable
+                        ctx.Preview = false;
+                        mouseX = ctx.X; mouseY = ctx.Y;       // the overlay puts the pivot / grab frame under the pointer
+                        canvas.ClearBuffer(unchecked((int)0xFF101418));
+                        RunTest(t);
+                        // A test is its render plus its overlays: Ctx.Label names each column and the info panel carries
+                        // the note and the readouts, so a shot without them shows less than the user sees. statsLine is
+                        // the fps / ms line, which changes every run - blank it so the shots stay comparable.
+                        var savedStats = statsLine; statsLine = "";
+                        DrawOverlays();
+                        statsLine = savedStats;
+                        int sh = stripHost.Visible ? stripHost.Height : 0;
+                        using var pic = new Sprite(canvas.Width, canvas.Height + sh, SR2D.Op.Paint);
+                        pic.ClearBuffer(unchecked((int)0xFF101418));
+                        if (sh > 0) { Compose(pic, stripHost, 0, 0); strip = "strip"; }
+                        pic.Draw(canvas, 0, sh, SR2D.Op.Paint);
+                        file = $"{n:000}_{Slug(t.Group, 28)}_{Slug(t.Name, 46)}.png";
+                        pic.SavePng(Path.Combine(dir, file));
+                        var st = Stat(pic, unchecked((int)0xFF101418));
+                        colors = st.colors; ink = st.ink; hash = st.hash; shots++;
+                        status = t.SlowFrames > 0 ? "OK-SLOW" : ink == 0 ? "BLANK" : "OK";
+                        if (t.SettingsControl != null)
+                        {   // the extra settings control (the curve editor of the tangent test, ...) lives in the right pane
+                            try
+                            {
+                                var sc = t.SettingsControl();
+                                sc.SetBounds(0, 0, Math.Max(1, sc.Width), Math.Max(1, sc.Height));
+                                using var sp = new Sprite(sc.Width, sc.Height, SR2D.Op.Paint);
+                                sp.ClearBuffer(unchecked((int)0xFF101418));
+                                Compose(sp, sc, 0, 0);
+                                sp.SavePng(Path.Combine(dir, Path.GetFileNameWithoutExtension(file) + "_settings.png"));
+                                sc.Dispose();
+                                note = (note.Length > 0 ? note + "; " : "") + "settings shot";
+                            }
+                            catch (Exception ex2) { note = (note.Length > 0 ? note + "; " : "") + "settings: " + ex2.GetType().Name; }
+                        }
+                    }
+                    catch (Exception ex) { status = "THREW"; note = ex.GetType().Name + ": " + ex.Message; }
+                }
+                if (hash != 0 && seen.TryGetValue(hash, out var dup)) status = "DUP of " + dup;
+                else if (hash != 0) seen[hash] = file;
+                man.Add($"{n}\t{t.Group}\t{t.Name}\t{file}\t{status}\t{strip}\t{colors}\t{ink}\t{hash:x16}\t{note}");
+                if (n % 10 == 0) Application.DoEvents();
+            }
+            File.WriteAllLines(Path.Combine(dir, "manifest.tsv"), man, Encoding.UTF8);
+            Log($"=== shots: {shots} / {tests.Count} tests rendered into {dir}");
+        }
+
+        /// <summary>Paints a control tree into one sprite: every SR2D control's own picture at its absolute offset, deepest
+        /// (back-most in WinForms z-order) first so a container cannot cover its children.</summary>
+        static void Compose(Sprite dst, Control host, int ox, int oy)
+        {
+            if (!host.Visible) return;
+            ox += host.Left; oy += host.Top;
+            if (host is SpriteBox sb) { try { dst.Draw(sb.RenderOnce(), ox, oy, SR2D.Op.AlphaOver); } catch { } }
+            // a plain PictureBox has no picture of its own (the output bench blits into its DC, which a capture of the
+            // control tree cannot see), so the bench tags its back buffer on the control for the shot
+            else if (host is PictureBox pb && pb.Tag is OutputDemo.Pane pane && pane.Buffer != null)
+            { try { dst.Draw(pane.Buffer, ox, oy, SR2D.Op.Paint); } catch { } }
+            for (int i = host.Controls.Count - 1; i >= 0; i--) Compose(dst, host.Controls[i], ox, oy);
+        }
+
+        /// <summary>How much of a picture is real: distinct colours, pixels that are not the backdrop, and a hash to
+        /// catch two tests that draw the same thing.</summary>
+        static (int colors, int ink, long hash) Stat(Sprite s, int bg)
+        {
+            var set = new HashSet<int>(); int ink = 0; long h = 17;
+            foreach (var v in s.Pixels) { h = (h ^ (uint)v) * 1099511628211L; if (v != bg) ink++; set.Add(v); }
+            return (set.Count, ink, h);
+        }
+
+        static string Slug(string s, int max)
+        {
+            var b = new StringBuilder(Math.Min(s.Length, max));
+            foreach (var ch in s)
+            {
+                if (b.Length >= max) break;
+                b.Append(char.IsLetterOrDigit(ch) || ch == '-' ? ch : '_');
+            }
+            return b.ToString();
         }
 
         void Log(string s)

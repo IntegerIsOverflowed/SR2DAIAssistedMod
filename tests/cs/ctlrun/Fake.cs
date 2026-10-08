@@ -4,7 +4,7 @@ namespace System.Windows.Forms {
   public enum MouseButtons { None, Left, Right, Middle }
   [Flags] public enum Keys { None = 0, Back = 8, Left = 37, Up = 38, Right = 39, Down = 40, Home = 36, End = 35, PageUp = 33, PageDown = 34, Space = 32, Enter = 13, Escape = 27, Delete = 46, Insert = 45, Add = 107, Subtract = 109, Oemplus = 187, OemMinus = 189, Apps = 93, Menu = 18, C = 67, F = 70, I = 73, N = 78, V = 86, X = 88, D0 = 48, NumPad0 = 96, A = 65, Z = 90, Shift = 0x10000, Control = 0x20000, Alt = 0x40000, KeyCode = 0xFFFF, Modifiers = unchecked((int)0xFFFF0000) }
   public enum Orientation { Horizontal, Vertical }
-  public class MouseEventArgs : EventArgs { public MouseButtons Button; public int X, Y, Delta; public Point Location => new Point(X, Y); public MouseEventArgs(MouseButtons b, int clicks, int x, int y, int delta) { Button = b; X = x; Y = y; Delta = delta; } }
+  public class MouseEventArgs : EventArgs { public MouseButtons Button; public int X, Y, Delta; public int Clicks { get; } public Point Location => new Point(X, Y); public MouseEventArgs(MouseButtons b, int clicks, int x, int y, int delta) { Button = b; Clicks = clicks; X = x; Y = y; Delta = delta; } }
   public class HandledMouseEventArgs : MouseEventArgs { public bool Handled; public HandledMouseEventArgs(MouseButtons b, int c, int x, int y, int d) : base(b, c, x, y, d) { } }
   public delegate void KeyEventHandler(object? sender, KeyEventArgs e);
   public class KeyEventArgs : EventArgs { public bool SuppressKeyPress; public Keys KeyData; public Keys KeyCode => KeyData & Keys.KeyCode; public Keys Modifiers => KeyData & Keys.Modifiers; public int KeyValue => (int)KeyCode; public bool Shift => (KeyData & Keys.Shift) != 0; public bool Control => (KeyData & Keys.Control) != 0; public bool Alt => (KeyData & Keys.Alt) != 0; public bool Handled; public KeyEventArgs(Keys k) { KeyData = k; } }
@@ -14,16 +14,23 @@ namespace System.Windows.Forms {
   public struct Padding { public int Left, Top, Right, Bottom; public Padding(int all) { Left = Top = Right = Bottom = all; } public Padding(int l, int t, int r, int b) { Left = l; Top = t; Right = r; Bottom = b; } public int Horizontal => Left + Right; public int Vertical => Top + Bottom; public static readonly Padding Empty = new Padding(0); }
   public static class Clipboard { static string _t = ""; public static void SetText(string t) => _t = t; public static bool ContainsText() => _t.Length > 0; public static string GetText() => _t; }
   [Flags] public enum ControlStyles { ContainerControl = 1, StandardClick = 0x100, StandardDoubleClick = 0x1000, Selectable = 0x200, UserPaint = 2, AllPaintingInWmPaint = 0x2000, Opaque = 4, ResizeRedraw = 0x40, OptimizedDoubleBuffer = 0x20000, DoubleBuffer = 0x10000 }
-  public class Timer : IDisposable { public int Interval { get; set; } public bool Enabled { get; private set; } public event EventHandler? Tick; public void Start() { Enabled = true; } public void Stop() { Enabled = false; } public void Dispose() { } public void Fire() => Tick?.Invoke(this, EventArgs.Empty); }
+  public class Timer : IDisposable { public int Interval { get; set; } public bool Enabled { get; private set; } public event EventHandler? Tick; public void Start() { Enabled = true; } public void Stop() { Enabled = false; } public void Dispose() { Dispose(true); GC.SuppressFinalize(this); } protected virtual void Dispose(bool disposing) { } public void Fire() => Tick?.Invoke(this, EventArgs.Empty); }
   public class Cursor { public static Point Position { get; set; } public Cursor() { } public Cursor(IntPtr h) { } } public static class Cursors { public static Cursor Hand = new Cursor(), Default = new Cursor(), SizeAll = new Cursor(), Cross = new Cursor(), IBeam = new Cursor(), SizeWE = new Cursor(), SizeNWSE = new Cursor(), SizeNS = new Cursor(), SizeNESW = new Cursor(); }
   public class CreateParams { public int Style, ExStyle; }
   public struct Message { public int Msg; public IntPtr WParam, LParam, Result; }
   public interface IMessageFilter { bool PreFilterMessage(ref Message m); }
   public static class Application { public static System.Collections.Generic.List<IMessageFilter> Filters = new(); public static void AddMessageFilter(IMessageFilter f) => Filters.Add(f); public static void RemoveMessageFilter(IMessageFilter f) => Filters.Remove(f); }
-  public enum FormBorderStyle { None, FixedSingle, Sizable } public enum FormStartPosition { Manual, CenterScreen } public enum DockStyle { None, Top, Bottom, Left, Right, Fill }
+  public enum FormBorderStyle { None, FixedSingle, Sizable, FixedDialog } public enum FormStartPosition { Manual, CenterScreen, CenterParent } public enum DockStyle { None, Top, Bottom, Left, Right, Fill } public enum DialogResult { None, OK, Cancel }
   public class Screen { public Rectangle WorkingArea = new Rectangle(0, 0, 1920, 1080); public Rectangle Bounds = new Rectangle(0, 0, 1920, 1080); public static Screen FromPoint(Point p) => new Screen(); }
   public class Form : Control {
     public FormBorderStyle FormBorderStyle { get; set; } public bool ShowInTaskbar { get; set; } public FormStartPosition StartPosition { get; set; } public bool TopMost { get; set; }
+    // the dialog surface (SpriteColorDialog): matches the real Form members the dialog touches; ShowDialog just shows
+    // (the headless checks assert the maths and the events, not the modality)
+    public bool MinimizeBox { get; set; } public bool MaximizeBox { get; set; } public bool KeyPreview { get; set; }
+    public DialogResult DialogResult { get; set; } = DialogResult.None;
+    public Control? AcceptButton { get; set; } public Control? CancelButton { get; set; }
+    public void Close() { Visible = false; }
+    public DialogResult ShowDialog(Form? owner) { Show(); return DialogResult; }
     protected virtual bool ShowWithoutActivation => false; protected override void WndProc(ref Message m) { }
     public new Size ClientSize { get => Size; set { Size = value; foreach (var c in Controls) if (c.Dock == DockStyle.Fill) c.Size = value; } }
     public void Show() { Visible = true; } public new void Hide() { Visible = false; }
@@ -37,7 +44,9 @@ namespace System.Windows.Forms {
     protected virtual void WndProc(ref Message m) { }
     Size _size; public Size Size { get => _size; set { if (_size == value) return; _size = value; OnResize(EventArgs.Empty); } } public Size ClientSize => Size; public virtual Color BackColor { get => _back; set { _back = value; OnBackColorChanged(EventArgs.Empty); } } Color _back; public Color ForeColor { get; set; }
     public virtual bool AutoSize { get; set; } Padding _pad; public Padding Padding { get => _pad; set { _pad = value; OnPaddingChanged(EventArgs.Empty); } } public virtual Rectangle DisplayRectangle => ClientRectangle; public virtual Size GetPreferredSize(Size s) => Size;
-    protected virtual void OnPaddingChanged(EventArgs e) { } protected virtual void OnTextChanged(EventArgs e) { } protected virtual void OnParentChanged(EventArgs e) { } protected virtual void OnControlAdded(ControlEventArgs e) { } protected virtual void OnControlRemoved(ControlEventArgs e) { } protected virtual void OnKeyPress(KeyPressEventArgs e) { }
+    protected virtual void OnPaddingChanged(EventArgs e) { } protected virtual void OnTextChanged(EventArgs e) { } protected virtual void OnParentChanged(EventArgs e) { }
+    public virtual void ResetBackColor() { }   // real WinForms: public virtual, resets to the ambient colour. ctlrun never calls it; the declaration is here so a derived override binds to it
+    protected virtual void OnControlAdded(ControlEventArgs e) { } protected virtual void OnControlRemoved(ControlEventArgs e) { } protected virtual void OnKeyPress(KeyPressEventArgs e) { }
     protected virtual void OnVisibleChanged(EventArgs e) { } protected virtual void OnParentVisibleChanged(EventArgs e) { }   // raised by the Visible setter (see above)
     public void Type(string s) { foreach (char c in s) OnKeyPress(new KeyPressEventArgs(c)); }
     public bool Enabled { get; set; } = true; bool _visible = true;   // real-WinForms semantics: the getter walks the ancestor chain (a child of a hidden form
@@ -57,7 +66,9 @@ namespace System.Windows.Forms {
     public void Wheel(int x, int y, int delta) => OnMouseWheel(new MouseEventArgs(MouseButtons.None, 0, x, y, delta));
     public Rectangle ClientRectangle => new Rectangle(0, 0, Size.Width, Size.Height);
     Control? _parent; public Control? Parent { get => _parent; set { _parent = value; OnParentChanged(EventArgs.Empty); } } public ControlCollection Controls { get; } public Control() { Controls = new ControlCollection(this); } public DockStyle Dock { get; set; } public int Width { get => Size.Width; set => Size = new Size(value, Size.Height); } public int Height { get => Size.Height; set => Size = new Size(Size.Width, value); } public void SetBounds(int x, int y, int w, int h) { Location = new Point(x, y); Size = new Size(w, h); } public int Left => Location.X; public int Top => Location.Y; public int Right => Location.X + Size.Width; public int Bottom => Location.Y + Size.Height;
-    public void Invalidate() { } public void Invalidate(Rectangle r) { } public Form? FindForm() { Control? c = this; while (c != null && !(c is Form)) c = c.Parent; return c as Form; } public void Hide() { Visible = false; } public void Dispose() => Dispose(true); protected virtual void Dispose(bool disposing) { }
+    public void Invalidate() { } public void Invalidate(Rectangle r) { } public Form? FindForm() { Control? c = this; while (c != null && !(c is Form)) c = c.Parent; return c as Form; } public DialogResult DialogResult { get; set; }   // SpriteButton.DialogResult: WinForms closes the form on click
+    public static System.Drawing.Font? DefaultFont;   // SpriteControlBase.DefaultFont deliberately hides it (a GDI Font in real WinForms)
+    public void Hide() { Visible = false; } public void Dispose() => Dispose(true); protected virtual void Dispose(bool disposing) { }
     public class ControlCollection : System.Collections.Generic.List<Control> { readonly Control _o; public ControlCollection(Control o) { _o = o; } public new void Add(Control c) { base.Add(c); c.Parent = _o; _o.OnControlAdded(new ControlEventArgs(c)); } public new bool Remove(Control c) { bool r = base.Remove(c); if (r) { c.Parent = null; _o.OnControlRemoved(new ControlEventArgs(c)); } return r; } }
     public event EventHandler? Click; protected virtual void OnClick(EventArgs e) => Click?.Invoke(this, e);
     public event EventHandler? LostFocus, GotFocus; public event KeyEventHandler? KeyDown; public void BringToFront() { } public void FireLostFocus() { OnLostFocus(EventArgs.Empty); LostFocus?.Invoke(this, EventArgs.Empty); } void UnusedEvents() { GotFocus?.Invoke(this, EventArgs.Empty); KeyDown?.Invoke(this, new KeyEventArgs(Keys.None)); }
@@ -79,7 +90,7 @@ namespace System.Windows.Forms {
   }
 }
 namespace System.ComponentModel.Design { public interface IDesigner { } }
-namespace Microsoft.Win32 { public class RegistryKey : IDisposable { public object? GetValue(string n) => null; public RegistryKey? OpenSubKey(string n) => null; public void Dispose() { } } public static class Registry { public static RegistryKey CurrentUser = new RegistryKey(); } }
+namespace Microsoft.Win32 { public class RegistryKey : IDisposable { public object? GetValue(string n) => null; public RegistryKey? OpenSubKey(string n) => null; public void Dispose() { Dispose(true); GC.SuppressFinalize(this); } protected virtual void Dispose(bool disposing) { } } public static class Registry { public static RegistryKey CurrentUser = new RegistryKey(); } }
 namespace System.ComponentModel {
   [AttributeUsage(AttributeTargets.All)] public class DesignerAttribute : Attribute { public DesignerAttribute(string s, Type t) { } }
   [AttributeUsage(AttributeTargets.All)] public class CategoryAttribute : Attribute { public CategoryAttribute(string s) { } }

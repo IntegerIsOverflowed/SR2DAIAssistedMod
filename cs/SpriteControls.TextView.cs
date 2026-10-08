@@ -13,7 +13,7 @@ using System.Windows.Forms;
 namespace Sr2d64CSport
 {
     /// <summary>A coloured stretch of a <see cref="SpriteTextView"/> line: <see cref="Start"/> / <see cref="Length"/> in characters of that line, ARGB <see cref="Color"/> (0 = the control's ForeColor).</summary>
-    internal readonly struct TextRun
+    public readonly struct TextRun
     {
         public readonly int Start, Length, Color;
         public TextRun(int start, int length, int color) { Start = start; Length = length; Color = color; }
@@ -29,7 +29,7 @@ namespace Sr2d64CSport
     /// pixel font (monospace) unless a TextFont / TextFontFamily is set.
     /// </summary>
     [ToolboxBitmap(typeof(SpriteTextView), "SpriteTextView.bmp")]
-    internal sealed class SpriteTextView : SpriteControlBase
+    public sealed class SpriteTextView : SpriteControlBase
     {
         protected override AccessibleRole DefaultAccessibleRole => AccessibleRole.Text;
         readonly List<string> _lines = new();
@@ -83,7 +83,7 @@ namespace Sr2d64CSport
         {
             bool atEnd = _scrollY >= MaxScrollY - 1;
             var parts = (line ?? "").Replace("\r\n", "\n").Split('\n');
-            foreach (var p in parts) { _lines.Add(Expand(p)); _runs.Add(color != 0 ? new[] { new TextRun(0, p.Length, color) } : null); _runsDone.Add(color != 0); }
+            foreach (var p in parts) { var exp = Expand(p); _lines.Add(exp); _runs.Add(color != 0 ? new[] { new TextRun(0, exp.Length, color) } : null); _runsDone.Add(color != 0); }   // the run must span the EXPANDED line - a raw length stops the colour at the first tab
             if (_maxLines > 0 && _lines.Count > _maxLines)
             {
                 int drop = _lines.Count - _maxLines;
@@ -355,7 +355,16 @@ namespace Sr2d64CSport
         TextRun[]? RunsOf(int line)
         {
             if (!_runsDone[line]) { _runsDone[line] = true; if (_colorizer != null) _runs[line] = _colorizer(_lines[line]); }
-            return _runs[line];
+            var runs = _runs[line];
+            if (runs == null) return null;
+            int len = _lines[line].Length;
+            foreach (var r in runs) if (r.Start + r.Length > len)          // runs from SetLines are measured on the caller's raw strings - clip to the stored (expanded) line
+            {
+                var clipped = new System.Collections.Generic.List<TextRun>();
+                foreach (var r2 in runs) { if (r2.Start >= len) continue; clipped.Add(r2.Start + r2.Length <= len ? r2 : new TextRun(r2.Start, len - r2.Start, r2.Color)); }
+                var arr = clipped.ToArray(); _runs[line] = arr; return arr;
+            }
+            return runs;
         }
         protected override void PaintControl(Sprite s)
         {
