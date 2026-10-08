@@ -24,8 +24,9 @@ namespace Sr2d64CSport
             ArgumentNullException.ThrowIfNull(Pattern);
             if (Path.Length < 3 || Pattern.Width == 0 || Pattern.Height == 0) return;
             var r = BoundsOf(Path);
-            r.Intersect(new Rectangle(0, 0, meWidth, meHeight));
+            r.Intersect(Rectangle.FromLTRB(meLeft, meTop, meRight, meBottom));   // the LOCK rect protects pixels like on every other verb (a locked canvas used to be painted outside it)
             if (r.IsEmpty) return;
+            if (meGdi) GdiFlush();                               // touching pBuf directly: flush pending GDI output first (the sibling verbs do the same)
 
             // coverage: fill the path once into a scratch, AA gives us the soft edge in its alpha
             using var cov = new Sprite(r.Width, r.Height);
@@ -60,9 +61,15 @@ namespace Sr2d64CSport
                     int sp = pb[sy * pw + sx];
                     int a = ((sp >>> 24) & 255) * covA / 255;
                     if (a == 0) continue;
-                    int src = (a << 24) | (sp & 0x00ffffff);
+                    int sc = sp & 0x00ffffff;
+                    if (Pattern.Premultiplied)                   // the pattern is premultiplied: un-premultiply into the straight colours the mix works on
+                    { sc = (((sp >>> 16 & 255) * 255 / a) << 16) | (((sp >>> 8 & 255) * 255 / a) << 8) | ((sp & 255) * 255 / a); }
+                    int src = (a << 24) | sc;
                     int di = (y + r.Y) * meWidth + (x + r.X);
-                    db[di] = MixOp(db[di], src, Op, bf);
+                    int o = MixOp(db[di], src, Op, bf);
+                    if (Premultiplied)                           // this sprite keeps premultiplied pixels: bring the result back into its space
+                    { int oa = (o >>> 24) & 255; o = oa == 0 ? 0 : (oa << 24) | (((o >>> 16 & 255) * oa / 255) << 16) | (((o >>> 8 & 255) * oa / 255) << 8) | ((o & 255) * oa / 255); }
+                    db[di] = o;
                 }
             }
             }
@@ -75,26 +82,37 @@ namespace Sr2d64CSport
             return Rectangle.FromLTRB((int)MathF.Floor(l), (int)MathF.Floor(t), Math.Min(meWidth, (int)MathF.Ceiling(rr) + 1), Math.Min(meHeight, (int)MathF.Ceiling(b) + 1));
         }
         static int Mod(int v, int m) { int r = v % m; return r < 0 ? r + m : r; }
-        /// <summary>One-pixel compositing of the ops a pattern fill promises (the rest falls back to AlphaBlend).</summary>
+        /// <summary>One-pixel compositing of the ops a pattern fill promises (the rest falls back to AlphaBlend).
+        /// Mirrors the engine's own per-pixel ops (native line_px case 3 = OVER, case 4 = Blend by k, both
+        /// applied to all four bytes) so the managed fill matches every other verb - the previous hand-rolled
+        /// OVER computed the ALPHA byte from the source alpha alone and manufactured opacity over pixels the
+        /// engine keeps transparent.</summary>
         int MixOp(int dst, int src, SR2D.LineOp op, float bf)
         {
             int sa = (src >>> 24) & 255;
             if (op == SR2D.LineOp.Set) return src;
-            float f = sa / 255f;
-            int dr = (dst >>> 16) & 255, dg = (dst >>> 8) & 255, dbv = dst & 255;
-            int sr = (src >>> 16) & 255, sg = (src >>> 8) & 255, sb = src & 255;
             if (op == SR2D.LineOp.Blend)
-            {
-                float t = f * bf;
-                return (unchecked((int)0xFF000000))
-                     | ((int)Math.Round(sr * t + dr * (1 - t)) << 16)
-                     | ((int)Math.Round(sg * t + dg * (1 - t)) << 8)
-                     | (int)Math.Round(sb * t + dbv * (1 - t));
+            {   // Blend by k over ALL four bytes (native case 4), k scaled by the source's coverage-scaled alpha
+                int k = sa * Math.Min(256, Math.Max(0, (int)(bf * 256f))) >> 8;
+                if (k <= 0) return dst;
+                if (k >= 256) return src;
+                int r = 0;
+                for (int sh = 0; sh < 32; sh += 8)
+                    r |= ((((src >>> sh) & 0xff) * k + ((dst >>> sh) & 0xff) * (256 - k)) >> 8 & 0xff) << sh;
+                return r;
             }
-            // AlphaBlend (OVER) + AlphaOver; anything else degrades to OVER
-            int ar = (int)Math.Round(sr * f + dr * (1 - f)), ag = (int)Math.Round(sg * f + dg * (1 - f)), ab = (int)Math.Round(sb * f + dbv * (1 - f));
-            int aa = Math.Max(sa, 255 - (int)Math.Round((255 - sa) * f));   // approximated destination alpha
-            return (aa << 24) | (ar << 16) | (ag << 8) | ab;
+            // AlphaBlend (OVER) + AlphaOver; anything else degrades to OVER - native case 3, all four bytes
+            if (sa == 0) return dst;
+            if (sa == 255) return src;
+            int ia = 256 - sa - (sa >> 7);                      // 255 -> 0 (the engine's rounding trick)
+            int aw = sa + (sa >> 7);
+            int r2 = 0;
+            for (int sh = 0; sh < 32; sh += 8)
+            {
+                int scc = (src >>> sh) & 0xff, dcc = (dst >>> sh) & 0xff;
+                r2 |= (((scc * aw + dcc * ia) >> 8) & 0xff) << sh;
+            }
+            return r2;
         }
     }
 }

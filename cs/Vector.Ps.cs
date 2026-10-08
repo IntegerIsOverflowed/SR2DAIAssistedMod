@@ -139,6 +139,8 @@ namespace Sr2d64CSport
         /// <summary>Next token: number (double), PsName, PsString, PsArray (procedure), "[" "]" "<<" ">>" as PsName exec, or null at EOF.</summary>
         public object? Next()
         {
+            while (true)                                           // skip loops, never recurses: a run of ')' or unknown bytes must not eat the stack
+            {
             SkipWs(); if (Pos >= end) return null;
             int c = d[Pos];
             switch (c)
@@ -153,7 +155,7 @@ namespace Sr2d64CSport
                 case ']': Pos++; return new PsName("]", true);
                 case '{': Pos++; return ReadProc();
                 case '}': Pos++; return new PsName("}", true);
-                case ')': Pos++; return Next();
+                case ')': Pos++; continue;   // stray end-of-string delimiter: skip it
                 case '/':
                     {
                         Pos++; bool imm = false; if (Pos < end && d[Pos] == '/') { Pos++; imm = true; }
@@ -163,10 +165,11 @@ namespace Sr2d64CSport
                     }
             }
             int st = Pos; while (Pos < end && !Ws(d[Pos]) && !Delim(d[Pos])) Pos++;
-            if (Pos == st) { Pos++; return Next(); }
+            if (Pos == st) { Pos++; continue; }
             string tok = Encoding.Latin1.GetString(d, st, Pos - st);
             if (TryNumber(tok, out double v)) return v;
             return new PsName(tok, true);
+            }
         }
         public static bool TryNumber(string t, out double v)
         {
@@ -179,14 +182,17 @@ namespace Sr2d64CSport
             }
             return double.TryParse(t, NumberStyles.Float, CultureInfo.InvariantCulture, out v);
         }
-        PsArray ReadProc()
+        PsArray ReadProc() => ReadProc(0);
+        PsArray ReadProc(int depth)
         {
+            if (depth > 100) throw new InvalidOperationException("PostScript: procedures nested more than 100 deep (not a picture)");
             var l = new List<object?>();
             while (true)
             {
                 var t = Next(); if (t == null) break;
                 if (t is PsName n && n.Exec && n.N == "}") break;
-                l.Add(t);
+                if (t is PsName open && open.Exec && open.N == "{") l.Add(ReadProc(depth + 1));   // Next() hands nested '{' procs over token by token - recurse with a budget
+                else l.Add(t);
             }
             return new PsArray(l, true);
         }
@@ -386,6 +392,8 @@ namespace Sr2d64CSport
             catch (IndexOutOfRangeException) { Warn("PostScript error: bad index (the picture may be incomplete)"); }
             catch (InvalidCastException ex) { Warn("PostScript error: typecheck (" + ex.Message + ") (the picture may be incomplete)"); if (trace != null) { Console.Error.WriteLine("PS trace (last ops): " + string.Join(" ", trace)); Console.Error.WriteLine("stack: " + string.Join(" | ", St.ConvertAll(o => o?.ToString() ?? "null"))); } }
             catch (NullReferenceException) { Warn("PostScript error: null object (the picture may be incomplete)"); if (trace != null) Console.Error.WriteLine("PS trace (last ops): " + string.Join(" ", trace)); }
+            catch (ArgumentOutOfRangeException) { Warn("PostScript error: range (the picture may be incomplete)"); }
+            catch (OverflowException) { Warn("PostScript error: value out of range (the picture may be incomplete)"); }
             if (!haveBbox) { var b = img.Bounds(); if (!b.IsEmpty) { img.ViewBox = b; img.Width = b.Width; img.Height = b.Height; } }
             else if (aiPage)
             {   // artwork placed entirely off the artboard (e.g. CorelDRAW exports with the drawing beside the page): show the art instead of an empty page

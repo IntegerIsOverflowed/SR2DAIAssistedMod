@@ -4,7 +4,7 @@ using System.Drawing;
 namespace Sr2d64CSport
 {
     /// <summary>How <see cref="SpriteBox"/> places its image (the <see cref="SpriteBox.Surface"/> of <see cref="SpriteBox.ImageSize"/>) in the client area.</summary>
-    internal enum SpriteSizeMode
+    public enum SpriteSizeMode
     {
         /// <summary>Classic behaviour: the surface IS the client area (1:1, follows the size). Zoom / pan / navigation are off.</summary>
         None,
@@ -23,7 +23,7 @@ namespace Sr2d64CSport
     }
 
     /// <summary>What dragging the image (hand) may do.</summary>
-    internal enum SpritePanMode
+    public enum SpritePanMode
     {
         /// <summary>The image cannot be moved.</summary>
         None,
@@ -34,7 +34,7 @@ namespace Sr2d64CSport
     }
 
     /// <summary>A client point mapped into image pixels (<see cref="SpriteView.Hit"/>).</summary>
-    internal readonly struct ImagePoint
+    public readonly struct ImagePoint
     {
         /// <summary>False when the point lies outside the image (X / Y are then extrapolated - beyond 0 or the size).</summary>
         public readonly bool Inside;
@@ -54,7 +54,7 @@ namespace Sr2d64CSport
     /// here - <see cref="SpriteBox"/> owns one and every number it shows comes from it; it can be unit-tested headlessly.
     /// Call <see cref="Layout"/> (or read <see cref="Dest"/>, which does) after changing anything.
     /// </summary>
-    internal sealed class SpriteView
+    public sealed class SpriteView
     {
         Size _image = new Size(1, 1), _viewport = new Size(1, 1);
         SpriteSizeMode _mode = SpriteSizeMode.CenterImage;

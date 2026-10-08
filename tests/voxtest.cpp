@@ -340,6 +340,96 @@ int main(int argc, char** argv)
     printf("voxtest: %d iterations, raycast pixels checked %lld (%lld hit a voxel, ambiguous skipped %lld = %.2f%%), point pixels %lld (%lld hits)\n",
         iters, checked, hitRay, ambig, 100.0 * ambig / (double)(checked + ambig + 1), pointsChecked, hitPt);
 
+    // ---- transparency: glass over a wall, exact compositing + the exposure rule + both ISAs equal ----
+    {
+        // side view from the south: screen x = grid x, 1 px per voxel, y = z (a 1-high, 1-deep row)
+        Grid g; g.w = 5; g.h = 1; g.d = 1; g.v.assign(5, SR2D_Voxel{}); g.faces.assign(5, 0);
+        g.v[1].argb = 0xffff0000u;      // opaque red
+        g.v[2].argb = 0x80ffffffu;      // translucent white (glass), alpha 128
+        g.v[3].argb = 0xff00ff00u;      // opaque green
+        O[0].VOXEL_FACES(g.v.data(), 5, 1, 1, g.faces.data());
+        // exposure: the camera-facing +Y face (bit 4) is exposed for all three (air counts 0 outside);
+        // the lower-alpha neighbour rule only kills faces BETWEEN voxels (checked on g2 below)
+        CHECK((g.faces[1] & 4) != 0 && (g.faces[2] & 4) != 0 && (g.faces[3] & 4) != 0, "faces: +Y exposed through glass and air (%02x %02x %02x)", g.faces[1], g.faces[2], g.faces[3]);
+        // the x rule: glass(128) next to wall(255): the WALL side toward the glass is hidden (128 < 255),
+        // no face between them faces the camera anyway; a stacked pair with different alphas does show one
+        Grid g2; g2.w = 2; g2.h = 1; g2.d = 1; g2.v.assign(2, SR2D_Voxel{}); g2.faces.assign(2, 0);
+        g2.v[0].argb = 0xc800ff00u; g2.v[1].argb = 0x640000ffu;   // alpha 200 (green) then 100 (blue)
+        O[1].VOXEL_FACES(g2.v.data(), 2, 1, 1, g2.faces.data());
+        CHECK((g2.faces[1] & 2) == 0, "faces: the 100-alpha voxel has no face toward the denser neighbour (%02x)", g2.faces[1]);
+        CHECK((g2.faces[0] & 1) != 0, "faces: the 200 voxel keeps its face toward the rarer one (%02x)", g2.faces[0]);
+        SR2D_VoxelScene S; memset(&S, 0, sizeof(S));
+        S.vox = (const SR2D_Voxel*)g.v.data(); S.faces = g.faces.data(); S.light = nullptr;
+        S.gw = 5; S.gh = 1; S.gd = 1; S.lighting = 0; S.mode = 1; S.flags = 0;
+        S.m[0] = 1.f; S.m[5] = -1.f; S.ox = 1; S.oy = 2;            // sx = x + 1, sy = -z + 2: cubes cover rows [1, 2]
+        S.view[1] = -1.f;                                           // from the north looking south: +Y faces face the camera
+        const int W = 8, H = 3;
+        const int BG = (int)0x10203040u;
+        std::vector<int> img0((size_t)W * H, BG), img1((size_t)W * H, BG);
+        std::vector<int> pk0((size_t)W * H, -1), pk1((size_t)W * H, -1);
+        O[0].VOXEL_RENDER(&S, img0.data(), W, 0, 0, W, H, pk0.data());
+        O[1].VOXEL_RENDER(&S, img1.data(), W, 0, 0, W, H, pk1.data());
+        CHECK(img0 == img1 && pk0 == pk1, "transparency: sse2 != avx2");
+        // expected: row 1 (= z 0): px 2 = the red wall, px 3 = glass OVER the background, px 4 = green
+        auto over = [](uint32_t bg, uint32_t s) {
+            uint32_t a = s >> 24, ia = 255 - a;
+            uint32_t r = ((s >> 16) & 255) * a + ((bg >> 16) & 255) * ia + 128, g2 = ((s >> 8) & 255) * a + ((bg >> 8) & 255) * ia + 128;
+            uint32_t b = (s & 255) * a + (bg & 255) * ia + 128, o = a * 255 + (bg >> 24) * ia + 128;
+            auto q = [](uint32_t t) { return (t + (t >> 8)) >> 8; };
+            return (int)((q(o) << 24) | (q(r) << 16) | (q(g2) << 8) | q(b));
+        };
+        // ox = 1: voxel x spans pixels [1 + x, 2 + x] -> px 2 = the red wall, px 3 = the glass, px 4 = green
+        CHECK(img0[1 * W + 2] == (int)0xffff0000u, "transparency: the red wall is opaque (%08x)", img0[1 * W + 2]);
+        CHECK(img0[1 * W + 3] == over((uint32_t)BG, 0x80ffffffu), "transparency: glass composites over the background (%08x)", img0[1 * W + 3]);
+        CHECK(img0[1 * W + 4] == (int)0xff00ff00u, "transparency: the green voxel is opaque (%08x)", img0[1 * W + 4]);
+        CHECK(pk0[1 * W + 2] == (1 << 3 | 2) && pk0[1 * W + 3] == (2 << 3 | 2) && pk0[1 * W + 4] == (3 << 3 | 2),
+              "transparency: pick reports wall / glass / green (%d %d %d)", pk0[1 * W + 2], pk0[1 * W + 3], pk0[1 * W + 4]);
+        CHECK(pk0[1 * W + 1] == -1 && pk0[1 * W + 5] == -1, "transparency: nothing drawn outside the voxels");
+        // KEEP_ALPHA: a raw stamp (the alpha-tagged-sprite contract) - the destination receives the voxel colour
+        // verbatim, no blending; translucent voxels write their own alpha, opaque ones are unchanged
+        S.flags = SR2D_VOX_KEEP_ALPHA;
+        std::fill(img1.begin(), img1.end(), BG);
+        O[1].VOXEL_RENDER(&S, img1.data(), W, 0, 0, W, H, nullptr);
+        CHECK(img1[1 * W + 2] == (int)0xffff0000u && img1[1 * W + 3] == (int)0x80ffffffu && img1[1 * W + 4] == (int)0xff00ff00u,
+              "transparency: KEEP_ALPHA stamps the raw colours (%08x %08x)", img1[1 * W + 3], img1[1 * W + 4]);
+        CHECK(img1[1 * W + 1] == BG && img1[1 * W + 5] == BG, "transparency: KEEP_ALPHA writes nothing outside the voxels");
+    }
+
+    // ---- transparency: random translucent grids, both ISAs render + faces identically ----
+    {
+        for (int it = 0; it < 24; ++it)
+        {
+            Grid g; int w = 4 + rnd() % 8, h = 4 + rnd() % 6, d = 3 + rnd() % 5;
+            make_grid(g, w, h, d, (int)(rnd() % 4));
+            for (auto& c : g.v) if ((c.argb >> 24) == 255 && (rnd() % 3) == 0) c.argb = ((rnd() % 254) + 1) << 24 | (c.argb & 0xffffff);
+            O[0].VOXEL_FACES(g.v.data(), w, h, d, g.faces.data());
+            Cam cam = random_cam(g, 60, 50, false);
+            SR2D_VoxelScene S; fill_scene(S, g, cam, 0, 1);
+            const int W = 60, H = 50;
+            std::vector<int> i0((size_t)W * H), i1((size_t)W * H); std::vector<int> p0((size_t)W * H, -1), p1((size_t)W * H, -1);
+            O[0].VOXEL_RENDER(&S, i0.data(), W, 0, 0, W, H, p0.data());
+            O[1].VOXEL_RENDER(&S, i1.data(), W, 0, 0, W, H, p1.data());
+            CHECK(i0 == i1 && p0 == p1, "transparency: random grid sse2 != avx2 (it %d)", it);
+            // the exposure rule spot-checked against the brute-force definition
+            std::vector<uint8_t> f2((size_t)w * h * d, 0);
+            for (int z = 0; z < d; ++z) for (int y = 0; y < h; ++y) for (int x = 0; x < w; ++x)
+            {
+                uint32_t sa = g.v[g.idx(x, y, z)].argb >> 24; int b = sa ? 0x40 : 0;
+                const int nx[6] = { 1, -1, 0, 0, 0, 0 }, ny[6] = { 0, 0, 1, -1, 0, 0 }, nz[6] = { 0, 0, 0, 0, 1, -1 };
+                for (int f = 0; f < 6; ++f)
+                {
+                    int X = x + nx[f], Y = y + ny[f], Z = z + nz[f];
+                    uint32_t na = (X < 0 || Y < 0 || Z < 0 || X >= w || Y >= h || Z >= d) ? 0 : g.v[g.idx(X, Y, Z)].argb >> 24;
+                    if (sa && sa > na) b |= 1 << f;
+                }
+                f2[g.idx(x, y, z)] = (uint8_t)b;
+            }
+            bool same = true;
+            for (size_t i = 0; i < f2.size(); ++i) if (g.faces[i] != f2[i]) { same = false; break; }
+            CHECK(same, "transparency: faces differ from the brute-force rule (it %d)", it);
+        }
+    }
+
     // ---- hostile input --------------------------------------------------------------------
     {
         Grid g; make_grid(g, 9, 7, 5, 1); O[1].VOXEL_FACES(g.v.data(), 9, 7, 5, g.faces.data()); O[1].VOXEL_LIGHT(g.v.data(), g.faces.data(), 9, 7, 5, g.light.data(), 15, 1);

@@ -264,6 +264,7 @@ static inline const sr2d_ops& ops()
     return *t;
 }
 
+SR2D_EXPORT int SR2D_CALL SR2D_ABI_VERSION() { return SR2D_ABI; }   // ABI handshake (see sr2d_api.h)
 SR2D_EXPORT int SR2D_CALL SR2D_SIMD_LEVEL()
 {
     return ops(), (int)load_long(&g_level);

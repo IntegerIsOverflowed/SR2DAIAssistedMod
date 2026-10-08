@@ -14,7 +14,7 @@ namespace Sr2d64CSport
     // Contains for free. Rectangle.Right/Bottom are exclusive, exactly like the
     // original Right/Bottom arguments, so no off-by-one anywhere.
     // ------------------------------------------------------------------------
-    internal unsafe partial class Sprite
+    public unsafe partial class Sprite
     {
         /// <summary>Whole surface as a rectangle: (0, 0, Width, Height).</summary>
         public Rectangle Bounds => new Rectangle(0, 0, meWidth, meHeight);

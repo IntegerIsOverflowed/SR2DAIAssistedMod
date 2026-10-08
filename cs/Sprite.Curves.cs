@@ -30,7 +30,7 @@ namespace Sr2d64CSport
     // Sprite.CurveTolerance pixels (default 0.2), so a small curve costs a handful of
     // segments and a screen-sized one a few hundred - never a fixed count.
     // ------------------------------------------------------------------------
-    internal unsafe partial class Sprite
+    public unsafe partial class Sprite
     {
         /// <summary>Maximum distance (pixels) between a curve and its polyline approximation. 0.2 is
         /// invisible even with AA; 1.0 is noticeably faceted on large curves but ~3x fewer segments.</summary>

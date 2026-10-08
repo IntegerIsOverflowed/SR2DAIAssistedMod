@@ -18,7 +18,7 @@ namespace Sr2d64CSport
     /// (and Escape restores the text from the last commit) so a form can react to "done" like a NumericUpDown.
     /// </summary>
     [ToolboxBitmap(typeof(SpriteTextBox), "SpriteTextBox.bmp")]
-    internal class SpriteTextBox : SpriteControlBase
+    public class SpriteTextBox : SpriteControlBase
     {
         protected override AccessibleRole DefaultAccessibleRole => AccessibleRole.Text;
         int _caret, _anchor, _scroll, _maxLen; bool _ro, _caretOn = true, _dragging; char _pw; string _placeholder = "", _committed = "";
@@ -252,10 +252,11 @@ namespace Sr2d64CSport
     /// loss, a button, a key or the wheel); typing alone does not change <see cref="Value"/> yet.
     /// </summary>
     [ToolboxBitmap(typeof(SpriteNumeric), "SpriteNumeric.bmp")]
-    internal sealed class SpriteNumeric : SpriteTextBox
+    public sealed class SpriteNumeric : SpriteTextBox
     {
         protected override AccessibleRole DefaultAccessibleRole => AccessibleRole.Slider;
         double _value, _min, _max = 100, _step = 1; int _dec; string _unit = ""; int _pressedBtn; Timer? _repeat; int _repeatDir;
+        double[]? _values; bool _pow2;
         SpinnerPlacement _spinner = SpinnerPlacement.Right; bool _wrapMouse = true, _dragSpin = true; int _pixelsPerStep = 4;
         // spinner drag: press on a button, move = value follows the pointer (up / right = larger); a press without movement is a click
         bool _spinDragging, _spinMoved; Point _spinLast; double _spinAcc, _spinStart; int _hotBtn;
@@ -280,11 +281,23 @@ namespace Sr2d64CSport
         [Category("Behavior"), DefaultValue(0.0)]
         public double Value { get => _value; set => SetValue(value, false); }
         [Category("Behavior"), DefaultValue(0.0)]
-        public double Minimum { get => _min; set { _min = value; if (_max < _min) _max = _min; SetValue(_value, false); } }
+        public double Minimum { get => _min; set { _min = value; if (_max < _min) _max = _min; if (_pow2) _values = Discrete.Pow2(_min, _max); SetValue(_value, false); } }
         [Category("Behavior"), DefaultValue(100.0)]
-        public double Maximum { get => _max; set { _max = value; if (_min > _max) _min = _max; SetValue(_value, false); } }
+        public double Maximum { get => _max; set { _max = value; if (_min > _max) _min = _max; if (_pow2) _values = Discrete.Pow2(_min, _max); SetValue(_value, false); } }
         [Category("Behavior"), DefaultValue(1.0), Description("Increment of the buttons / arrow keys / wheel (Shift = a tenth).")]
         public double Step { get => _step; set { _step = value <= 0 ? 1 : value; } }
+
+        /// <summary>Discrete values the control snaps to: sorted and de-duplicated automatically, every input (typing, buttons, keys, code) picks the nearest entry, and the buttons / arrow keys step through the list one entry at a time. When set, Step is ignored.</summary>
+        [Category("Behavior"), Description("Discrete values to snap to (e.g. 2 4 6 8 10 12, or any predetermined set). Every value picks the nearest entry; the buttons and the arrow keys step through the list.")]
+        public double[]? Values { get => _values; set { _values = Discrete.Norm(value); SetValue(_value, false); } }
+        [Browsable(false)] public bool ShouldSerializeValues() => _values != null;
+        /// <summary>Snap to the powers of two inside Minimum..Maximum (2 4 8 16 ...); the list follows range changes.</summary>
+        [Category("Behavior"), DefaultValue(false), Description("Snap to the powers of two inside Minimum..Maximum (2 4 8 16 ...) instead of a continuous range.")]
+        public bool PowersOfTwo
+        {
+            get => _pow2;
+            set { _pow2 = value; _values = value ? Discrete.Pow2(_min, _max) : null; SetValue(_value, false); }
+        }
         [Category("Appearance"), DefaultValue(0)]
         public int Decimals { get => _dec; set { _dec = Math.Clamp(value, 0, 6); SyncText(); } }
         [Category("Appearance"), DefaultValue(""), Description("Suffix shown after the number (not editable).")]
@@ -295,13 +308,29 @@ namespace Sr2d64CSport
             if (double.IsNaN(v)) v = _min;
             v = Math.Clamp(v, _min, _max);
             v = Math.Round(v, _dec);
+            if (_values is { Length: > 0 }) v = Discrete.Nearest(_values, v);          // the discrete list wins (after rounding, so entries survive Decimals = 0)
             bool changed = v != _value; _value = v;
             SyncText();
             if (changed) ValueChanged?.Invoke(this, EventArgs.Empty);
         }
         void SyncText() { string s = Format(_value); if (Text != s) Text = s; }
         string Format(double v) => v.ToString("F" + _dec, System.Globalization.CultureInfo.CurrentCulture);
-        public void Nudge(int steps, bool fine = false) => SetValue(_value + steps * (fine ? _step / 10 : _step), true);
+        public void Nudge(int steps, bool fine = false)
+        {
+            if (_values is { Length: > 0 } && steps != 0)                              // one list entry per step (never stuck between entries)
+            {
+                int dir = Math.Sign(steps); double v = _value;
+                for (int i = 0; i < Math.Abs(steps); i++)
+                {
+                    double next = Discrete.Next(_values, v, dir);
+                    if (next == v) break;
+                    v = next;
+                }
+                SetValue(v, true);
+                return;
+            }
+            SetValue(_value + steps * (fine ? _step / 10 : _step), true);
+        }
 
         protected override void OnCommitted()
         {
@@ -446,14 +475,14 @@ namespace Sr2d64CSport
     }
 
     /// <summary>Where a <see cref="SpriteNumeric"/> puts its up / down buttons.</summary>
-    internal enum SpinnerPlacement { Right, Below, None }
+    public enum SpinnerPlacement { Right, Below, None }
 
     /// <summary>
     /// A drop-down list: the field shows the selected item and a chevron, clicking (or Space / Enter / Alt+Down) opens an
     /// SR2D <see cref="SpriteMenu"/> with the <see cref="Items"/>; Up / Down and the wheel change the selection directly.
     /// </summary>
     [ToolboxBitmap(typeof(SpriteCombo), "SpriteCombo.bmp")]
-    internal sealed class SpriteCombo : SpriteControlBase
+    public sealed class SpriteCombo : SpriteControlBase
     {
         protected override AccessibleRole DefaultAccessibleRole => AccessibleRole.ComboBox;
         readonly List<string> _items = new(); int _sel = -1; SpriteMenu? _menu; bool _open; string _placeholder = "";
@@ -564,7 +593,7 @@ namespace Sr2d64CSport
     }
 
     /// <summary>How items of a <see cref="SpriteListBox"/> are selected.</summary>
-    internal enum ListSelection
+    public enum ListSelection
     {
         /// <summary>Clicking only raises ItemActivated; nothing stays selected.</summary>
         None,
@@ -581,7 +610,7 @@ namespace Sr2d64CSport
     /// <see cref="ItemActivated"/>.
     /// </summary>
     [ToolboxBitmap(typeof(SpriteListBox), "SpriteListBox.bmp")]
-    internal sealed class SpriteListBox : SpriteControlBase
+    public sealed class SpriteListBox : SpriteControlBase
     {
         protected override AccessibleRole DefaultAccessibleRole => AccessibleRole.List;
         readonly List<string> _items = new(); readonly HashSet<int> _selected = new(), _checked = new(), _headers = new();
@@ -799,7 +828,7 @@ namespace Sr2d64CSport
                     {   // group header: a band in the rim colour, bold caption, no check box
                         v.FillRect(inner.X + 1, y, inner.Width - 2, rh, Mix(BackColor, ThumbColor, 0.10f));
                         string ht = _items[i]; int hfit = FitScale(ht, avail, sc);
-                        T.Draw(v, inner.X + 4 * sc + 2, y + rh / 2, FitText(ht, avail, hfit), Mix(Fore, AccentRaw.ToArgb(), 0.35f), 0, hfit, 1, 0, SR2D.LineOp.Set, 128, TextAnchor.MiddleLeft);
+                        T.Draw(v, inner.X + 4 * sc + 2, y + rh / 2, FitText(ht, avail, hfit, 1), Mix(Fore, AccentRaw.ToArgb(), 0.35f), 0, hfit, 1, 0, SR2D.LineOp.Set, 128, TextAnchor.MiddleLeft);
                         continue;
                     }
                     if (sel) v.FillRect(inner.X + 1, y, inner.Width - 2, rh, selCol);

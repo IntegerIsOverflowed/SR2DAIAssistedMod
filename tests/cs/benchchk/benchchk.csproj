@@ -13,8 +13,8 @@
     <ImplicitUsings>$(Implicit)</ImplicitUsings>
     <EnableWindowsTargeting>true</EnableWindowsTargeting>
     <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
-    <BaseOutputPath>/home/user/.cache/benchchk/$(Implicit)/bin/</BaseOutputPath>
-    <BaseIntermediateOutputPath>/home/user/.cache/benchchk/$(Implicit)/obj/</BaseIntermediateOutputPath>
+    <BaseOutputPath Condition="Exists('/home/user/.cache')">/home/user/.cache/benchchk/$(Implicit)/bin/</BaseOutputPath>
+    <BaseIntermediateOutputPath Condition="Exists('/home/user/.cache')">/home/user/.cache/benchchk/$(Implicit)/obj/</BaseIntermediateOutputPath>
   </PropertyGroup>
   <ItemGroup>
     <Compile Include="../../../cs/*.cs" />

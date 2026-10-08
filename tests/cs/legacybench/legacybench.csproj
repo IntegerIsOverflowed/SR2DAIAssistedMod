@@ -1,0 +1,41 @@
+<!-- legacybench: ORIGINAL SR2D engine (legacy/original-engine -> SR2DOLD64.dll, build_native.bat)
+     vs the CURRENT engine (native/bin/x64/SR2D64.dll, prebuilt, never rebuilt here) on identical
+     sprite-drawing call sequences, through each engine's own C# binding layer.
+     Headless: no window, no present - pure engine draw throughput.
+     Native side: the original bindings live in legacybind/ (copies of legacy/original-engine/SR2D.cs
+     + Sprite.cs, only the namespace and the DllImport library name string changed + a missing
+     using System.Drawing added). The current bindings come from the real cs/*.cs.
+     Output dir trap (same as the sibling test runners): /home/user/.cache exists on this box, so the
+     condition is TRUE and the exe lands in D:\home\user\.cache\legacybench\bin\Release\net10.0-windows\.
+     build_native.bat must have been run first; both engine DLLs are copied next to the exe by the
+     None items below. -->
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <AssemblyName>legacybench</AssemblyName>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <UseWindowsForms>true</UseWindowsForms>
+    <EnableWindowsTargeting>true</EnableWindowsTargeting>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+    <StartupObject>LegacyBench.Program</StartupObject>
+    <NoWarn>CA1416;WFO1000;CS0436;CS0618;CS8981;CS1591;SYSLIB1054;IDE1006;CS0168;CS0219;NU1510;CA1310;CA1806;CA1305</NoWarn>
+    <BaseOutputPath Condition="Exists('/home/user/.cache')">/home/user/.cache/legacybench/bin/</BaseOutputPath>
+    <BaseIntermediateOutputPath Condition="Exists('/home/user/.cache')">/home/user/.cache/legacybench/obj/</BaseIntermediateOutputPath>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="../../../cs/*.cs" />
+    <Compile Include="legacybind/SR2D.cs;legacybind/Sprite.cs" />
+    <Compile Include="Program.cs" />
+  </ItemGroup>
+  <ItemGroup>
+    <PackageReference Include="System.Drawing.Common" Version="10.0.0" />
+  </ItemGroup>
+  <ItemGroup>
+    <!-- both engines are Windows DLLs: copied when present, skipped on a Linux checkout (build-only gate there) -->
+    <None Include="obj_native/SR2DOLD64.dll" Link="SR2DOLD64.dll" CopyToOutputDirectory="PreserveNewest" Condition="Exists('obj_native/SR2DOLD64.dll')" />
+    <None Include="../../../native/bin/x64/SR2D64.dll" Link="SR2D64.dll" CopyToOutputDirectory="PreserveNewest" Condition="Exists('../../../native/bin/x64/SR2D64.dll')" />
+  </ItemGroup>
+</Project>

@@ -19,7 +19,7 @@ using System.Runtime.InteropServices;
 namespace Sr2d64CSport
 {
     /// <summary>How the magic wand compares colours.</summary>
-    internal enum SelectMetric
+    public enum SelectMetric
     {
         /// <summary>Max channel difference (Chebyshev, like GIMP / Paint.NET) - the native fast path.</summary>
         Rgb,
@@ -28,9 +28,9 @@ namespace Sr2d64CSport
     }
 
     /// <summary>How a new shape combines with the current selection.</summary>
-    internal enum SelectMode { Replace, Add, Subtract, Intersect, Xor }
+    public enum SelectMode { Replace, Add, Subtract, Intersect, Xor }
 
-    internal sealed unsafe class Selection : IDisposable
+    public sealed unsafe class Selection : IDisposable
     {
         byte* p; int w, h;                  // size (a Rotate90 of a non-square selection swaps them)
         int bl, bt, br, bb;                 // bounding box of non-zero coverage (br <= bl: empty); conservative
@@ -143,7 +143,8 @@ namespace Sr2d64CSport
                 return Math.Clamp(255 * (1 - (d - tol / 2f) / MathF.Max(1f, tol / 2f)), 0, 255);
             }
 
-            var fill = mode == SelectMode.Replace ? this : new Selection(W, H);
+            using var tmp = mode == SelectMode.Replace ? null : new Selection(W, H);   // the temporary mask is native memory: it must not leak when the wand returns
+            var fill = tmp ?? this;
             if (mode == SelectMode.Replace) fill.Clear();   // Replace replaces (the native path does the same): the old mask must not guard the flood
             byte* m = fill.p;
             int found = 0;
@@ -604,10 +605,11 @@ namespace Sr2d64CSport
         void Check(Sprite s) { if (disposed) throw new ObjectDisposedException(nameof(Selection)); if (s.Width != w || s.Height != h) throw new ArgumentException("Sprite and selection sizes differ."); }
         internal Rectangle ClipTo(Rectangle lockRect) => Rectangle.Intersect(Bounds, lockRect);
 
-        public void Dispose() { if (disposed) return; disposed = true; if (p != null) { NativeMemory.Free(p); p = null; } }
+        public void Dispose() { if (disposed) return; disposed = true; if (p != null) { NativeMemory.Free(p); p = null; } GC.SuppressFinalize(this); }
+        ~Selection() { if (!disposed && p != null) NativeMemory.Free(p); }   // a forgotten Dispose must not leak the mask (VoxelSelection carries the same finalizer)
     }
 
-    internal unsafe partial class Sprite
+    public unsafe partial class Sprite
     {
         /// <summary>
         /// Bucket fill: colours the region connected to (x, y) whose colour is within

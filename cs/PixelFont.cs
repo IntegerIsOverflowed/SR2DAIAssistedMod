@@ -11,7 +11,7 @@ namespace Sr2d64CSport
     /// otherwise as a box. You can supply your own font with the constructor - one string per glyph, '#' = set pixel, row after row -
     /// e.g. a 3x5 digit font or an 8x8 retro font. Glyph rows are stored as bit masks (bit GlyphWidth-1 = left column), so a glyph is at most 16 pixels wide.
     /// </summary>
-    internal sealed partial class PixelFont
+    public sealed partial class PixelFont
     {
         public int GlyphWidth { get; }
         public int GlyphHeight { get; }

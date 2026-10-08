@@ -21,7 +21,7 @@ namespace Sr2d64CSport
     /// pop-up modes the double-click reset of the base class moves to Ctrl + double click.</para>
     /// </summary>
     [ToolboxBitmap(typeof(SpriteWheel), "SpriteWheel.bmp")]
-    internal sealed class SpriteWheel : SpriteRangeControl
+    public sealed class SpriteWheel : SpriteRangeControl
     {
         protected override AccessibleRole DefaultAccessibleRole => AccessibleRole.Slider;
         Orientation _orient = Orientation.Vertical;
@@ -129,9 +129,11 @@ namespace Sr2d64CSport
             // the surface follows the pointer: dragging towards the small end brings the larger values (printed on the other
             // side) under the centre line - drag up / left = larger (Reversed flips it, together with the print direction)
             double dir = _reversed ? 1 : -1;
+            double prev = _acc;
             _acc += dir * d / px * Step * (fine ? 0.1 : 1.0);
             if (!_wrapAround) _acc = Math.Clamp(_acc, Minimum, Maximum);      // no dead travel past an end
             if (_wrapMouse) { var np = WrapPointerOnScreen(p, !Hz); if (np != p) _last = np; }
+            if (_acc != prev) RepaintRequested = true;   // the drum follows _acc even when the clamped value stopped changing (the base repaints on the flag)
             return _acc;
         }
         protected override void OnValueApplied(double oldValue)
@@ -227,8 +229,24 @@ namespace Sr2d64CSport
         }
         /// <summary>Parses the field and applies it (bad text = revert).</summary>
         public void CommitEdit() { if (_field != null) { _field.Commit(); RefreshField(); } }
-        /// <summary>Steps the value (Up / Down / wheel in the field).</summary>
-        public void Nudge(int steps, bool fine = false) => SetValue(Value + steps * (fine ? Step / 10 : Step), true);
+        /// <summary>Steps the value (Up / Down / wheel in the field); with a discrete <see cref="Values"/> list, one entry per step.</summary>
+        public void Nudge(int steps, bool fine = false)
+        {
+            var list = Values;
+            if (list is { Length: > 0 } && steps != 0)                                 // one list entry per step (never stuck between entries)
+            {
+                int dir = Math.Sign(steps); double v = Value;
+                for (int i = 0; i < Math.Abs(steps); i++)
+                {
+                    double next = Discrete.Next(list, v, dir);
+                    if (next == v) break;
+                    v = next;
+                }
+                SetValue(v, true);
+                return;
+            }
+            SetValue(Value + steps * (fine ? Step / 10 : Step), true);
+        }
 
         // ------------------------------------------------------------------ paint
         protected override void PaintControl(Sprite s)
@@ -384,7 +402,7 @@ namespace Sr2d64CSport
     }
 
     /// <summary>Look of a <see cref="SpriteWheel"/>.</summary>
-    internal enum WheelStyle { Detailed, Flat }
+    public enum WheelStyle { Detailed, Flat }
     /// <summary>How a <see cref="SpriteWheel"/> lets the user type a value.</summary>
-    internal enum WheelEdit { None, Beside, DoubleClick, Click }
+    public enum WheelEdit { None, Beside, DoubleClick, Click }
 }

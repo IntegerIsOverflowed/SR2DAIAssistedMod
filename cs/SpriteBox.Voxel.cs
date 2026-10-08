@@ -9,10 +9,10 @@ using Timer = System.Windows.Forms.Timer;   // ImplicitUsings also brings System
 namespace Sr2d64CSport
 {
     /// <summary>Camera presets of a <see cref="VoxelBox"/>.</summary>
-    internal enum VoxelCameraView { Free, Isometric, ThreeQuarter, TopDown, Side }
+    public enum VoxelCameraView { Free, Isometric, ThreeQuarter, TopDown, Side }
 
     /// <summary>What the left mouse button does on a <see cref="VoxelBox"/>.</summary>
-    internal enum VoxelDragMode
+    public enum VoxelDragMode
     {
         /// <summary>Left drag orbits (yaw / pitch), middle drag or Space + left pans, wheel zooms, right click = menu (default).</summary>
         Orbit,
@@ -23,7 +23,7 @@ namespace Sr2d64CSport
     }
 
     /// <summary>Data of <see cref="VoxelBox.VoxelClick"/> / <see cref="VoxelBox.VoxelHover"/>: which voxel and face is under the pointer.</summary>
-    internal sealed class VoxelHitEventArgs : EventArgs
+    public sealed class VoxelHitEventArgs : EventArgs
     {
         public readonly int Index, Face, X, Y, Z; public readonly MouseButtons Button; public readonly Point Client;
         public bool Hit => Index >= 0;
@@ -47,7 +47,7 @@ namespace Sr2d64CSport
     /// the settings each frame; <see cref="CameraChanged"/> lets you tweak it (light direction, shade tables) before use.
     /// </summary>
     [ToolboxBitmap(typeof(VoxelBox), "VoxelBox.bmp")]
-    internal class VoxelBox : SpriteBox
+    public class VoxelBox : SpriteBox
     {
         VoxelGrid? _grid; bool _ownsGrid;
         VoxelCameraView _view = VoxelCameraView.Free; int _turn; float _yaw = 0.8f, _pitch = 0.55f, _panX, _panY, _zoom = 4f;
@@ -259,7 +259,7 @@ namespace Sr2d64CSport
         {
             base.OnMouseDown(e);
             Focus();
-            if (e.Button == MouseButtons.Right) { if (_menuEnabled) { Menu.Show(this, e.Location); } return; }
+            if (e.Button == MouseButtons.Right) { if (_menuEnabled) { Menu.Show(this, e.Location, e.Button); } return; }
             Drag d = Drag.None;
             if (e.Button == MouseButtons.Middle) d = _dragMode == VoxelDragMode.Pan ? Drag.Orbit : Drag.Pan;
             else if (e.Button == MouseButtons.Left)

@@ -25,7 +25,7 @@ namespace Sr2d64CSport
     /// its transform changes (the composite is transform-independent) - changing the angle every
     /// frame costs one warp, nothing else.
     /// </summary>
-    internal sealed class SpriteTransform
+    public sealed class SpriteTransform
     {
         float x, y, scaleX = 1f, scaleY = 1f, angle, pivotX = -1f, pivotY = -1f, opacity = 1f;
         Matrix3x2 matrix = Matrix3x2.Identity;
@@ -207,7 +207,7 @@ namespace Sr2d64CSport
     }
 
     // ------------------------------------------------------------------------------ Sprite.DrawTransformed
-    internal unsafe partial class Sprite
+    public unsafe partial class Sprite
     {
         [ThreadStatic] static Effects? transformFx;
 

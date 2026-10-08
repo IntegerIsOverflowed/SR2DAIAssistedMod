@@ -26,14 +26,14 @@ namespace Sr2d64CSport
     // ------------------------------------------------------------------------
 
     /// <summary>Stroke line cap.</summary>
-    internal enum VectorCap : byte { Butt, Round, Square }
+    public enum VectorCap : byte { Butt, Round, Square }
     /// <summary>Stroke line join.</summary>
-    internal enum VectorJoin : byte { Miter, Round, Bevel }
+    public enum VectorJoin : byte { Miter, Round, Bevel }
     /// <summary>What a gradient does outside 0..1.</summary>
-    internal enum VectorSpread : byte { Pad, Reflect, Repeat }
+    public enum VectorSpread : byte { Pad, Reflect, Repeat }
 
     /// <summary>How a shape is painted: <see cref="VectorColor"/> or <see cref="VectorGradient"/>; null = not painted.</summary>
-    internal abstract class VectorPaint
+    public abstract class VectorPaint
     {
         public abstract VectorPaint Clone();
     }
@@ -51,7 +51,7 @@ namespace Sr2d64CSport
     }
 
     /// <summary>One gradient stop: offset 0..1 and colour.</summary>
-    internal struct VectorStop
+    public struct VectorStop
     {
         public float Offset; public int Argb;
         public VectorStop(float offset, int argb) { Offset = offset; Argb = argb; }
@@ -62,7 +62,7 @@ namespace Sr2d64CSport
     /// space - or, with <see cref="ObjectBoundingBox"/>, given as fractions (0..1) of the shape's bounding box (SVG default).
     /// Radial: circle (Cx,Cy,R) with focal point (Fx,Fy) and optional focal radius Fr - also covers PDF's two-circle shadings.
     /// </summary>
-    internal sealed class VectorGradient : VectorPaint
+    public sealed class VectorGradient : VectorPaint
     {
         public bool Radial;
         public float X1, Y1, X2, Y2;                      // linear: start / end
@@ -98,7 +98,7 @@ namespace Sr2d64CSport
     /// A path: sub-paths of straight and cubic Bézier segments in absolute coordinates. Quadratics and arcs are converted on
     /// entry (<see cref="QuadTo"/>, <see cref="ArcTo"/>), so renderers only see Move / Line / Cubic / Close.
     /// </summary>
-    internal sealed class VectorPath
+    public sealed class VectorPath
     {
         internal enum K : byte { Move, Line, Cubic, Close }
         internal readonly List<K> Kinds = new List<K>();

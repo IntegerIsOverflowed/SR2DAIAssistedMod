@@ -26,12 +26,16 @@ struct SR2D_FxStage
     int32_t        mw, mh;    // its size
     int32_t        pad[2];
 };
+static_assert(sizeof(SR2D_FxStage) == 80,    "SR2D ABI: SR2D_FxStage drifted (must be 80 bytes; mirror: Effects.Stage in C#)");
+static_assert(alignof(SR2D_FxStage) == 8,    "SR2D ABI: SR2D_FxStage alignment drifted (must be 8)");
 
 // One voxel (8 bytes, mirrored by Voxel in C#). A == 0 -> empty cell, anything else -> opaque.
 // emit 0..15 = light emission strength (colour = the voxel colour), mat/user = free data.
 struct SR2D_Voxel { uint32_t argb; uint8_t emit; uint8_t mat; uint16_t user; };
+static_assert(sizeof(SR2D_Voxel) == 8,       "SR2D ABI: SR2D_Voxel drifted (must be 8 bytes; mirror: VoxelGrid.Voxel in C#)");
 
-// VOXEL_RENDER input (224 bytes; mirrored by VoxelGrid.Scene in C#). See sr2d_voxel.inl.
+// VOXEL_RENDER input (232 bytes; v2 was 224, v1 208 - zero the appended fields for the older behaviour;
+// mirrored by VoxelGrid.Scene in C#). See sr2d_voxel.inl.
 struct SR2D_VoxelScene
 {
     const SR2D_Voxel* vox;     // gw*gh*gd voxels, index = (z*gh + y)*gw + x   (x east, y north, z up)
@@ -60,12 +64,18 @@ struct SR2D_VoxelScene
     const float* lampLut;      // light level 0..15 -> brightness for the LAMP channels (NULL = lut); lets lamps and sky
                                // be scaled separately ("lamp energy" vs "sky energy")
 };
+static_assert(sizeof(SR2D_VoxelScene) == 232, "SR2D ABI: SR2D_VoxelScene drifted (must be 232 bytes; mirror: VoxelGrid.Scene in C#)");
 #define SR2D_VOX_KEEP_ALPHA  1  // write the voxel alpha instead of 255
 #define SR2D_VOX_FADE_Z      2  // depth fade along grid z: brightness 1 at the top slab (gd-1) -> fadeMin at z = 0
 #define SR2D_VOX_FADE_VIEW   4  // depth fade along the view direction: 1 at the nearest grid corner -> fadeMin at the farthest
                                 // (both may be set; the factors multiply. Applied after the lighting tier, before writing.)
 #define SR2D_VOX_FADE_COLOR  8  // fade towards fadeColor (fog) instead of towards black
 
+// ABI handshake: SR2D_ABI_VERSION() (exported below the op list) returns SR2D_ABI. Bump it whenever the
+// SR2D_OPS list, an op-word encoding or a mirrored struct layout changes - cs/SR2D.cs refuses to run
+// against a native library that reports a different number (a stale SR2D64.dll otherwise loads and
+// silently draws garbage).
+#define SR2D_ABI 1
 #define SR2D_OPS(X) \
 /* ---- misc ------------------------------------------------------------ */ \
 X(void, MOVSD_,        (int* src, int* dst, int dwcnt), (src, dst, dwcnt)) \
@@ -303,6 +313,15 @@ X(int,  VOXEL_FLOOD,   (const void* vox, int gw, int gh, int gd, int x, int y, i
 //                          SR2D_FXF_DIFFUSE_DARKEN / _LIGHTEN keep the per-channel darker /
 //                          lighter of the original and the picked pixel ("Darken Only" /
 //                          "Lighten Only" in Photoshop). Margin = radius * passes.
+//     SR2D_FX_MOTION       motion blur: the picture is averaged over i[0] samples (2..64, the
+//                          first sits ON the pixel) along a trail. Linear trail (i[1] = 0):
+//                          f[0] = direction in degrees (0 = +x, 90 = down), f[1] = trail length
+//                          in px - the last sample sits that far from the pixel. Custom path
+//                          (i[1] = point count 2..32): map = i[1] float pairs (x, y) of relative
+//                          trail offsets in px, walked uniformly and scaled by f[1] (strength;
+//                          1 = the points as given). Sampling bilinear, SR2D_FXF_SAMPLE_NEAREST
+//                          / _BICUBIC override (as the distortions). Margin = the trail extent
+//                          + the tap support.
 //     Any stage            flags SR2D_FXF_DISABLED = skipped (and adds no margin).
 #define SR2D_FX_POST     8
 #define SR2D_FX_PREMUL   16
@@ -314,6 +333,7 @@ X(int,  VOXEL_FLOOD,   (const void* vox, int gw, int gh, int gd, int x, int y, i
 #define SR2D_FX_MORPH        5
 #define SR2D_FX_SHADOW       6
 #define SR2D_FX_DIFFUSE      7
+#define SR2D_FX_MOTION       8
 #define SR2D_FX_WAVE        0
 #define SR2D_FX_RIPPLE      1
 #define SR2D_FX_NOISE       2
@@ -386,7 +406,9 @@ enum { SR2D_SIMD_SSE2 = 1, SR2D_SIMD_AVX2 = 2 };
 // LERP_MASK8: dst = lerp(dst, src, mask / 255) over a w x h rect (commit through a selection).
 
 // VOXEL_FACES: faces[i] = 0x40 for a solid cell | bits 0..5 for its exposed sides (+X -X +Y -Y
-//   +Z -Z: the neighbour is empty or outside the grid). Returns the number of exposed voxels.
+//   +Z -Z: the neighbour's alpha is lower than the cell's own - empty or outside counts as 0, so
+//   opaque-on-opaque and equal-alpha (the inside of a uniform glass block) stay hidden).
+//   Returns the number of exposed voxels.
 // VOXEL_LIGHT: Minecraft-style light propagation. light[i] = sky<<24 | r<<16 | g<<8 | b, each
 //   byte = level * 8 (fixed point 1/8 levels, 0..120 = level 0..15). Open-sky columns get
 //   skyLevel from the top down to the first solid, emitters seed their colour scaled by emit,
@@ -394,9 +416,10 @@ enum { SR2D_SIMD_SSE2 = 1, SR2D_SIMD_AVX2 = 2 };
 //   one level per cell, the Minecraft rule: a full lamp reaches 15 cells; 4 -> 30 cells, 2 ->
 //   60, 1 -> 120 - the cost grows with the lit volume). flags bit 0: sky enters from the sides.
 //   Solid cells keep their own emission. Returns lit cells, -1 = out of memory.
-// VOXEL_RENDER: draws the grid into dst (Paint, alpha 255) with the projection / lighting of
-//   'scene'; pick (stride dw, may be NULL) receives the voxel index of every written pixel.
-//   Returns voxels drawn. See sr2d_voxel.inl for the algorithm.
+// VOXEL_RENDER: draws the grid into dst with the projection / lighting of 'scene'; opaque voxels
+//   write Paint (alpha 255), translucent ones (alpha 1..254) composite over what is behind them
+//   (straight-alpha over with their own alpha, alpha channel included - KEEP_ALPHA stamps instead). pick (stride dw, may be NULL) receives the voxel index of
+//   every written pixel. Returns voxels drawn. See sr2d_voxel.inl for the algorithm.
 // VOXEL_FLOOD: 3-D flood fill region finder (the voxel analogue of FLOOD_MASK). Writes 1 into
 //   mask (one byte per cell, cleared first) for every cell connected to the seed (x, y, z) that
 //   matches it: empty matches empty; solid matches solid with max channel difference <= tol

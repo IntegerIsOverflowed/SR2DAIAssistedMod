@@ -15,6 +15,7 @@ rem ============================================================================
 setlocal
 cd /d "%~dp0"
 set "ROOT=%CD%"
+
 set "TOOLSET=ClangCL"
 if /i "%~1"=="msvc" set "TOOLSET=v145"
 if /i "%~2"=="msvc" set "TOOLSET=v145"
@@ -149,6 +150,14 @@ if "%FAILED%"=="0" echo  RESULT: BUILD OK - run %BENCH_EXE%
 if not "%FAILED%"=="0" echo  RESULT: BUILD FAILED - see the step^(s^) marked FAILED above
 echo ============================================================================
 echo.
+rem start the demo on request - only when the script runs in its own console (double-click),
+rem never inside build-and-test.bat or other callers
+if not "%FAILED%"=="0" goto :maybe_pause
+if not defined BENCH_EXE goto :maybe_pause
+echo %cmdcmdline% | find /i "%~0" >nul || goto :maybe_pause
+choice /c YN /n /m "Start the demo now? [Y/N] "
+if not errorlevel 2 start "" "%BENCH_EXE%"
+:maybe_pause
 if /i "%~1"=="nopause" goto :end
 if /i "%~2"=="nopause" goto :end
 rem pause only when started by double-click (the console would vanish otherwise)

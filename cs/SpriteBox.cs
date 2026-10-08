@@ -32,7 +32,7 @@ namespace Sr2d64CSport
     /// (immediate blit, no message round-trip, Render not involved).
     /// </summary>
     /// <summary>Argument of <see cref="SpriteBox.Render"/>: the surface to draw into (already the right size).</summary>
-    internal sealed class RenderEventArgs : EventArgs
+    public sealed class RenderEventArgs : EventArgs
     {
         public RenderEventArgs(Sprite surface) : this(surface, Rectangle.Empty) { }
         public RenderEventArgs(Sprite surface, Rectangle clip) { Surface = surface; ClipRectangle = clip; }
@@ -49,7 +49,7 @@ namespace Sr2d64CSport
 
     [DefaultEvent(nameof(Render))]
     [ToolboxBitmap(typeof(SpriteBox), "SpriteBox.bmp")]
-    internal partial class SpriteBox : Control
+    public partial class SpriteBox : Control
     {
         private Sprite? _surface;
         private bool _dirty = true;
@@ -243,7 +243,9 @@ namespace Sr2d64CSport
 
         /// <summary>
         /// Immediate present of the current surface contents, bypassing the message queue.
-        /// For game loops: draw into <see cref="Surface"/>, then Present().
+        /// For game loops: draw into <see cref="Surface"/>, then Present(). Present consumes the SURFACE
+        /// pixels; it never consumes a pending renderer frame - a _dirty set by <see cref="Redraw"/> stays
+        /// set until the paint path runs the renderer, so Redraw() + Present() cannot drop the frame.
         /// </summary>
         public void Present()
         {
@@ -251,16 +253,15 @@ namespace Sr2d64CSport
             ContentChanged();                                    // whoever drew into Surface: the view's caches are stale
             if (!IsHandleCreated || !Visible)
             {
-                // Window not on screen yet (e.g. called from the form constructor): keep the
-                // surface content and let the first WM_PAINT show it instead of dropping it.
-                _dirty = false;
+                // Window not on screen yet (e.g. called from the form constructor): keep the surface
+                // content AND any pending render - the first WM_PAINT shows both (OnPaint renders _dirty).
                 Invalidate();
                 return;
             }
             IntPtr hdc;
             try { hdc = GetDC(Handle); }
-            catch (DllNotFoundException) { _dirty = false; Invalidate(); return; }   // no GDI/user32 on this platform (a Linux
-            catch (EntryPointNotFoundException) { _dirty = false; Invalidate(); return; }   // headless runner): paint via WM_PAINT
+            catch (DllNotFoundException) { Invalidate(); return; }   // no GDI/user32 on this platform (a Linux
+            catch (EntryPointNotFoundException) { Invalidate(); return; }   // headless runner): paint via WM_PAINT (a pending render runs there)
             if (hdc == IntPtr.Zero) return;
             try
             {

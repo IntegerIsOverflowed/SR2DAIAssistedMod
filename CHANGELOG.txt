@@ -16,6 +16,1457 @@ Conventions
   DOCS     README / comments only
 
 
+2026-10-08  FeatureDemo / apps / template removed - EmptySR2DFormTemplate is the template
+------------------------------------------------------------------------------------------------------------
+  CHANGED  FeatureDemo/, apps/SpriteBox/ and template/SR2DApp are REMOVED (user order - the empty
+           SpriteForm template replaces the app template and the demo apps are not shipped with the
+           repo). Nothing in the engine or the demo changes. build-and-test.sh builds demo (both
+           ImplicitUsings modes) + EmptySR2DFormTemplate as the managed app gates (20 now, was 23),
+           build-and-test.bat drops the template/ build for EmptySR2DFormTemplate, projchk checks the
+           empty template's file set and csproj wiring, README lost the three sections and the rows.
+
+2026-10-08  the darkening plate hugs the text's INK (Sprite.MeasureTextInk); extra width / height replace the inflate
+------------------------------------------------------------------------------------------------------------
+  ADDED    Sprite.MeasureTextInk (cs/Sprite.Text.cs) - where a text's INK sits, as DrawText would draw
+           it: a rectangle relative to the draw origin, from the first to the last set pixel / row.
+           The advance box MeasureText returns starts where a leading space starts and keeps the
+           inter-glyph gaps; the plate (and anything that has to hug text) wants the pixels the eye
+           sees. The text is rendered once into a scratch surface and scanned - exact by construction,
+           for the pixel font, its weight and the fallback glyphs alike. Sprite.InkBounds is the
+           reusable scan underneath.
+  FIXED    the darkening plate was sized from the ADVANCE box: with the template's " Test form..."
+           caption it started ~5 px left of the T (the leading space's advance) and ended at the drop
+           shadow's last pixel. The plate is aligned to the ink now (BehindTitle = the caption's ink,
+           BehindAllText = the ink of the caption plus every extra text), vertically to the ink rows.
+  CHANGED  TitleDarkenInflate is replaced by TitleDarkenExtraWidth + TitleDarkenExtraHeight - how much
+           WIDER / TALLER than the ink the plate is, per side (left + right / top + bottom).
+  FIXED    the feather came out as "glitchy dark stripes": the edge ramp multiplied a PRE-SHIFTED
+           alpha int, which overflowed the 32 bits. The ramp multiplies the alpha byte now, the corner
+           pixels take the product of both ramps (a real separable 9-patch), and feather 0 / 0 adds
+           exactly nothing - the plate is the ink plus the extras, to the pixel.
+  TESTS    ctlrun +7 pins (340 total): the ink of "T" starts at its first set pixel, the advance box
+           runs past a dot's ink, a trailing space does not widen the ink, a leading space shifts it by
+           its advance, "H" spans the full glyph height, weight widens the ink by its px, only spaces =
+           no ink.
+
+2026-10-08  SpriteForm rework: the colour properties are real Color (the native designer cell); the title
+            darkening is a feathered plate sized to the text
+------------------------------------------------------------------------------------------------------------
+  CHANGED  the SpriteForm colour properties (TitleBarColor, TitleTextColor, TitleTextShadowColor,
+           BorderColor) and TitleTag's Color / ShadowColor are System.Drawing.Color now - a Color-typed
+           property gets the NATIVE WinForms designer cell for free: the swatch rectangle, the colour's
+           name or [A=, R=, G=, B=] values, and the drop-down arrow with the Custom / Web / System pages,
+           exactly like BackColor. This replaces the int + ArgbColorConverter / ArgbColorEditor approach
+           that never really matched the native cell; ArgbColorEditor is removed, ArgbColorConverter stays
+           as the palette-list parser (StripeColorList / StripeColors are untouched, the array form stays
+           the palette's property). The properties serialize as Color.FromArgb(...) in InitializeComponent
+           and each carries Reset / ShouldSerialize for its default. COMPAT: code that set these as ints
+           (TitleBarColor = -12763843) writes Color.FromArgb(-12763843) now; TitleTag's constructors take
+           Color - wrap the old int literal in Color.FromArgb(...).
+  CHANGED  the title darkening is reworked from "dim the bars under the text" (TitleBarsDarken
+           None / Smooth / PerStripe with Strength / Feather / FeatherV / Height, which altered the bar
+           colours) to a darkening PLATE: a black rectangle BEHIND the covered texts, sized to their pixel
+           run and glyph rows, inflated around them and feathered at the edges. New API: TitleDarkenMode
+           (None / BehindTitle / BehindAllText - the plate spans the caption, or the caption plus every
+           extra title text), TitleDarkenInflate (px around the text, every side), TitleDarkenFeatherWidth
+           (px the left / right edges fade over), TitleDarkenFeatherHeight (px the top / bottom edges fade
+           over), TitleDarkenOpacity (0..100 %). Drawn after the bars and before the icon and the texts;
+           the old per-bar / band dimming paths (DrawBars' second pass, DimUnderText, DarkenBand,
+           DarkenVRamp, BlendToBlack) are gone - DrawBars paints the bars as they are. COMPAT:
+           TitleTextDarken* properties do not exist any more.
+  UPDATED  EmptySR2DFormTemplate to the user's cleaned rearrangement (the four test controls are gone,
+           stripe bars 12 px) with the new plate knobs set (BehindTitle, inflate 5, feather 3 / 3,
+           opacity 60); FeatureDemo's host form uses the new API; the demo's title tags pass Color.
+
+2026-10-08  warning-free restored: the five API-shape rules tuned in .editorconfig; the gate now enforces it
+------------------------------------------------------------------------------------------------------------
+  FIXED    the first build_release.bat run after the merge surfaced 163 analyzer warnings on Windows
+           (326 instances here): CA1051 / CA1725 / CA1720 / CA1708 / CA2211 - all five fire on the
+           engine's DELIBERATE API shape (public fields that ARE the API and its perf model, the
+           Ptr / PTR native-ABI naming pairs, the house-style override parameter names, the engine-wide
+           config statics) and were overlooked in the 2026-09-23 audit. Renaming / encapsulating would
+           break source compatibility, so the rules are tuned to none in .editorconfig's "deliberate"
+           section with the reasons written next to them, exactly like the audit's own entries. The demo
+           builds warning-free again in both ImplicitUsings modes.
+  CHANGED  build-and-test.sh: the demo / template / SpriteBox / EmptySR2DFormTemplate / FeatureDemo
+           builds go through buildwarn - the step FAILS on any warning line now (allowlisted: the
+           intentional "SR2D64.dll not found" advisory and the benign MSB3539). My earlier checks
+           grepped only `warning CS`, which is how the CA rules slipped through - the gate cannot
+           anymore.
+
+2026-10-08  workspace merge: the Windows dump's rounds six-thirteen adopted (the chrome rewrite, the
+            second demo app, the new runners); two headless pins made environment-safe
+------------------------------------------------------------------------------------------------------------
+  ADDED    everything from SR2Dlastdump is in the tree: cs/SpriteForm.cs rewritten as ONE TitleBarStrip
+           control (background + colour bars + icon + caption + tags rendered into a single cached
+           Sprite; only the three caption buttons are children - nothing a sibling can cover and no
+           Controls.Clear can dispose the bar's parts; bar.SendToBack() keeps it behind app content),
+           the full stripe knob set (StripeMode / StripeBarWidth / StripeBarCount / StripeStyle /
+           StripeSkew / StripeColors / StripeColorList / StripeBarsAlign / StripesBehindText), per-tag
+           shadow on/off + shadow colour, the icon slot with the engine-side resample, cs/ChromeDesign.cs
+           (ArgbColorConverter: the swatch cell, the drop-down and the parse spellings for int ARGB
+           properties), form -> control colour inheritance (IControlFaceSource +
+           ShouldSerializeBackColor / ResetBackColor), demo/OutputDemo.cs (the output bench strip),
+           the FeatureDemo app with its three photographed shot sets, EmptySR2DFormTemplate, the
+           legacybench / outbench runners and SpriteForm-fixes.txt (the log of the rounds). The work's
+           own changelog entries (2026-10-06..08 below) are kept verbatim - they are the details.
+  FIXED    tests/cs/legacybench/legacybench.csproj: the two engine-DLL <None> copies carry
+           Condition="Exists" now - a Linux checkout has no native/bin/x64/SR2D64.dll and the build
+           gate died on MSB3030 (on Windows both DLLs exist, so the condition changes nothing there).
+  TESTS    ctlrun: the dialog Esc pins stub SpriteColorPicker.ScreenSampler (headless Linux has no
+           desktop to grab: BeginPick laid itself down through its own error path and the first Esc
+           legally cancelled the dialog - the pins never ran on the dump's machine because ctlrun stops
+           at the first FAIL); Fonts() skips the real-font section when none of the candidate families
+           resolves + bold (that was the known-red pin on Windows, hiding every pin after check 163
+           there). Linux: 333 ok, 0 fail.
+  CHANGED  build-and-test.sh: outbench / legacybench join the runner builds, EmptySR2DFormTemplate and
+           FeatureDemo join the app gates - 23 gates now. Not adopted from the dump: build outputs,
+           .vs caches, .csproj.user files, the stray 'tests/cs/blur/--nologo' file, Thumbs.db and the
+           run artifacts (*.raw / *.vox).
+
+2026-10-08  Round thirteen: a SECOND demo app, built from nothing, whose whole design goal is that
+            adding the 24th example cannot inherit anything from the 23rd and cannot leave its panel
+            on a 1920x1080 desktop - plus the two control bugs it found in cs/ on the way
+------------------------------------------------------------------------------------------------------------
+  ADDED    FeatureDemo/ (SR2DFeatureDemo.csproj -> SR2DFeatureDemo.exe): .NET 10 WinForms, x64,
+           every SR2D control and engine verb shown once, on screen, with its own knobs and a live
+           fps / frame-ms readout. Nothing was copied from demo/: the C# sources are compiled in
+           from ..\cs (so it always demonstrates the current engine), SR2D64.dll is copied beside
+           the exe, and the pixel font is the default and only UI font at an integer scale.
+           23 features in three groups - Engine (blit ops, blend modes, scaling and filters,
+           rotation and pivot, pixel font, shapes and strokes, masked/keyed draw, SpriteBox
+           surfaces, fill rate), Effects (chain, stage order and PRE/POST, colour grade, shadow /
+           glow / outline, motion blur routes, warp from a map), Controls (buttons and progress,
+           the five value widgets, text / combo / list, containers, colour picker, curve editor,
+           text view, voxels).
+  ADDED    The expandability contract (FeatureDemo/Feature.cs, documented at the top of that file):
+           a feature is ONE Features.With<T>(...) call - id, group, title, summary, API line, docs,
+           a knob callback and a scene callback - and its state is a private class T that the
+           framework constructs when the feature is selected and drops when it is not. That is the
+           structural answer to "new tests inherited elements from the previous test": the only
+           thing two features can share is the immutable textures in Stock, and a duplicate id
+           throws at registration instead of shadowing silently. Knob placement, sizing, clamping,
+           the scroll host and disposal belong to KnobStack + FeatureCtx; a feature never sets a
+           Location or parents a control.
+  ADDED    Two gates that make "it fits my monitor" a measured claim rather than a hope:
+           SR2DFeatureDemo.exe --shots <dir> photographs the REAL window (chrome, nav, canvas,
+           knobs) per feature into NNN_<id>.png + manifest.tsv with colors / ink / hash and an
+           OK / WARN / BLANK / NOIMAGE verdict, and --fitcheck lays every feature out at
+           1024x768, 1366x768, 1920x1080 at 100 %, 1920x1080 at 200 % and 2048x1536 at 175 % -
+           through --size / --ui-scale, so a one-monitor machine measures the other one - and
+           walks the control tree recursively, naming anything outside its parent (a control two
+           levels down inside a tab page included), and naming which features needed the knob
+           column's scroll host. Current result: 0/23 overflow at every size, and 1/23
+           (controls-containers, which shows a stack panel, a tab control and a group box at once)
+           taking the scroll host at the three short profiles - the designed behaviour, not an
+           overflow. Both shot sets are checked in (FeatureDemo/shots-b, shots-1080).
+  ADDED    Every size in the app comes from one place (FeatureDemo/Ui.cs) in DEVICE pixels: the
+           window is Ui.Fit(workingArea, tex) = 88 % x 86 %, capped and floored around the column
+           minimums, a text row is Cell(tex) = 8/16/24/32 px, and the form is AutoScaleMode.None
+           with HighDpiMode.SystemAware because the engine both renders and hit-tests in device px.
+           Measured here: 1802x1160 window on this 2048x1536 @ 175 % screen, 1680x929 at
+           1920x1080 @ 100 % - the same layout, not a scaled screenshot.
+  FIXED    cs/SpriteControls.Static.cs - SpriteLabel.AutoSize never re-fitted when TextScale
+           changed: OnTextScaleChanged repainted but kept the box measured for the old scale, so
+           an auto-sized caption was clipped by half after switching the UI to 2x. It now calls
+           Fit() first (the box is measured in the text scale, so a new scale is a new size).
+  FIXED    cs/SpriteControls.Text.cs, cs/SpriteControls.cs, cs/SpriteControls.Static.cs,
+           cs/SpriteControls.Input.cs - ControlText.FitText measured the elided string at weight 0
+           while bold captions draw at weight >= 1 (a bold glyph is a pixel wider each), so a
+           "fitted" bold label still overflowed its box and got cut mid-glyph with no ellipsis.
+           FitText gained an int weight parameter (defaulted, so existing calls are unchanged) and
+           the two weight-bearing call sites pass it: SpriteLabel's ellipsis path and the group
+           header of SpriteListBox. Proved before fixing by cropping a shot 2x: the feature demo's
+           head title rendered as "Buttons, toggles, radios, progre" and now ends "progr...".
+  DEMO    FeatureDemo/HostForm.cs also fixes what the first shots showed: a valued option now
+           accepts both --name value and --name=value (the help printed a form the parser
+           rejected), ctx.Say drops a line identical to the one before it instead of stacking
+           three copies, a note in the knob column is actually wrapped into the column (it was
+           measured wrapped and drawn unwrapped, which read as text running off the panel), the
+           docs head says when it is cut instead of stopping, and the container examples size
+           their children before handing them to the framework (KnobStack.Full snapshots the
+           height, so setting it afterwards did nothing).
+  DOCS    FeatureDemo/README.md (build, CLI, keys, the sizing derivation with the measured
+           fit-check table, the add-a-feature contract with a worked example, the file map, the
+           verification commands and what each manifest status means), a "Feature demo" section and
+           a coverage row in README.md.
+  COMPAT  The only engine change is the optional weight parameter on ControlText.FitText and the
+           protected wrapper on SpriteControlBase - source and binary compatible for callers, and
+           demo/SR2DDemo.csproj rebuilds clean against it (0 errors; a --no-incremental build of it
+           still reports exactly the pre-existing cs/ analyzer baseline - 278 CA1051, 24 CA1725,
+           14 CA1720, 6 CA1708, 4 CA2211 - so nothing new was introduced). FeatureDemo is a
+           separate project: nothing existing references it, and the demo/ app is untouched. Its
+           csproj suppresses six rules for the ..\cs sources it compiles (CA1051, CA1725, CA1708,
+           CA1720, CA2211, CA2213) with the reason for each written next to the line; a
+           --no-incremental build of the demo itself is 0 warnings / 0 errors.
+
+2026-10-08  Round twelve: the question "does the new output control cost performance?" turned
+            into a measurement (a four-pane bench in the demo, an off-screen twin in tests/, and
+            the ORIGINAL native DLL rebuilt and timed against the current one), and the canvas
+            height that a strip test was stealing from every test after it
+------------------------------------------------------------------------------------------------------------
+  DEMO    New test "Output paths: raw blit vs SpriteBox" (demo/OutputDemo.cs, registered in
+          demo/Tests.cs in the "Original API" group, FIRST, before "Draw (Op selector)"). It
+          answers how much the newer way of putting pixels on the window costs against the
+          original one by drawing ONE AND THE SAME scene four ways side by side, each pane with
+          its own stopwatch and its own milliseconds written into its own picture: 1 = a stock
+          PictureBox driven the original way (GetDC -> Sprite.PaintToDevice(HandleRef) ->
+          ReleaseDC), 2 = a SpriteBox driven by RedrawNow() (the Render event paints its Surface,
+          Present() blits it - the game-loop route, no message round trip), 3 = a SpriteBox
+          driven the way a WinForms app drives it (Redraw() -> WM_PAINT -> Render -> blit), 4 = a
+          SpriteBox in SizeMode Zoom at 200 % with the bilinear filter, i.e. the same surface
+          resampled on every present. The strip's knobs: "Copies" (how many Sprite.Draw calls the
+          scene makes) and "GDI DIB buffers" (every buffer at once, DIB section = one BitBlt per
+          present against plain buffer = SetDIBitsToDevice, so the four panes stay comparable).
+          The button opens a borderless FULLSCREEN plain native Form that runs ONE route alone,
+          unthrottled, with the real frame rate on screen (Tab cycles the route, Left / Right
+          change Copies, G switches the buffers, a click or Esc closes it); while it is up
+          MainForm.Frame() renders nothing, so the fullscreen is the only thing on the screen.
+          Measured here (640x480 scene, 200 copies, two independent runs of the same binary, this
+          box moves +-25 %): raw 0.267 ms hidden / 0.634 ms shown, SpriteBox + Present() 0.277 /
+          0.507, SpriteBox through WM_PAINT 0.350 / 0.654, SpriteBox view (2x bilinear resample)
+          0.790 / 1.059. So the control itself is free - a SpriteBox presented 1:1 costs what the
+          hand-written GetDC blit it replaces costs, and WM_PAINT adds only the message round
+          trip - and the SizeMode resample is the 1.7 - 3x, because it writes every destination
+          pixel through Sprite.DrawScaled instead of copying the block.
+  FIXED   Every demo test after the first CONTROL-STRIP test was photographed one strip-height
+          too short (1380x984 instead of 1380x1276, i.e. 292 px of picture gone). Two defects
+          stacked up: demo/MainForm.cs ShowStrip() refitted the canvas only when the strip row
+          APPEARED, so the height the row gave back on hide was never handed to the canvas
+          sprite; and the refit lives in a 150 ms resize timer, which the --shots loop (one
+          Application.DoEvents() per test) never gets. RebuildCanvas() is now called on both
+          transitions and synchronously inside RunShots after the selection is pumped. The
+          demoshots20 sweep confirms it: the movers left are the height correction itself (four
+          tests gain their picture back) plus the known sub-pixel / timing movers.
+  FIXED   OutputDemo's own measurement honesty, found while reading its first shots. A route that
+          never ran used to print "draw 0.000 + blit 0.000 ms" and "1000000 fps if this route ran
+          alone": a zero-size or asset-less frame now returns FALSE from Scene() and is not
+          sampled at all, the readouts gate on the pane's DrawFrames ("measuring ..." until the
+          route has actually painted), and the frame count is printed while the average is still
+          short. The raw pane also reported 0.490 ms against the boxes' 0.239 ms for the SAME
+          scene, because the first frame of a new asset set pays BuildSprites() into an average
+          that never lets go - the EMAs now restart when the assets change. Route 2 briefly used
+          Redraw() + Present(), which queues a paint message Present() does not consume, so the
+          pane re-blitted once per frame for free and the figure was not the route's; it is
+          RedrawNow() now. A headless --shots capture has no frame source of its own, so the
+          canvas lambda catches the panes up to a warm average instead of photographing frame 1.
+  TESTS   tests/cs/outbench - the same four routes with no window furniture to argue about:
+          per-variant render ms and present ms, a non-background pixel check that FAILS the run
+          (exit 1) if any path drew nothing, --noshow to park the window off screen (a hidden
+          window still owns a real HDC; a MINIMISED one does not, and SpriteBox.Present()
+          silently falls back to Invalidate() when the control is not Visible - that is how a
+          table of clean zeros gets published), --frames / --copies / --w / --h for the workload.
+          Its render / present split, three runs of 180 frames each on this box: the 1:1 SpriteBox
+          present is 9.8 - 12.1 ms against the raw blit's 11.4 - 15.0 ms (the same BitBlt, so the
+          same money), WM_PAINT 27.8 - 32.2 ms (about 16 - 21 ms of message round trip on top),
+          the view SizeMode 117 - 124 ms (about 106 - 114 ms of resample).
+          tests/cs/legacybench - the ORIGINAL engine: legacy/original-engine/*.cpp compiled
+          UNCHANGED by build_native.bat (MSVC, /LD /O2 /MT) into SR2DOLD64.dll with the same 54
+          export names, bound by a second copy of the managed layer (legacybind/, namespace
+          OrigEngine), and run against the current DLL on the workloads both export (Draw Paint /
+          AlphaBlend / AlphaTest, DRAW_ROT, RESIZE, CLEAR_C, BLEND, plus a 40-sprite frame
+          simulation). Every common-kernel row asserts the two surfaces have the same pixel hash
+          BEFORE printing a timing, so the rows compare identical work. On this box (AMD FX-4300,
+          no AVX2 - the current engine ran its SSE2 tier), medians of 5 passes / best of 3 runs,
+          us per call: Draw Paint 256x256 23.0 -> 15.3 (0.67x), AlphaBlend 258.8 -> 52.2 (0.20x),
+          AlphaTest 83.7 -> 22.6 (0.27x), DRAW_ROT 324.7 -> 220.3 (0.68x), RESIZE 256->512 12475
+          -> 2076 (0.17-0.24x), BLEND k=128 339.0 -> 36.7 (0.11x), CLEAR_C over 1280x800 381 ->
+          418 (parity, it was memory-bandwidth bound then and is now), one simulated frame
+          5349 -> 2302 (0.43x). Nothing the rewrite did made a common kernel slower by more than
+          this machine's noise. Kernels the original never had print n/a for the old side.
+  TESTS   tests/cs/benchrun (the headless test-body runner) compiled demo/Tests.cs but not the
+          new demo/OutputDemo.cs, so the whole runner broke on the new test's first line. It now
+          gets a Stubs.cs entry in the file's established style: the strip is a stub Control and
+          the canvas draws the same bench scene (gradient + the same orbiting sprites, same draw
+          calls) with one info line saying the four panes need real windows - so the test body
+          still exercises Sprite.Draw headlessly instead of being deleted from the run.
+  DOCS    README.md: two new measurement sections - "The original DLL against the current one,
+          measured here (tests/cs/legacybench)" and "What the new output control costs: raw blit
+          vs SpriteBox", the latter cross-referencing the demo's "Output paths" test and ending
+          with the two benchmarking traps above - plus the two rows in the harness coverage
+          table for the new tests.
+  COMPAT  No cs/ engine file changed this round: the demo, the two new tests and the docs only.
+          The demo's test list gains one entry at index 1 of the "Original API" group, so any
+          script that selects a test by NUMBER (rather than by group + name, which
+          harness/shotnames.sh now does) has to shift its indices by one.
+
+2026-10-07  Round eleven: the stripe knobs the chrome was missing (extra bars, a feathered
+            dark band), a motion blur that fits a frame loop, the Lenna photo in that test,
+            and the curve editor's right click, which deleted the node it was asked to menu
+------------------------------------------------------------------------------------------------------------
+  ADDED    SpriteForm.StripeBarExtra (cs/SpriteForm.cs) - "additional bars": the knob that
+           tweaks a count another property already fixed. It is added to whichever number won
+           (the width-derived count, the mode-derived count, or the fixed count), so it works
+           in every StripeMode. With a positive StripeBarWidth the bars keep their width and
+           the run grows; with width 0 the extra bars subdivide the SAME mirrored length, so
+           the run still ends on the last glyph. Measured on the harness form (caption
+           "SR2D64.dll", 10 characters, 87 px of text): width 25 -> extra 0 / 1 / 3 gives
+           count 4 / 5 / 7 and run 109 / 134 / 184 px; width 0 -> extra 0 / 1 gives 10 bars at
+           8 px and 11 bars at 7 px, both runs 87 px; FixedCount 6 with width 25 -> extra 2
+           gives 8 bars and run 209 px. The property is in the bar plan's Signature(), so a
+           change repaints, and EmptySR2DFormTemplate/Form1.Designer.cs sets it to 1 (the
+           caption-length run, plus one bar).
+  ADDED    SpriteForm.TitleTextDarkenFeatherV - how many px the dark band behind the title
+           texts fades in over at its TOP and BOTTOM edges (0 = the hard cut it always was).
+           TitleTextDarkenFeather is the other axis (the ends of the run) and the two are
+           independent, so a band can be soft on all four sides. Clamped to half the band's
+           own height, so the two ramps can never cross, and it needs TitleTextDarkenHeight
+           below 100 to have an edge left to soften. Applies to both the Smooth and the
+           PerStripe path (SpriteForm.DarkenVRamp, one row per call so the callers group equal
+           ramps into one clipped pass). Measured (darkh=60, darkamt=200, featherV 0 against
+           8): 1493 px changed, bounding box 11,10 .. 118,27 - the text block only, in both
+           darken modes; a grab of the two shows the hard slab and the soft band.
+  ADDED    Sprite.DrawMotionTaps (cs/Effects.cs) - motion blur that fits a frame loop. The
+           existing Effects.MotionBlur / MotionBlurPath resample every pixel of the
+           sprite-plus-trail image once per tap, which is exact and O(taps x (w+2M) x (h+2M)):
+           right for an editor and for baking a blur into a sprite, wrong for a game frame.
+           DrawMotionTaps covers the same trail with N whole copies of the sprite and AVERAGES
+           them: one copy is premultiplied and scaled to 1/N, then added N times into a reused
+           premultiplied accumulator with Op.Add (colour AND alpha add there, and N x 1/N never
+           saturates, so the sum is the exact box mean rather than N copies piled up), and the
+           accumulator goes over the destination with AlphaOver. The work is sprite-sized and
+           constant whatever the trail length, and the picture is deterministic - unlike the
+           feedback MotionEcho, a still object and a screenshot come out right at any frame
+           rate. Measured here (256x256 sprite, 400 px trail, one draw; two runs of the same
+           check): the taps 1.38 - 1.43 ms against 221 - 286 ms for the resampled blur, so
+           160x .. 200x - the ratio itself moves between runs because the machine is slower or
+           faster, while the taps' own cost barely does. The cost is honesty: a tap is a whole copy,
+           so few taps on a long trail read as separate ghosts, not a smooth sweep. The scratch
+           surfaces are [ThreadStatic], like VectorRender's, because the bench renders parallel
+           bands through the same canvas.
+  DEMO    The motion blur test (demo/Tests.cs) now blurs the Lenna photo (Assets.Color) instead
+           of the coloured disc, and its Op selector gained the fourth mode TAPS; the Grid
+           slider is the tap count there (8 .. 32, above 32 the engine stops) and the info line
+           prints the pixels each algorithm touches for one sprite (8 taps over a 512 px sprite
+           = 3208k px against 32 taps x 610^2 = 11907k px for the resampled blur at the test's
+           own defaults). demo/ControlsDemo.cs: the strip heading and help say CURVE / TAPS and
+           describe the curve editor's new right click.
+  FIXED   The curve editor's RIGHT press deleted the node under the cursor, so the menu's own
+           node-type entries were unreachable for an existing point - it was gone before its
+           menu opened - and one mis-click was an unrecoverable edit. Right click now only
+           SELECTS the point under the cursor (if there is one) and opens the menu, where
+           "Delete node" lives; Curve.Remove still refuses the two endpoints, so the entry is
+           greyed while one of them is selected (cs/SpriteControls.Curve.cs, HelpLines and the
+           file header say the same).
+  FIXED   DrawMotionTaps repeated the second-to-last path point instead of placing the head of
+           the trail: the interpolation fraction was taken off the UNCLAMPED segment index, so
+           at s = the last index the clamped i was one short and the fraction came out 0. The
+           ctlrun box-average pin caught it (its 3 taps landed on 0, 1, 1 and the middle column
+           saturated instead of averaging).
+  FIXED   The motion test's description promised a "BENCH button in the strip, or --bench":
+           neither exists (the demo parses only --shots). It now points at the FPS / render-ms
+           line the demo itself writes under the info text.
+  TESTS   tests/cs/ctlrun: 10 new pins. Three for the average itself (a 4x4 white sprite on a
+           3-tap trail = 85 / 170 / 255 / 255 / 170 / 85 in colour AND alpha, a straight
+           half-alpha sprite contributes 1/2 of its COVERAGE and not its colour, a zero-length
+           trail is the sprite rather than a faded copy), one measured (the taps draw must beat
+           the resampled blur, printed with both ms figures), and six for the curve editor's
+           right click (the point survives the press, the menu opens, the node under the cursor
+           is the selected one, Delete node is live for a middle point and removes it, an
+           endpoint is selected without being deleted and the entry is greyed there). The node
+           pixels are asked of the control's own ToPlot() through reflection rather than
+           computed from the plot rectangle by hand - the first version of the pin guessed the
+           layout and missed the node by 9.5 px, which is outside the 9 px grab radius.
+  DOCS    README.md: the SpriteForm property list (StripeBarExtra, Strength / Feather /
+           FeatherV / Height), the DrawMotionTaps API row, the Effects.cs and
+           SpriteControls.Curve.cs tree lines and the curve-editor prose paragraph.
+
+2026-10-07  Demo round ten: every demonstration photographed through the real UI path, every
+            description text checked against the code it describes, and the two last components
+            (curve editor, colour dialog) plus five engine files the audit exposed on the way
+------------------------------------------------------------------------------------------------------------
+  ADDED    SR2DDemo.exe --shots <dir> (demo/MainForm.cs RunShots) - the make-sense instrument.
+           It walks the whole test list the way a user does (lstTests.SelectedIndex, FillCtx(),
+           the test's own start parameters), pins the pointer to the canvas centre and
+           Ctx.Time to 0.25 so the frame is the same one every run, renders once and writes
+           NNN_group_name.png + manifest.tsv (index group test file status strip colors ink_px
+           hash note). The control strip is composed above the canvas in the same picture, and
+           DrawOverlays() runs before the capture, because a test is its render PLUS the
+           Ctx.Label names and the info-panel readouts - for many demos that text is the only
+           place a control's effect is visible. statsLine (fps / ms) is blanked for the shot;
+           it is the one thing on screen that is not a function of the test. status is
+           SKIP-DLL / SKIP-NOFILE / BLANK / OK / OK-SLOW, and the pixel hash lets two runs diff
+           down to the single test that moved. Selecting a test shortens / lengthens the canvas
+           below the strip, and that layout only settles when the queue is pumped - without an
+           Application.DoEvents() after the selection, every test after a strip test was shot at
+           whatever height the previous strip left behind (measured: 1380x1144 vs 1380x1276 for
+           the tests after the VoxelBox strip), which made the hash comparison useless there.
+  FIXED    the knob / slider / wheel test (shot 097) rendered a COMPLETELY BLANK canvas. Two
+           independent causes: its colour tile was copied once into c.Temp, which is 2S x 2S
+           while the sprite is S x S, so three quadrants stayed empty and Op.Blend - which
+           ignores source alpha - painted them as flat grey over the disc; and the tile was then
+           run through MulAddS2X with bare scalar constants. The scratch is tiled 2x2 and the
+           constants are packed vectors now.
+  FIXED    "frosted glass backdrop" (shot 084) came out transparent: panel.MulAddS2X(panel, 0, 0,
+           96, 160) reads as four separate byte multipliers and four byte adders, so it scaled
+           only BLUE by 0.75, scaled red / green / ALPHA by 0, and the alpha byte landed on
+           0 * 2 - 256 = -256. Now SR2D.ARGB(96,96,96,96) / SR2D.ARGB(160,160,160,160). The
+           kernel was right all along - checked against pMulAdd in
+           legacy/original-engine/SR2D.cpp and the SIMD OpMulAdd in sr2d_kernels.inl - the demo
+           was wrong, and cs/Sprite.cs got an XML doc that spells the convention out (neutral is
+           Mul 128/byte + Add 128/byte; an Add byte of 0 is -256, i.e. black AND transparent).
+  FIXED    the motion blur test, the report that opened the round: its Op selector really picks
+           straight / curve / echo now, with the echo driven by a MotionEcho feedback history
+           (persistence from Blend, the object layer rendered into a scratch, the accumulator
+           composited onto the canvas) instead of drawing a still sprite and claiming a trail.
+  FIXED    SpriteColorPicker test: the colour swatch was drawn at a fixed offset from the corner
+           viewport, which put it UNDER the embedded dialog - the shot showed one box and a swatch
+           nobody could find. It now sits right of wherever the dialog actually is (the overlay's
+           Right + 8, falling back to the old offset when the dialog is hidden), and clamps to the
+           canvas width instead of running off it.
+  FIXED    the discrete-values strip: the numeric field wrote over the slider's own variable
+           instead of its own (NumV), so the two controls fought and one readout was always a
+           lie; the canvas now prints both. Dead state removed (an unused WheelV, and a
+           single-member radio group named "solo" that could never be un-checked and whose value
+           nothing read). The "Predetermined" slider got CommitOnRelease, which is what its
+           caption promised. Two button captions were being elided by FitText (columns 160 ->
+           212 and 170 -> 226 px).
+  CHANGED  description texts that made promises the code does not keep. The knob / slider /
+           wheel text implied TextScale derived the font size from the control's Size -
+           SpriteControlBase.AutoTextScale deliberately DISCARDS its size hint, and 0 means the
+           smallest pixel-font size, not "auto"; the drag-mode, strip-scrolling and
+           double-click-reset sentences were rewritten against SpriteControls.cs. The button text
+           now says out loud that the Paint op has no opacity of its own, so the "Paint" radio
+           draws through Blend while a job runs - that is the only way it can fade in. The
+           SizeMode text explains why the Free pan mode always shows scroll bars (overscroll
+           widens the range past the picture), and the VoxelBox text states the real preview
+           rules (propagated light and AO off while dragging, and unlit 1-px Points past 40 ms
+           or 128^3).
+  FIXED    cs/SpriteControls.cs: a control parented through a PLAIN container (TableLayoutPanel,
+           FlowLayoutPanel) inherited no face colour, because the handoff stopped at the first
+           parent that was not a SpriteControlBase. OnParentChanged and PushBackColor now walk up
+           / down through containers, so a knob two panels deep inside a sunken SpritePanel
+           still takes the form's colour (round nine's feature, completed).
+  FIXED    cs/SpriteControls.Menu.cs: a RIGHT-click context menu ate the next left click on the
+           control that opened it ("first click does nothing"). SpriteMenu.Show / ShowAt record
+           which button opened the menu (OpenedBy), SpriteBox.Voxel.cs and SpriteBox.View.cs pass
+           e.Button, and OutsideClickFilter now swallows the click on the opener only for a menu
+           opened by that same left click - where swallowing is what stops it toggling open
+           again on the very same press.
+  FIXED    cs/SpriteControls.Curve.cs (the last two components of the report): three defects in
+           SpriteCurveEditor. (1) The plot ran under the caption. A curve's endpoints sit AT the
+           bottom edge (y = 0), so the caption text drew straight through the two endpoint nodes
+           and the 0.0 line. Plot now reserves CapH at the bottom (measured in ctlrun: plot bottom
+           148 + a 14 px caption in a 170 px box). (2) The Help overlay could not fit the sizes the
+           app actually uses: 17 lines at the 13 px row step needed 221 px, and the docked / demo
+           editor is 320x150 - a 134 px plot - so the bottom rows were drawn outside the control.
+           The listing is 9 lines now, a plot too short for them scrolls with the wheel (the
+           overlay owns the wheel while it is up), and the lines are drawn through
+           Sprite.CreateView so a clipped row ends at the frame instead of crossing it. (3) Right
+           click on an empty spot opened the menu with the DEFAULT (left) openButton, so the next
+           left click on the plot was the menu-close click and got swallowed - "my first click
+           does nothing" on the control. It opens as a right-click menu now, which is what it is,
+           and that click reaches the plot (move / add a point).
+  FIXED    cs/SpriteControls.Color.cs + the colour test: the dialog's pick path. (1) The test
+           text promised "Cancel reverts" and nothing reverted - the embedded dialog's Cancel did
+           no work at all. demo/ControlsDemo.cs now remembers the last ACCEPTED viewport colour and
+           Cancel puts the viewport back to it. (2) The eyedropper's desktop grab is a system call
+           and it can fail (a coordinate that fell off every monitor mid-sweep); the throw left
+           Picking true, the mouse capture held and the cursor swapped for the rest of the session.
+           UpdateHover now lays the pipette down. (3) SchemeValuesToRgb carried a CMYK arm that
+           could never run - FromNumeric handles CMYK (its fourth channel is K, not alpha) before
+           reaching it - removed, with the doc saying where CMYK lives. (4) The strip's readout
+           called every picker edit "picker drag", which was untrue for a hex, numeric or wheel
+           edit; the label is "picker" and the event count is honest.
+  FIXED    cs/Effects.cs RemoveLast() removed the stage but left its native scratch buffer in
+           bufs, so the parallel lists drifted apart, the buffer leaked until Clear / the
+           finalizer, and Clear() saw a non-empty buffer list and bumped Version on a chain that
+           already looked empty - which invalidated the LayeredSprite prefix cache for nothing.
+           layerchk asserted exactly this and had never reached the assert (below).
+  TESTS    ctlrun gained two pins for the menu fix: a right-click menu must let the next left
+           click on its opener THROUGH, a left-click menu must still swallow it - and the same
+           pair again on the curve editor's own plot. The curve editor gained four more: the help
+           overlay puts 0 px of ink on the control's bottom row, the wheel scrolls it when the
+           plot cannot show it all (0 -> 13 at 320x60), a too-short plot CLIPS it there instead of
+           running off the control, and a caption keeps its band clear of the plot (measured: plot
+           bottom 148 + a 14 px caption in a 170 px box). The first version of that third pin
+           probed a row the 5x7 font never paints (the old caption was "Trail curve", no
+           descenders) and passed for the wrong reason - it asserted 0 px on a row that stays
+           clean either way; the detector was validated before the claim was kept. Colour: the
+           brightness bar reads bright at its right end and dark at its left (it used to give
+           black at the bright end), an RGB numeric edit drags the gamut hue with it, CMYK's
+           fourth entry ranges 0..100 and leaving CMYK restores the 0..255 alpha entry, ShowAlpha
+           takes the entry out of the column and back, every entry of the scheme drop list keeps
+           the colour, and Esc lays an armed pipette down instead of cancelling the dialog.
+           Full run after the round: 321 pins ok, none failing, exit 0.
+           tests/cs/* runners except ctlrun had NO SR2D64.dll beside their exes, so
+           autochk / edgechk / layerchk / selchk / voxchk / webpchk / blur died with
+           DllNotFoundException (exit 127) and read like a regression; with the DLL copied into
+           each bin/Release/net10.0/ the picture is: ctlrun, autochk, codechk, edgechk,
+           layerchk, selchk, voxchk, blur, vecrun green and webpchk 17/17 files exact. vecfuzz
+           parses argv[0] as an iteration count and looks for its corpus under /home/user, so it
+           only builds here. Shot sweep: 104 OK + 1 OK-SLOW (the big voxel grid) + 3 SKIP-NOFILE
+           (the file-picker tests) + 0 BLANK + 0 duplicates; two consecutive runs of the final
+           build are byte-identical for 98 of the 105 photographed shots, and the seven that move
+           are the ones printing a measured millisecond figure of their own (PNG codec, the three
+           voxel Update / draw timings, the big grid, depth of field, VoxelBox) - identical
+           colors, and ink_px identical except VoxelBox, where a digit count changed by one.
+           harness/shotcmp.sh <runA> <runB> prints exactly that (the movers, plus their
+           colors / ink_px side by side) so a hash delta is never read as a regression again.
+  DOCS     README.md: a new MulAddS2X section (the packed per-channel convention, the neutral
+           pair, a table of what each constant means, and the two demos it broke), a Shot harness
+           subsection with its three documented limits, a row for it in the headless-check table,
+           and a "Demo make-sense audit" section listing what the sweep found and what only
+           LOOKED wrong (the empty band in a strip shot is the harness not seeing native WinForms
+           children; the washed-out chain test is a legitimate Opacity: c.Blend / 255f; the
+           scroll bars in SizeMode are the documented overscroll).
+
+
+2026-10-07  SpriteForm round nine: a bar width you set is a bar width you get, the run mirrors the
+            icon + text block and can be centred on it, every colour property behaves like a native
+            Color in the grid, and SR2D controls inherit the form's background
+------------------------------------------------------------------------------------------------------------
+  FIXED    "with stripe mode = caption length, width of bars not equal of width that set up in
+           property" - round eight's answer was wrong in the other direction: a positive
+           StripeBarWidth was treated as a MAXIMUM in the two text-mirror modes, so the template's
+           CaptionLength + StripeBarWidth = 10 painted 50 bars of 6 px instead of 10 px ones.
+           cs/SpriteForm.cs PlanBar: StripeBarWidth is now LITERAL in every mode, and in
+           CaptionLength / AllTitleTextLength the NUMBER of bars is whatever covers the length
+           (ceil(length / width)). That is the pairing the report asked for - custom width / auto
+           amount, or with the width at 0, auto width / the mode's own amount (the length divided
+           between the count: count 10 over a 327 px block = one bar per 32,7 px). FixedCount
+           takes both numbers literally and derives nothing. compat: harness --widthcap=1 restores
+           round eight (measured: count=32 barW=10 shipped, count=50 barW=6 with the probe);
+           harness/geom.sh cells tpl / tpl_r8 / tpl_cnt.
+  CHANGED  the length the bars mirror is the WHOLE BLOCK they are furniture for - the icon slot
+           when ShowIcon draws one, plus the caption (CaptionLength) or every title text
+           (AllTitleTextLength) - not the glyphs alone, which stopped the last bar a whole icon
+           short of the last glyph. The slant is still paid out of the budget, so the run's
+           SILHOUETTE, not its base, ends at the block's edge. Measured by --geom on the
+           template's own caption: mirrored text 8..327, run 8..327, painted silhouette off by 0 px.
+  ADDED    StripeBarsAlign.WithText (StripeAlignment dropdown): the run centres ON that block
+           instead of in the bar, with the same margin past the icon as past the last glyph; with
+           StripesBehindText off the pattern and the texts are placed as one centred group.
+           compat: --align=text, measured "centre delta 0 px, 0 px of colour left of the icon,
+           0 px right of the last glyph".
+  CHANGED  every chrome colour property (TitleBarColor, BorderColor, TitleTextColor,
+           TitleTextShadowColor) is now EDITED like a native Color in the Visual Studio grid, not
+           only clickable through the "..." dialog: cs/ChromeDesign.cs ArgbColorConverter paints the
+           swatch, shows the value as "[A=255, R=46, G=52, B=60]" - or the NAME when the int is a
+           known Windows colour - and offers the drop-down list of named colours, non-exclusive so
+           typing still works. What it reads back is every spelling that names a colour:
+           AARRGGBB, RRGGBB, #RRGGBB, 0xRRGGBB, a decimal ARGB integer, a colour name, and the
+           bracket text the cell itself displays, so a value copies between forms as text.
+           harness --gridprops prints the descriptor data the grid consumes (converter, 157-item
+           dropdown, exclusive=False, swatch=True, editor) and round-trips twelve input forms.
+  ADDED    StripeColorList takes integers as well as hex and names per entry, and the answer to
+           "cache it to ints, so not convert string to int each time" is that it always did: the
+           string is parsed ONCE, in the setter, into StripeColors (int[]) - the bars paint from
+           that array and never touch the text. Documented as such, and proven by --gridprops
+           (text "FF112233,FF445566" -> StripeColors = -15654349,-12298906).
+  FIXED    "controls added to form don't inherit colors from form ... they don't inherit background
+           color". A SpriteControl sets its own dark face in its constructor, which cut the WinForms
+           ambient chain, so a form coloured in the designer left every SR2D control on the old
+           default - and the designer made it permanent by writing BackColor = Color.FromArgb(32, 36,
+           40) (exactly that default) into every control's InitializeComponent. Now SpriteForm hands
+           its BackColor down (OnBackColorChanged -> the direct SpriteControls, containers pass their
+           own face on), a control adopts the colour of the window it sits on when it is parented, and
+           the SR2D default no longer counts as a choice: ShouldSerializeBackColor returns false for
+           it, so the grid stops writing the line, and right-click / Reset puts a control back on the
+           ambient colour. compat: a control that used to stay 0x202428 on a coloured form now follows
+           that form - give it an explicit BackColor to pin it. harness --inherit photographs the
+           matrix (untouched / set / changed again / reset, plain vs designer-default vs explicit Red
+           vs a sunken panel and the label inside it).
+  TESTS    the interface SpriteControls.cs needs for that (IControlFaceSource, implemented by
+           SpriteForm) exists because tests/cs/ctlrun compiles the control files WITHOUT
+           SpriteForm.cs, against its own shim in Fake.cs - which had no ResetBackColor for
+           SpriteControlBase.ResetBackColor to override. Fake.Control now declares it, and the
+           suite is green where it was before: 162 ok, the one known-red DejaVu font pin.
+           demo / template / apps/SpriteBox / EmptySR2DFormTemplate / harness rebuild 0 errors.
+  DOCS     README.md: the grid section says what a colour cell now is, the container section says
+           who a control takes its face from, the stripe summary states the two pairings;
+           SpriteForm-fixes.txt + EmptySR2DFormTemplate/README.txt got the round-nine sections.
+
+
+2026-10-06  SpriteForm round eight: a fixed bar width no longer makes the colour run longer than the
+            caption it mirrors, the stripe palette gets a real designer dialog, and the darkened band
+            behind the title text gets a height
+------------------------------------------------------------------------------------------------------------
+  FIXED    "number of bars still results in stripe being larger than form caption" - reported against
+           the form template project (EmptySR2DFormTemplate), whose saved designer values are the
+           case: StripeMode CaptionLength (one bar per caption character, so 46 of them) plus
+           StripeBarWidth = 10 laid out 460 px of colour over a 305 px caption, and the skew added
+           another 9 px on the silhouette. The bar count changed the stripe length because the width
+           was taken literally in every mode; the Demo only looked right with its four-character
+           caption. cs/SpriteForm.cs PlanBar: in the two text-mirror modes a positive
+           StripeBarWidth is now a MAXIMUM - the bars are narrowed to their share of the mirrored
+           text so the run still ends at the last glyph - and with an auto width the slant is paid
+           out of the length budget, so the silhouette rather than the base mirrors the text.
+           StripeBarsMode.FixedCount keeps both old answers on purpose: there the count is the
+           user's, so the length is theirs too. compat: --widthcap=0 / --skewbudget=0 restore each
+           half; measured by harness/geom.sh cases tpl / tpl_nocap / fixed20_w10 (painted silhouette
+           +180 px before, -2 px after, on the template's own settings), and on the template app
+           itself (grab tplC_bar.png 514 vs tplD_bar.png 332, caption ends 335).
+  ADDED    StripePaletteEditor (cs/ChromeDesign.cs): the "..." button of StripeColorList. The bar
+           palette is a list, so the grid could only offer one text box of hex; the dialog is a
+           swatch + AARRGGBB list with Add / Edit / Remove over the standard Windows colour dialog,
+           and returns the same string the box demanded. ArgbColorEditor also paints a swatch now
+           (GetPaintValueSupported / PaintValue), so the four single-colour int properties look like
+           a native Color property in the grid. Proved through TypeDescriptor, not by assumption:
+           harness --colordlg=<property> resolves the editor the attribute names, calls EditValue
+           the way the grid calls it and photographs the modal result.
+  FIXED    that dialog was unreadable at 175 % DPI: built in code it gets no designer scaling, so its
+           FlowLayoutPanel rows were pinned to 34 / 38 px while the DPI-scaled buttons in them are
+           ~40 px, and the Fill list box painted over what stuck out. AutoSize rows, and every
+           literal (window size, item height, swatch) through Dpi(v) = v * DeviceDpi / 96.
+  ADDED    TitleTextDarkenHeight (1..100, default 100): how tall the darkened band behind the title
+           text is, as a per cent of the bar height and centred on it - 100 is the whole stripe as
+           before, 45 is a band, 20 a slit through the text. DarkenBand(h) feeds both dimming modes;
+           for FullBars + PerStripe the run is drawn twice (dimmed bars clipped to the band, plain
+           bars clipped to what is left), because the per-stripe dimming lives in the bar colours.
+           harness --darkh, measured by pdiff of full-window grabs: 100/45 774 px, 45/20 216 px,
+           100/20 990 px differ, same seed and feather.
+  DOCS     "the additional text in the title with a different colour" was a question, not a bug: it is
+           SetTitleTags(new TitleTag(text, 0xAARRGGBB)) - cs/SpriteForm.cs:99 the type, :434 the
+           method, demo/MainForm.cs:974 the working example - and TitleTags is [Browsable(false)]
+           because a list of objects carrying fonts is not something a property grid edits well.
+           Written up in EmptySR2DFormTemplate/README.txt with the stripe-length and band-height
+           knobs. SpriteForm-fixes.txt round eight adds the probe traps this round found: a report
+           about "the template" can mean template/ (SR2DApp, a plain Form with no chrome) rather
+           than EmptySR2DFormTemplate; grabbing Form.Size as if it were device pixels photographs
+           the top-left corner of a DPI-scaled window; GetWindowTextW without CharSet.Unicode
+           returns one character per title, so a by-title window search never matches; and
+           --mode=caplen silently means StripeBarsMode.None.
+  TESTS    harness: --widthcap, --colordlg, --darkh / --darkfeather knobs, geom cases for the
+           template's own settings, PaletteProbe (photographs the palette dialog), dlgshot.ps1
+           (grab a dialog by GetWindowRect), runedge.ps1 (the painted silhouette row by row),
+           glyphend.ps1 (where the caption's last glyph is). Gates re-greened: ctlrun 162 ok / the
+           same 1 known-red DejaVu pin, geom.sh, shots.sh 17/17, demo + apps + template +
+           EmptySR2DFormTemplate build with 0 errors.
+
+
+2026-10-06  SpriteForm round seven: the window stops blinking out of existence while the border
+            is dragged - WM_NCPAINT is answered by the default handler again - measured with real
+            mouse resize drags and whole-window burst captures
+------------------------------------------------------------------------------------------------------------
+  FIXED    "form still flickering upon resize (blinking in and out of existence, revealing what's
+           behind)". Not the round-six flicker (that one was the bar re-rendering and the form
+           erasing twice): here the WHOLE client area showed the desktop for a frame at a time.
+           Cause: WM_NCPAINT was swallowed because WM_NCCALCSIZE had left no non-client strip to
+           paint - but that message is also the paint that validates the fresh surface a resize
+           hands the window, so everything outside the invalid part of it stayed empty and the
+           compositor showed what is behind. cs/SpriteForm.cs HideFrame now forwards WM_NCPAINT.
+           Measured over five real drag resizes per cell (harness --burst + harness/matrix.sh,
+           whole-window grabs every ~4 ms, every sample point verified to belong to the window):
+           swallowed + no class styles = 21 blanked frames of 136 sizing grabs, swallowed +
+           CS_HREDRAW|CS_VREDRAW = 2 of 130, forwarded = 0 of 131 and 0 of 135. Compat:
+           NcPaintProbe = 0 (harness --ncpaint=0) is the old swallow, kept for the A/B.
+           Costs nothing visually: grabs of the settled normal (908x520) and maximized (2080x1476)
+           window are byte-identical between the two answers, and so are the blurred-focus grabs
+           (0 differing px), because the caption-over-the-bar problem is WM_NCACTIVATE's and that
+           answer is untouched. CS_HREDRAW|CS_VREDRAW stay as the second line of defence (they
+           soften the old path and cost 0 extra paints, harness --msg).
+  TESTS    harness: BurstProbe (--burst) grabs the whole window and counts frames whose client is
+           a foreign colour; drag.ps1 now drags the right pixels (its bottom / corner branches had
+           x and y swapped, so a "bottom drag" resized whatever window was there) and refuses to
+           run unless the grab point belongs to the target and the size really changed; --keepfront
+           holds the window in the topmost band so an IDE that keeps taking the foreground cannot
+           silently void a run. Checked against an independent instrument (harness/blank.ps1 green
+           backdrop + harness/record.ps1 + harness/e2e.sh, a separate process that knows nothing
+           about the harness): old answer 20 green frames of 674 grabs, shipped answer 0 of 692,
+           SR2DApp (the template app) 0 of 655, SR2DDemo 0 of 497 - the demo opens maximized, so
+           e2e.sh restores it first (restore.ps1) or the drags would resize nothing and read clean.
+           Also fixed: three user32 wrappers renamed
+           SetWindowPosStatic / SetForegroundWindowStatic / keybd_event_static had no EntryPoint and
+           threw EntryPointNotFoundException at the first call.
+  VERIFIED Stripe length against the text re-measured with the new chrome (harness/geom.sh):
+           caption / all-text / real-font / no-icon / offset layouts all "off by 0 px" - the last
+           bar ends where the last glyph ends; --barw=6 still honours an explicit width.
+           ctlrun 162 ok (1 known-red DejaVu pin), all 10 projects build green, hit.ps1 all eight
+           HT codes, dbl.ps1 maximizes, shots.sh 17 of 17 chrome variants.
+  DOCS     SpriteForm-fixes.txt "Round seven", including the four ways the first version of the
+           burst probe lied (unthrottled drop loop, foreground filter, reference colour learned
+           from a contaminated frame, DllImport entry point).
+
+
+2026-10-06  SpriteForm round six: resizing stops flickering, losing focus no longer paints a native
+            caption over the bar, the designer's BackColor survives to runtime, every control is public
+            so the toolbox lists them, and the colour bars gain offset / alignment / brightness /
+            palette / pixel-exact length / darkening around the text
+------------------------------------------------------------------------------------------------------------
+  FIXED    resizing flickered. Two mechanisms, both measured over 20 grow + 20 shrink steps with the
+           shipped switch (harness --msg=1500 --smooth=0/1): the bar re-rendered its whole pixel pattern
+           on every step (barRebuild 20), and the form erased its background before painting it
+           (formBackgroundPaint 80). SmoothChrome (new, default true) turns on
+           OptimizedDoubleBuffer | AllPaintingInWmPaint and gives the bar an oversized (1.5x, cap 4096 px)
+           left-anchored buffer, which takes those to 0 and 39 with the message traffic unchanged
+           (WM_SIZE 40, WM_PAINT 39 on both sides). Compat: SmoothChrome = false is the old path.
+  FIXED    "when the form loses focus it turns into default form graphics". Round five forwarded
+           WM_NCACTIVATE to DefWindowProc with lParam = -1 on the strength of that value's documentation
+           ("do not redraw the non-client area"); on 10.0.26100 it redraws precisely the strip
+           WM_NCCALCSIZE had given back to the client, i.e. a grey native caption with native buttons
+           over the whole bar. The message is now answered without passing the activation change down.
+           A/B with SpriteForm.NcActivateProbe (0 = the pre-fix answer, 1/2 = shipped), focused vs
+           blurred live screen grabs: 40833 differing pixels before, 3 after.
+  FIXED    a BackColor set in the designer never reached the screen: ApplyFrame painted the border band
+           by writing the FORM's BackColor to the border colour, after InitializeComponent had run. The
+           band is now drawn in OnPaintBackground from BorderColor and ApplyFrame only sets Padding.
+           A/B with SpriteForm.BackColorProbe (0 = the old write): with --backcol=20A020 --nolabel the
+           client-area patch differs in 59800 of 59800 pixels, 2E343C against 20A020; verified end to end
+           by setting EmptySR2DFormTemplate's designer BackColor to green, photographing the running
+           template and reverting. A docked child that paints its own background still covers the form's.
+  CHANGED  every control type is PUBLIC (44 files, 258 declarations: SpriteBox, SpriteControlBase,
+           SpriteClickable, SpriteRangeControl, the 25 controls, Sprite, SpriteFont, PixelFont, Effects,
+           SR2D, RenderEventArgs, ControlText, TextRun and the enums in their signatures). The toolbox
+           only offers public Control types, so none of them could be dragged before; the list was
+           closed by the CS0050 / CS0051 / CS0053 chain, not by taste. SpriteForm.Point stays internal.
+           Compat: nothing - internal types were unusable from outside the assembly anyway.
+  ADDED    StripeOffset (-2048..2048, slides the pattern along the bar), StripeAlignment
+           (Left / Center / Right, where a short pattern sits), StripeBrightness (0..300 %, applied to
+           whatever palette is in use) and StripeColorList (hex string, the designer entry) /
+           StripeColors (int[], the same pixels) for a fixed palette instead of the random one.
+           StripeColorList takes "FF3B82F6, 20A020, #FFC0CB00, Red" (the ArgbColorConverter hex forms
+           plus System.Drawing colour names; an unparseable token is skipped).
+  FIXED    the StripeColorList getter joined the palette as DECIMAL ints ("FF2E343C" became
+           "-13749188"), which the setter then read back as hex and dropped: the first time the designer
+           serialized the property the palette was gone. The getter now writes the 8-digit hex the setter
+           parses, so the round trip is stable (harness --design: set -> get -> set, five inputs, every
+           one stable=True; the old format measured through the same setter keeps 0 of 2 colours).
+           --pal (int[]) and --pallist (the string) photograph byte-identically.
+  CHANGED  StripeMode.CaptionLength and .AllTitleTextLength now size the pattern by the MEASURED PIXEL
+           width of the caption / caption+tags, not by a character count against the pixel font's fixed
+           cell, so the last bar reaches the last symbol with a real font or tags in play too.
+  ADDED    TitleTextDarken (None / Smooth / PerStripe) with TitleTextDarkenStrength (0..100) and
+           TitleTextDarkenFeather (0..256 px): the bars lose brightness where the text sits, as a
+           gradient across the text rectangle or one flat decision per bar.
+  ADDED    TitleTextFont, one System.Drawing.Font for the caption, so the property grid's own font
+           dialog writes both halves: TitleTextFontFamily and TitleTextFontSize (the dialog's unit
+           converted to device pixels). Style travels in the family name.
+  ADDED    cs/ChromeDesign.cs: ArgbColorConverter shows and accepts the chrome colours as hex
+           ("FF2E343C", "#2E343C", "0x20A020", "2E343C" = opaque) instead of a signed decimal, and
+           ArgbColorEditor adds the "..." button that opens the standard colour dialog with the alpha
+           byte preserved. Wired onto TitleBarColor, TitleTextColor, TitleTextShadowColor, BorderColor.
+  DOCS     SpriteForm-fixes.txt sections 15-20 (the three fixes with their A/B numbers, the toolbox
+           change, the new bar surface, the designer dialogs) and the round six verification block;
+           the file header now lists the capture scripts and says the reads are screen grabs;
+           EmptySR2DFormTemplate/README.txt covers the toolbox and the new properties; README.md's
+           SpriteForm entry lists the new knobs.
+  DOCS     KNOWN LIMITATION, written up in section 20: DrawToBitmap / PrintWindow on a window that keeps
+           an invisible real frame render a native caption into the strip - a capture-path artefact
+           (--frame=1 vs --frame=0 on the same window), not something the user sees. Taskbar thumbnails
+           and window previews can show chrome nobody sees. Read the screen for this window class.
+  TESTS    demo, EmptySR2DFormTemplate, apps/SpriteBox and tests/cs/{ctlrun,benchrun,vecrun,selchk,
+           autochk,codechk,fontchk} build green; a clean (--no-incremental) rebuild of demo has 0
+           warnings in SpriteForm.cs / ChromeDesign.cs against the engine's pre-existing analyzer
+           baseline of 326. tests/cs/ctlrun 162 pins ok / 1 red, the same pre-existing "ControlFonts
+           resolves DejaVu Sans" environment pin as every previous round.
+           All 17 chrome variants re-photographed after the palette fix (harness/shots.sh), and the
+           StripeColorList round trip is a standing probe in harness --design.
+           hit.ps1 (all eight HT codes), dbl.ps1 (double-click maximize) and anim6.ps1 (minimize steps,
+           measured against an ordinary captioned window) are unchanged by the new WM_NCACTIVATE answer.
+
+2026-10-05  SpriteForm round five: the bar shrinks to 18 px with the pixel font, the icon and the caption
+            move IN FRONT of the colour bars (icon on a rounded chip), the window gets a minimum size, and
+            the invisible real frame brings the Windows 11 animations back
+------------------------------------------------------------------------------------------------------------
+  CHANGED  TitleBarHeight defaults to 18 (MinBarHeight) instead of 26 and is clamped to 18..64; the
+           caption button glyphs now scale with the bar (clamp(height - 6, 8, 20)) so the smallest bar is
+           still legible. The caption / tags keep falling back to the 1 px PixelFont, which is the
+           smallest face SR2D has.
+  CHANGED  the icon and every title text render ON TOP OF the colour bars instead of after them
+           (StripesBehindText, default true; false = the old layout). When the icon does overlap the
+           pattern it sits on a small rounded plate - FillRoundRect + a 1 px AA DrawRoundRect, padding and
+           radius scaled from the icon - so it stays readable on any palette (IconBackdrop = false removes
+           it). Both are in the bar's cache signature.
+  ADDED    MinimumSize is now derived from the chrome (ApplyMinimumSize: buttons + text gaps + 80 px of
+           pattern, bar + 40 px of content, twice the painted border) and refreshed from LayoutBar,
+           ApplyFrame and the three Show*Button setters. It only ever raises a floor the app set. Resizing
+           to 10x10 now lands on that floor with the bar and all three buttons intact, instead of a window
+           with no chrome left.
+  CHANGED  the window keeps a REAL frame and hides it (NativeWindowFrame, default true): CreateParams adds
+           WS_CAPTION | WS_THICKFRAME on top of the WS_SYSMENU / WS_MINIMIZEBOX / WS_MAXIMIZEBOX from the
+           last round, WM_NCCALCSIZE answers "the client is the whole window", WM_NCPAINT is swallowed and
+           WM_NCACTIVATE is forwarded with lParam = -1 so no native caption is ever painted or flashed over
+           the bar. Measured with harness/anim6.ps1 (74 samples/s over the window rect, minimize on a
+           timer): borderless-with-menu-bits = 1 pixel change (a hard cut), NativeWindowFrame = 2 (an
+           in-between frame), an ordinary captioned window = 3. The menu bits alone changed nothing.
+           Compat: NativeWindowFrame = false is the previous fully borderless window.
+  FIXED    maximize with the frame on landed one invisible border OFF screen (2072x1476 at -12,-12 on a
+           2048x1452 work area) and cut the bar's icon and buttons off; ClientInsideMonitor clamps the
+           client rectangle to the monitor's working area in WM_NCCALCSIZE. (WM_GETMINMAXINFO does not
+           work for this - WinForms computes the maximized rectangle from MaximizedBounds itself and
+           SetWindowPos-es it, measured.)
+  CHANGED  full screen is no longer "maximized at the monitor bounds" - a framed window can never maximize
+           past the working area - it places the window explicitly (Normal state, Bounds = the monitor or
+           the working area). Same geometry as before, measured: Bounds 0,0 2048x1536, ClientSize
+           2048x1536.
+  CHANGED  SpriteForm is PUBLIC and carries [DesignerCategory("Form")], and EmptySR2DFormTemplate's Form1
+           is public partial in both halves. [DesignerCategory("Code")] is INHERITED, so the old internal
+           base made Visual Studio open every derived form in the code editor and hid every chrome property
+           from the property grid; the designer now opens (not verifiable on this machine - no Visual
+           Studio installed, build verified).
+  DOCS     SpriteForm-fixes.txt gained sections 11-14 (the six items, the animation measurement, the
+           designer) and the round-two re-run block; README.md's SpriteForm entry lists the new knobs.
+  TESTS    demo, template, EmptySR2DFormTemplate, apps/SpriteBox, tests/cs/benchrun and tests/cs/vecrun
+           build clean under AnalysisLevel=latest-recommended; tests/cs/ctlrun is 162 pins ok /
+           1 red (the pre-existing DejaVu Sans font pin, environment only).
+           (Correction, round six: "0 warnings" was read off an INCREMENTAL build, which does not re-emit
+           analyzer diagnostics for unchanged files. A clean rebuild of demo has always carried 326
+           pre-existing engine warnings - 278 CA1051, 24 CA1725, 14 CA1720, 6 CA1708, 4 CA2211 - none of
+           them in the chrome files. Measure the analyzer gate with --no-incremental.)
+
+2026-10-05  SpriteForm round four: the bar is ONE sprite (chrome can no longer be disposed or covered),
+            the border becomes Padding + WM_NCHITTEST, the colour bars get full settings, double-click
+            maximizes; the shadow + background engine bug fixed
+------------------------------------------------------------------------------------------------------------
+  CHANGED  the title bar is a single cached Sprite again, but this time the WHOLE bar lives in it:
+           background, colour bars, icon, caption and the extra texts render in one pass (RenderBar) and
+           blit. The stripe Sprite / caption label / icon box / Dock.Fill filler children are DELETED -
+           their only surviving children are the three caption buttons. Reason: ControlCollection.Clear()
+           DISPOSES the children it removes, so any app that rebuilt its child list left the form with a
+           half-dead bar, and the opaque filler label sitting over the pattern is the "rectangle with text
+           covering the stripes" that was reported. One surface cannot be covered by a sibling and cannot
+           be mis-ordered: OnControlAdded now keeps the bar at the highest child index (SendToBack), which
+           is where docked layout puts it in front.
+  ADDED    the window ICON in the bar, like a native title bar: Form.Icon (override with TitleIcon, hide
+           with ShowIcon=false), drawn at the bar height, click = the window menu, double click = close.
+           Trap: Icon.ToBitmap returns the icon's STORED 32x32 frame whatever size the Icon was built at,
+           so the slot is sized by the engine instead (new Sprite(bmp, Transform.None, size, size)).
+  CHANGED  the stripe knobs are the bars' full setting surface: StripeSeed (-1 = random per form, which it
+           now is), StripeBarWidth, StripeBarCount, StripeMode (None / CaptionLength / AllTitleTextLength /
+           FixedCount), StripeStyle (FullBars / TopAndBottomLines, with StripeLineThickness), StripeSkew
+           (-1 = half the bar height) and StripeColors. Geometry goes through FillPolygon in pixel-CORNER
+           coordinates (the engine fills rows [top, bottom)), so neighbouring skewed bars share an edge
+           with no seam; the line style clips the SAME geometry with SetLockRectXY instead of redrawing it.
+  CHANGED  BORDER = Padding + BackColor + WM_NCHITTEST, the eight grip controls are gone. BorderColor
+           (0xAARRGGBB; alpha 0 or BorderThickness 0 = no frame at all) paints the frame with no child
+           control, ResizeBandWidth widens only the grab. WndProc answers HTLEFT / HTRIGHT / HTTOP /
+           HTBOTTOM and all four corner codes, so the native cursor AND the native resize loop come from
+           Windows on all eight directions (the old corner grips were 0x0 in some states - no corner
+           cursor - and a transparent child painted the PARENT's background over its siblings, which is
+           the "transparent at full size / garbage while scaling" report). GrabBand is 0 when maximized or
+           full screen. compat: a form that added its own grips must drop them.
+  FIXED    double-clicking the bar did not maximize / restore: Control raises the event only when
+           ControlStyles.StandardDoubleClick is set (off for a plain Control, and Control.DoubleClick is
+           an event - it cannot be assigned). The bar's constructor sets StandardClick +
+           StandardDoubleClick now. Verified with a real synthesized double click: 800x500 -> the working
+           area -> back to 800x500.
+  FIXED    cs/Sprite.Text.cs engine bug: the shadow overload passed the SAME bg to the plain overload for
+           the main pass, and that pass fills its text box with 2 * scale padding - always bigger than a
+           1-2 px shadow offset - so the background erased the drop shadow completely. The box is now
+           filled BEFORE the shadow and both text passes use bg = 0 (order: box -> shadow -> glyphs).
+           Probe: shadow px 104 (fixed) vs 0 (old order).
+  FIXED    new SpriteForm() threw NRE from the base Form constructor: the ctor sizes the window, the
+           overridden OnResize / OnTextChanged touched the not-yet-assigned bar. A barLive flag gates
+           every chrome callback until the bar exists.
+  FIXED    the pattern pushed the caption off-screen on a narrow window: the bars clip to
+           width - ButtonsWidth() - TextGap, and ButtonsWidth() follows Visible so hiding a button
+           reclaims its room (the Show*Button setters touch the bar). The bar's cache signature now
+           includes the three Visible flags and the app default font, so those changes invalidate it.
+  CHANGED  real (non-pixel) caption fonts were vertically clipped in a short bar: the pixel-font scale
+           step multiplied an absolute px em size. TextScale() splits them - a pixel font steps with the
+           bar height, an explicit real-font size draws at 1.
+  ADDED    EmptySR2DFormTemplate/ - a .NET 10 WinForms desktop project as empty as Visual Studio's own
+           template (stock Program.cs, a Form1 with nothing on it), except Form1 derives from SpriteForm,
+           so a brand-new app already has the SR2D chrome with zero code. net10.0-windows / x64, the
+           engine compiled in from ../cs/*.cs, SR2D64.dll copied next to the exe.
+  DOCS     SpriteForm-fixes.txt at the repo root: every defect above, how it was fixed, why, and the
+           measurement that proves it (HT codes, shadow pixel counts, resize captures).
+  DEMO     the demo app runs on the reworked chrome (bars + icon + caption + two tags in the bar).
+
+2026-10-05  SpriteForm round three: drag fixed, edge resize, caption over the stripes with a shadow; the
+            headless gates repaired
+------------------------------------------------------------------------------------------------------------
+  FIXED    the bar did not DRAG the window: the drag handlers were wired to the bar and the caption
+           only, while the Dock.Fill filler label between them ate every click. All bar children drag
+           now (bar, stripes, icon, filler, the extra tags). Dragging a MAXIMIZED window restores it
+           under the cursor (the grab point stays where it was on the caption), like Windows does.
+  CHANGED  cs/SpriteForm.cs is PLAIN borderless again (the WS_THICKFRAME + WM_NCCALCSIZE trick from
+           2026-10-04 is removed - it put the bar off-screen on some states): FormBorderStyle.None,
+           the DWM corner preference (rounding + shadow) stays. Edge / corner RESIZE comes from eight
+           chrome grips around the window (4 edges + 4 corners, Normal state only, full screen hides
+           them) - they start the native resize loop (WM_NCLBUTTONDOWN with the HT* code) and are also
+           the thin frame you see. An OnControlAdded re-ordering keeps them behind the bar and the
+           content.
+  ADDED    pixel-font drop shadow (the spreadsheet look): Sprite.DrawText gained an overload with
+           trailing shadowColor + shadowOffset (cs/Sprite.Text.cs) - the whole text is drawn once in
+           the shadow colour, offset down-right by offset x scale px, then the text itself on top;
+           anchors, multiline, the fallback font and blending all behave, the returned box covers
+           both passes. shadowColor 0 = no shadow. Source-compatible (nothing existing changes).
+  CHANGED  the title bar STRIPES are back to full height and the caption is drawn OVER them: the
+           StripeStrip renders the diagonal bars + the caption (pixel font, white, drop shadow) into
+           a cached Sprite and blits it (PaintToDevice); its width follows the caption length (the
+           stripe count is clamped to MinStripes..MaxStripes). The separate caption label is gone.
+           ShowStripes=false hides the whole stripe+caption block (put your own label via
+           SetTitleTags). CaptionShadowColor picks the caption's shadow colour (0 = off).
+  DEMO     the on-canvas info panel uses the new shadow (dark shadow, alpha background stays) - the
+           text is readable over any test's background now.
+  TESTS    ctlrun +3 pins (283 total): the shadow pixels appear only with the colour set, the text
+           itself is unchanged, the returned box covers the shadow.
+  FIXED    the headless gate suite was RED since the motion batch (10 of 19 gates): benchrun compiled
+           demo/Tests.cs, whose WinForms strips (ColorDemo, the motion curve editor) have no headless
+           counterparts - the WinForms strip half moved to demo/ControlsDemo.cs (MotionStrip;
+           MotionDemo keeps the pure curve / path math) and Stubs.cs gained MotionStrip + ColorDemo;
+           vecrun / benchrun exclude cs/SpriteForm.cs (window chrome, like the other WinForms files);
+           build-and-test.sh exports DOTNET_ROOT (it runs the apphosts directly) and copies the fresh
+           libSR2D64.so to ctlrun / benchrun / selchk (the path missed the SR2D segment). ALL GREEN.
+  FIXED    the round-three STRIPES + CAPTION were invisible: the StripeStrip (which now carries the
+           caption) and the icon box never got Dock = Left - they sat undocked at (0,0) BEHIND the bar's
+           Dock.Fill filler (index 0 = the front of the z-order), which covered them completely. The
+           buttons and the tags stayed visible only because docking carves their bands regardless of the
+           z-order. Both dock Left by construction now; the bar reads stripes+caption | icon | tags |
+           filler | minimize maximize close as intended.
+  CHANGED  build-and-test.sh redirects NuGet into /home/user/.cache - the ~100 MB package cache must not
+           bloat the workspace snapshot.
+
+  FIXED    the demo opened with NO title bar at all (the previous "off-screen" report was the same symptom
+           with a second cause on top): the SpriteForm rewrite built the bar but never put it ON the form
+           - the Controls.Add(bar) call and the OnControlAdded pin that keeps the bar docking first were
+           both lost in the rewrite. Restored; the launch is maximized with the bar across the top and the
+           taskbar free.
+2026-10-04  SpriteForm round two: real window feel (shadow / rounding / animations / resize), the bar finished
+------------------------------------------------------------------------------------------------------------
+  CHANGED  cs/SpriteForm.cs: the window keeps WS_THICKFRAME | WS_CAPTION under the hood and removes the
+           visible frame with WM_NCCALCSIZE - so it now has what a real window has: the DWM drop shadow,
+           Windows 11 corner rounding (switched off while full screen), the minimize / maximize / close
+           animations, Aero snap and edge / corner RESIZE (WM_NCHITTEST zones, Normal state only, never
+           over the caption buttons - full screen disables the zones). The bar itself: the caption is Plain
+           + Bold (the Heading rule was the mystery "line after the text"), the title text is actually shown
+           and follows Text, the buttons are 26 x 24 (the first cut inherited the 100 px panel default ->
+           giant buttons), close is the same size and turns Windows-close-red on hover, maximize shows the
+           restore glyph while maximized. A SINGLE click on the bar does nothing (the old synthetic
+           WM_NCLBUTTONDOWN drag made the next click land as a caption double-click -> the window restored;
+           the drag is manual now). Full screen no longer sticks: leaving sets WindowState = Normal BEFORE
+           restoring the bounds. The dedicated full screen button is GONE - right click on the maximize
+           button toggles full screen (the title bar menu keeps the command); ShowFullScreenButton was
+           removed with it, FullScreenEnabled still gates everything.
+  ADDED    SpriteForm bar decorations: the diagonal colour stripes at the very start (the count follows the
+           caption length, clamped by MinStripes / MaxStripes; StripeSeed -1 = random colours per run, any
+           other seed is deterministic; StripeColors supplies exact colours), an icon slot (TitleIcon, drawn
+           after the stripes) and extra texts after the caption (SetTitleTags - each with its own colour and
+           font). Maximize always lands on the working area, Aero-snap maximise included (the taskbar never
+           gets covered).
+  FIXED    the maximized bar sat ABOVE the screen (and Win + arrow snap broke the layout): the first cut
+           kept WS_THICKFRAME | WS_CAPTION under the hood and removed the visible frame with
+           WM_NCCALCSIZE - but Windows PLACES framed maximized / arranged windows with that invisible
+           frame hanging over the screen edge, so the client (and the bar) started off-screen, and
+           clamping one state only moved the problem to the next. REVERTED to plain borderless: what
+           you see is exactly the window in every state. The real-window feel still comes back: the
+           DWM corner preference (DWMWA_WINDOW_CORNER_PREFERENCE = ROUND) gives a borderless window
+           both the Windows 11 corner rounding and the drop shadow; edge / corner resize works through
+           WM_NCHITTEST zones; maximize is MaximizedBounds = the working area (the taskbar never gets
+           covered, Win + arrow snap-included states included). The tradeoffs of plain borderless are
+           documented in the header: no Aero snap for borderless windows and no system min / max /
+           close animations.
+  CHANGED  demo/MainForm.cs: the DLL line moved into the title bar - the path relative to the exe plus the
+           kernel set as SetTitleTags (the FULL path goes to the log line); the demo icon is extracted from
+           the exe into the bar. The old lblDll strip (the green line under the bar) is gone.
+
+2026-10-04  Demo: SpriteForm chrome (thin title bar, full screen), the info panel un-hidden, colour test split,
+            motion blur reworked (curve editor, long trails, real-time echo); build bat: demo prompt + arena unpack
+------------------------------------------------------------------------------------------------------------
+  ADDED    cs/SpriteForm.cs: a borderless form whose chrome is SR2D's own thin title bar - a visibly
+           lighter 24 px strip with the window title on the left and the Windows glyphs on the right:
+           "–" minimise, "□" maximise / restore, "⛶" full screen, "×" close (tooltips on hover; each
+           button hideable, FullScreenEnabled removes the feature entirely, ShowFullScreenButton hides
+           only the button - the command stays in the title bar menu). Drag moves, double-click maximises,
+           right click opens the window menu (restore / minimise / maximise / full screen). Maximize always
+           uses the working area (a borderless WinForms maximize would swallow the taskbar); Full screen
+           covers the monitor, or the working area with FullScreenExcludeTaskbar. The bar keeps itself
+           last in the control collection, so no content control can overlap it. The first cut shipped
+           the bar without a height (100 px default -> giant buttons), without a visible face and with
+           cryptic "+"/"^" glyphs and an empty title label - fixed to the above. demo/MainForm.cs derives
+           from SpriteForm; the ad-hoc title row is gone.
+  FIXED    the demo's info / fps panel ("clipped outside the viewport" on some tests): the 2026-10-03 title
+           row was added FIRST to the form, and WinForms docks back to front - the bar (and lblDll) ended up
+           laid out OVER the top-left of the canvas, exactly where the info panel draws. SpriteForm pins the
+           bar to the docking-first slot, so the canvas always keeps its full top-left.
+  CHANGED  demo test split: the colour controls are their own test now ("SpriteColorPicker / SpriteColorDialog")
+           - SpriteColorPicker inline on the strip, the embedded SpriteColorDialog beside the corner viewport
+           (OK paints the viewport, the eyedropper sweep is described there); the buttons test canvas no longer
+           hosts a dialog. demo/ControlsDemo.cs gains the ColorDemo strip; MainForm.ShowStrip drives the
+           embedded dialog from the colour test.
+  CHANGED  the motion blur test has three modes (the Op selector): STRAIGHT (Angle = direction, Scale = trail
+           length up to 400 px - the old cap was Blend/8 = 32 px), CURVE (the trail follows a curve edited in
+           the new strip: a SpriteCurveEditor over MotionDemo.TrailCurve, sampled every frame; Angle rotates
+           the whole trail, Blend applies the bend, Scale = length) and ECHO.
+  ADDED    cs/Effects.cs: MotionEcho - the real-time friendly motion blur. A persistent accumulator sprite:
+           each Step fades it by Persistence and draws the frame over it (two whole-surface passes at any
+           trail length, no resampling). The echo test mode renders a flying object through it (works with
+           Animate; Parallel-safe - the Step is keyed on the animation time). ctlrun pins the exact fade +
+           over composite, persistence 0 and Reset: 280 checks, 0 failures.
+  CHANGED  the test-list filter box has a clear button (right of the hint; disabled while empty - Esc still
+           clears and Ctrl+F focuses).
+  CHANGED  build_release.bat: after a green build it asks "Start the demo now? [Y/N]" (its own console only -
+           never for build-and-test.bat callers) and starts SR2DDemo.exe on Y. An earlier build also tried
+           to rename a freshly unpacked workspace-... download folder (detached helper first, then stepping
+           out of the folder in the same console) - REMOVED the same day: Windows keeps holding such a
+           folder ("open in a program") no matter what the script does, so it could not work reliably. The
+           bat is back to the plain build + the demo prompt.
+2026-10-04  Transparent voxels: alpha 1..254 composites over what is behind; KEEP_ALPHA stays a raw stamp
+------------------------------------------------------------------------------------------------------------
+  ADDED    native/sr2d_voxel.inl: a voxel with alpha 1..254 is translucent. VOXEL_FACES now exposes the
+           side toward a neighbour of LOWER alpha (outside the grid counts 0; equal alphas - e.g. the
+           inside of a uniform glass block - stay hidden); the alpha plane is gathered to one byte per
+           cell so the vector body can run whole 16/32-lane compares (saturating byte subtract, scalar
+           tail included). VOXEL_RENDER composites translucent faces OVER what is behind with their own
+           alpha (straight-alpha over, alpha channel included) in every rasteriser - flat fill, smooth
+           lighting and points mode - reusing the existing far-to-near painter's walk as the correct
+           back-to-front order, no depth buffer. KEEP_ALPHA (SR2D_VOX_KEEP_ALPHA / VoxelCamera.KeepAlpha)
+           keeps its contract: the raw voxel colour incl. its own alpha is stamped verbatim, no blending
+           (the alpha-tagged-sprite path is byte-identical to before for opaque voxels).
+  COMPAT   grids that only use alpha 0 / 255 produce bit-identical faces, light and pixels as before;
+           SR2D_VoxelScene (232 bytes), SR2D_ABI and the C# Scene mirror are unchanged - no API surface
+           moved, no version bump. Translucent voxels are still full light occluders (VOXEL_LIGHT
+           unchanged) - documented as a deliberate simplification.
+  DOCS     cs/VoxelGrid.cs doc comments only (Voxel.Argb, KeepAlpha). README voxel section: a
+           "Transparency" paragraph. sr2d_api.h VOXEL_FACES / VOXEL_RENDER comments.
+  TESTS    tests/voxtest.cpp: exact glass-over-wall side view (exposure bits, exact composite pixel,
+           pick encoding, KEEP_ALPHA stamp, SSE2 == AVX2), a 24-iteration random translucent sweep
+           (render vs a per-pixel brute-force composite reference, faces vs the brute-force rule) and
+           the main sweep's reference faces now implement the alpha rule. ctlrun: 6 new pins through
+           DrawVoxels (exposure rule, exact composites, bounds, KEEP_ALPHA stamp) - 277 checks, 0
+           failures. make test 308852 / 0 failed; demo + template build clean; projchk 68/68.
+
+2026-10-03  Motion blur effect: linear trail (degree + strength) or a custom path (+ strength)
+------------------------------------------------------------------------------------------------------------
+  ADDED    the DRAW_FX chain gains SR2D_FX_MOTION (native/sr2d_api.h, native/sr2d_fx.inl) and cs/Effects.cs
+           the builders. MotionBlur(degree, strength): the picture averaged over 2..64 taps along a straight
+           trail - direction in degrees (0 = right, 90 = down), the last tap `strength` px away, the first on
+           the pixel. MotionBlurPath(path, strength): the trail follows a polyline of 2..32 relative offsets,
+           walked uniformly and scaled by strength; the points are copied at call time (own native buffer per
+           chain, freed on Clear / finaliser, deep-copied by Append / Clone). Sampling bilinear with the
+           NEAREST / BICUBIC overrides, premultiplied averaging (the trail fades correctly over
+           transparency), and the trail extent counts into the draw's margin - nothing clips. The vector
+           kernel accumulates per channel (summing packed bytes would carry between channels), scalar trig
+           via the same fx_sin the wave uses - no libm. demo/Tests.cs: a motion blur test in the effects group
+           (Angle = direction, Blend = strength, Smooth = the arc path).
+  TESTS    tests/fxtest.cpp: motion vs references (nearest taps exact integer thirds; bilinear / arc / scaled
+           path vs the double reference within 3/255) + the stage joined the random SSE2 == AVX2 chain sweep.
+           ctlrun pins the C# path end to end (exact thirds trail incl. the semi-transparent fade over the
+           background, the downward path trail, buffer free on Clear): 271 checks, 0 failures. make test
+           308852/0, fx 0 failures; demo / template / SpriteBox warning-free; projchk 68/68.
+
+2026-10-03  Demo: borderless maximised start with its own chrome; one colour selector; the eyedropper sweep gesture
+------------------------------------------------------------------------------------------------------------
+  CHANGED  demo/MainForm.cs starts borderless and maximised (FormBorderStyle.None + Maximized) - a fixed modern-
+           screen layout (1080p / 4K) instead of the 1500 x 900 floating window that clipped strips. The system
+           chrome is replaced by the demo's own title row (SpritePanel docked top): the demo's name left, a
+           minimise ("_") and a close ("x", accented) SpriteButton right.
+  CHANGED  demo/ControlsDemo.cs: the colour selector exists ONCE now - the strip's own picker + "Dialog..." button
+           + ARGB label are gone, the embedded dialog on the canvas (right of the corner viewport) is THE
+           selector. That also removes the ShowDialog detour the "OK / Cancel only close late" reports came
+           from: the embedded buttons act synchronously (no modal loop is involved any more; Frame() keeps its
+           modal guard for API users of SpriteColorDialog.ShowDialog). The strip is four columns again
+           (ButtonsStripHeight back to 330).
+  FIXED    cs/SpriteControls.Color.cs: the eyedropper now also takes the colour on RELEASE after a sweep - press
+           the preview, sweep anywhere, release picks the pixel under the pipette (the classic gesture; a plain
+           badge click without a sweep stays armed for the one-click pick). The hex entry syncs only when its
+           text actually differs (one less per-move invalidation while dragging).
+  TESTS    ctlrun 268 checks, 0 failures: + press-sweep-release commits, + a plain badge click stays armed, + the
+           next click still picks after it. demo / template / SpriteBox build warning-free; make test 308852/0.
+
+2026-10-03  SpriteColorPicker eyedropper: take a colour from anywhere in Windows
+------------------------------------------------------------------------------------------------------------
+  ADDED    cs/SpriteControls.Color.cs: the picker's preview doubles as the eyedropper (a pipette badge is drawn
+           on its right end; the click target is the whole preview). BeginPick() arms it programmatically too:
+           the control captures the mouse and shows a pipette cursor over the ENTIRE screen - the colour under
+           it is sampled from the desktop itself (GDI CopyFromScreen, so it works over every window, not just
+           this application's), shown live in the preview. One click takes the pixel's colour, restores the
+           regular cursor and lands the colour in Value (ValueChanged as usual); Esc or right click cancels;
+           losing the capture (alt-tab) cancels. The cursor is a real pipette icon (drawn once, its nib on the
+           hotspot); headless / non-Windows runs use Cursors.Cross, and the desktop read sits behind an internal
+           ScreenSampler seam the ctlrun pins substitute (265 checks, 0 failures - arming, live sampling,
+           one-click pick + cursor restore, Esc / right-click cancel). The dialog's picker has it too.
+
+2026-10-03  Colour picker first-session fixes: square gamut, wheel inside its frame, live brightness, embedded dialog, corner viewport
+------------------------------------------------------------------------------------------------------------
+  FIXED    cs/SpriteControls.Color.cs, from the first real-window session with the v3 picker. The Wheel poked
+           1 px past its rim (the 3 px radial rays ran to radius + 1 with their half width on top - they now
+           end at half side - 4 and the hit / drag radius matches the painted edge). The gamut was a RECTANGLE
+           (it stretched over the full width left of the entry column) - it is a square now, sized to fit the
+           height, and the strips below match its width. Brightness is live: the Brightness square's hue
+           columns render at the current saturation (the code said so, the paint used full sat), and the Wheel
+           re-lights / darkens with its value bar (its rays live at the current value; the bar's bright end
+           stays full-brightness). The mode drop list is capitalised ("Hue Square" / "Brightness" / "Wheel")
+           and the scheme list's "HLS" typo is "HSL".
+  ADDED    SpriteColorDialog.CloseOnButton (default true, nothing changes for ShowDialog): with false the
+           OK / Cancel buttons stay open - they set DialogResult and raise the new ButtonClick event - so the
+           dialog can be embedded in a form (TopLevel = false). The demo's button/toggle test embeds it on the
+           canvas right of its viewport: OK paints the viewport background (visible proof, the strip's modal
+           button does the same now), Cancel reverts the picker preview.
+  FIXED    the demo's OK / Cancel felt dead: while a modal was open the bench's Application.Idle render loop
+           kept flooding the modal's message pump with full-canvas frames (255 fps), starving its input.
+           Frame() now sleeps while any WinForms modal form is open.
+  DEMO     the button/toggle test's canvas is a small corner viewport now (470 x 310 at 12, 12 with a rim; the
+           sprite scales to the viewport) - room for the dialog beside it, nothing clipped on a 1080p screen;
+           the strip row grew 330 -> 344 (330 clipped the ARGB label under the 252 px picker).
+  TESTS    ctlrun pins the square gamut in all three modes, the strip following the square, the capitalised
+           drop lists and the embedded flow (CloseOnButton = false: the OK click raises ButtonClick and keeps
+           the dialog open). The .NET SDK was re-provisioned (10.0.401 after the cache wipe) and its stricter
+           analyzers are satisfied for real: the fake Timer / RegistryKey got the full Dispose pattern
+           (CA1063 / CA1816), the fake Control carries the DefaultFont that SpriteControlBase deliberately
+           hides (CS0109), one AllowNull flow hole in SpriteBox.View.Cursor (CS8601), an InvariantCulture pin
+           (CA1305) and CA1508 off in ctlrun with a reason (the pins' event counters are "always zero" to the
+           flow analyzer - they fire at run time). ctlrun: 255 checks, 0 failures; demo / template / SpriteBox
+           build warning-free (demo with analyzers latest-recommended).
+
+2026-10-02  Colour picker v3: gamut modes, colour schemes, hex I/O, a themed dialog - plus two control fixes
+------------------------------------------------------------------------------------------------------------
+  ADDED    cs/SpriteControls.Color.cs reworked on user feedback. SpriteColorPicker gains SelectorMode
+           (HueSquare - x = saturation, y = value with the hue strip; Brightness - x = hue, y = value with the
+           saturation strip; Wheel - angle = hue, radius = saturation with the value strip, drawn as 720 radial
+           rays) and ColorScheme (Rgb / Hsb / Hsl / Yiq / Lab / Cmyk) - two combos drive the numeric entry
+           column; the six conversions are pure internal statics (D65 Lab, L 0..100 / a,b -128..127, exact
+           CMYK) and are round-trip pinned headless (CMYK bit-exact, HSV / HSL / YIQ within 1/255, Lab within
+           3/255 over a stride walk of the RGB cube). New Hex property with a hex entry: reads #RGB, #RRGGBB
+           and #AARRGGBB with or without the '#', always outputs #AARRGGBB, ignores garbage. SpriteColorDialog
+           rebuilt: the face is SpriteControlBase's dark colour (was the system Form grey), OK / Cancel are
+           SR2D buttons that close through the form's DialogResult (SpriteButton is no IButtonControl, so
+           AcceptButton / CancelButton are out) and KeyDown wires Enter = OK, Esc = Cancel.
+  FIXED    the marker did not follow a mouse-picked colour: SetHsv stored the hue but never the saturation /
+           value. An achromatic colour now keeps the current hue instead of snapping the marker. Scheme
+           switches route through the sync flag so re-ranging the numerics cannot counterfeit a user edit.
+  FIXED    cs/SpriteControls.cs: a discrete slider's value text was reported "completely cropped" - it was
+           rounding: the entry list (e.g. 0 / 0.5 / 1) still formatted with Decimals = 0, so 1.5 displayed as
+           "2". Discrete.DecimalsOf derives the needed decimals from the values (max 3), EffectiveDecimals
+           uses it for discrete lists, and the horizontal value scales to fit its third of the track
+           (FitScale), so full-scale values shrink instead of clipping.
+  DEMO     controls strip: the picker cell grows to 250 x 252 for the two new combos; the "Limit fps to" row
+           drops to the 24 px every other row uses (it was reported misaligned - it was 2 px taller, not
+           offset; the user-confirmed FrameInset alignment from the v2 entry is untouched).
+  TESTS    tests/cs/ctlrun: the colour section re-pinned (round-trips, hex parse table, dialog Value in / out,
+           RenderOnce across every mode / scheme / layout) + the SpriteStackPanel.FrameInset alignment pins
+           (a nested row's children match a direct row's X exactly when the inner frame is off, differ by the
+           2 px frame when on). The Fake grows Form.AcceptButton / CancelButton and Control.DialogResult.
+           ctlrun: 246 checks, 0 failures.
+
+
+2026-10-02  SpriteColorPicker + SpriteColorDialog (cs/SpriteControls.Color.cs); the Setup-tab checkbox alignment fixed for real
+------------------------------------------------------------------------------------------------
+  ADDED    cs/SpriteControls.Color.cs: the colour selector in the two shapes applications need. SpriteColorPicker is
+           the on-form control: a saturation / value square (gradient fills: white -> pure hue, then a vertical fade
+           to black), a six-segment hue bar, an optional alpha bar over a checkerboard (ShowAlpha), a colour preview
+           with the #AARRGGBB readout and an R / G / B / A entry column (ShowRgb) - drag anywhere in the square /
+           bars, or type exact values; ValueChanged fires per change, and an achromatic colour keeps the previous
+           hue instead of snapping to 0. SpriteColorDialog is the modal ColorDialog stand-in around it (FixedDialog,
+           OK / Cancel buttons, Enter / Esc, Value in and out). The HSV maths is pure and internal-published
+           (RgbToHsv / HsvToRgb) so it is testable headless. Eleven new ctlrun pins: primaries, alpha placement, the
+           hue / saturation / value round-trip grid (achromatic cases excluded - a grey has no hue by definition,
+           tolerances absorb the 8-bit quantisation), Value event / round-trip semantics, ShowAlpha keeping alpha,
+           and RenderOnce in both layouts. The headless Fake grows the dialog surface the real Form provides
+           (FormBorderStyle.FixedDialog, Min / MaximizeBox, KeyPreview, DialogResult, Close, ShowDialog). The demo's
+           controls strip gained a fifth column: the picker live, a "Dialog..." button and the current ARGB.
+           ctlrun: 235 checks, 0 failures.
+  FIXED    demo Setup tab: the "Limit fps to" checkbox sat 2 px right of the column (the same offset on the nested
+           "Run suite" row). Root cause found this time: SpritePanel.DisplayRectangle hard-codes the 2 px frame
+           inset and does NOT read Padding, so the previous negative-Padding "fix" was a no-op - which is exactly
+           why it never yielded a result. SpriteStackPanel gains FrameInset (default true, nothing changes for
+           existing layouts); the two nested rows set FrameInset = false and align edge to edge with the direct
+           rows. cs/SpriteControls.Static.cs, demo/MainForm.cs.
+
+2026-09-30  Hotfix: restore the Link block the fps-rollback splice had dropped (undefined memcpy/memset on Windows)
+--------------------------------------------------------------------------------------------------------------------
+  FIXED    native/SR2D.vcxproj: the 2026-09-30 false-alarm rollback earlier rewrote this file with a text splice
+           and silently dropped the whole <Link> block - module definition (SR2D.def, the export table!) and the
+           linker inputs. The first native build after that (the /sdl trial) failed with undefined memcpy /
+           memset: nothing told lld-link to pull the static CRT members that define them, and the DLL would have
+           shipped without exports. The block is restored (SR2D.def wiring, ASLR) with the static CRT libraries
+           pinned explicitly (vcruntime.lib; libcmt.lib; libucrt.lib) - the original project already carried
+           vcruntime.lib this way. Startup stays out (entry point is DllMain, no CRT init runs). Lesson taken:
+           the spliced region was re-verified only for XML well-formedness, not against the git-era shape - the
+           manifest diff caught the file change but nothing caught the block loss before a build did.
+
+2026-09-30  /sdl enabled (B-01 follow-up) - verified on Windows, see below
+------------------------------------------------------------------------------------------------
+  CHANGED  native/SR2D.vcxproj: <SDLCheck> true (was deliberately false pending a Windows trial). /sdl makes
+           MSVC reject a specific set of dangerous-code patterns at build time (uninitialized locals, unary
+           minus on unsigned, compile-time-visible buffer overruns, deprecated CRT calls) and pre-initializes
+           some stack pointers. It cannot change pixel arithmetic, so the byte-exact differential suite stays
+           valid. First build on Windows may therefore FAIL with new errors - that is the feature working; the
+           promoted warnings get triaged and fixed, not suppressed wholesale.
+           VERDICT (same day): the Windows trial passed - VS 2026 18 Community, ClangCL toolset, Release x64
+           builds clean (no new warnings), the demo runs; /sdl stays on permanently. (The build failure of the
+           first attempt was the dropped Link block - separate hotfix above, not /sdl.)
+2026-09-30  B-05 + B-07 (docs integrity): the check-coverage table, qualified warning claims, projchk guards the table
+------------------------------------------------------------------------------------------------
+  DOCS     README.md "Verification" grew "What every check covers (and what it needs)": one table over every check
+           - the native make targets (so / test / asan / tsan with what each suite inside covers), all fifteen
+           tests/cs runners (what they cover, what they need - DLL and/or generated references - and what they do
+           NOT cover), the python helpers, the demo suite and the build-and-test driver. B-05's "state the
+           coverage of every check project in one table" (the dual-mode codec harness is NOT part of this - it
+           stays open). The stale difftest sample output in the same section (pre-dispatch-refactor numbers, no
+           regchk / dispatch / voxtest lines) was replaced with a fresh `make test` capture.
+  TESTS    tests/cs/projchk.py now asserts the table stays complete: every tests/cs folder with a csproj (and the
+           loose curvetest.csproj) must appear in the table in the full `tests/cs/<name>` row form - a bare name
+           mention elsewhere does not count (the build-and-test row's "does NOT cover" list would otherwise fool
+           the check). A missing runner from the docs is now a red gate, no CI required. Verified both ways:
+           removing a row fails the check, restoring it passes.
+  DOCS     B-07: the absolute "warning-free" claims are qualified to "warning-free for the rules that are
+           enabled" (README analyzers section + the DrawParallel section; two CHANGELOG entries reworded in
+           place), and the five .editorconfig rules that silenced analyzers without an inline reason (CA1512,
+           CA1850, CA1870, CA1846, CA1823) carry one now. After the rewording README contains no quality claim
+           that depends on a configuration the reader cannot see.
+2026-09-30  False-alarm fps report closed; tests/opbench perf harness kept, mitigations verified
+------------------------------------------------------------------------------------------------------------------
+  CHANGED  A report of the demo's "Draw (Op selector)" bench dropping from ~1500 to ~1100 fps triggered an A/B of
+           the round-2 B-01 mitigation flags (/GS + /guard:cf assembly-wide): for a moment the two SIMD kernel
+           TUs were built without them. The report did not reproduce (the slow run was a background load on the
+           reporting machine; with AND without the flags the bench sits at the same ~1600-1700 fps), so the
+           scoping was ROLLED BACK - the mitigations are assembly-wide again, and the "measured cost is noise"
+           claim in the vcxproj is now verified instead of assumed (a Linux/GCC opbench A/B showed only
+           noise-level differences; keep in mind each flag alone is a small cost and the two add up, so re-check
+           with tests/opbench before piling more mitigations on).
+  TESTS    tests/opbench/opbench.cpp (kept from the investigation): a tiny headless harness that times the demo
+           "Draw (Op selector)" frame shape - a tiled Paint checker plus grids of Paint / AlphaBlend blits - for
+           future perf A/Bs. Build: g++ -O2 opbench/opbench.cpp -L build -lSR2D64 -o build/opbench; run from
+           tests/ (needs build/libSR2D64.so).
+2026-09-30  Hotfix: the I-03 DllImport pin broke non-KnownDLL system DLLs (demo died on winmm)
+------------------------------------------------------------------------------------------------
+  FIXED    cs/SR2D.cs: the assembly-wide DefaultDllImportSearchPaths pin from the review round allowed only
+           the application directory. gdi32 / user32 / kernel32 kept loading (KnownDLLs bypass the search
+           path), but winmm does not - the demo crashed in its constructor on the timeBeginPeriod P/Invoke
+           with DllNotFoundException "winmm" (0x8007007E). System32 is back in the set (ApplicationDirectory
+           | System32): the hardening goal stands - the current directory and PATH stay out - and system
+           DLLs resolve again. A ctlrun pin asserts the attribute keeps both directories, so re-narrowing
+           it can no longer pass the gates.
+2026-09-30  SpriteBox warp bench (apps/SpriteBox) + Sprite.DrawQuadWarp (cs/Sprite.Warp.cs)
+------------------------------------------------------------------------------------------------
+  ADDED    cs/Sprite.Warp.cs: Sprite.DrawQuadWarp - four-corner warp. The part of a source sprite framed by a
+           quadrilateral is re-projected onto another quadrilateral of the target by inverse-bilinear sampling
+           (nearest fetch; identity quad = byte-exact; every quad edge maps linearly, so quads sharing two
+           corners stay seamless when a shared vertex moves - no crack along the seam). Pixels outside the
+           destination quad and self-intersecting (bowtie) quads are left untouched instead of throwing; the
+           lock rect protects pixels like on every other verb; premultiplied sprites convert like FillPattern.
+           Op: Paint (replace, default) or AlphaBlend (straight-alpha over). Sprite.QuadInvert publishes the
+           inverse map as the point-in-quad test. Ten new ctlrun pins cover identity, exact translation,
+           corner landing, shared-seam closure, bowtie safety, AlphaBlend alpha handling, the lock rect and
+           QuadInvert. ctlrun: 223 checks, 0 failures.
+  ADDED    apps/SpriteBox: a small Photoshop-style warp bench (net10.0-windows, x64, same source-sharing layout
+           as template/). CageBox hosts the engine's own SpriteBox viewport (Space / middle pan, Ctrl + wheel
+           zoom at the pointer, plain wheel scrolls, pixel grid, scroll bars) and adds the cage: "Add quadrangle"
+           clicks four corners (corners snap onto existing vertices and MERGE on drop, so neighbouring faces
+           share corners like the wall / floor faces of an isometric room), "Start warping" freezes the cage as
+           the warp source and vertex drags deform every quad sharing the vertex, live (DrawQuadWarp, coalesced
+           per frame; the cage overlay is drawn in screen space, so outlines and handles stay crisp at any zoom).
+           Open / drag-and-drop (managed decoders), undo / redo of placement, merges, drags and mode switches,
+           Delete removes a quad, Save flattens the result (PNG with alpha / JPEG / BMP). Form follows the DPI
+           policy from the review round (SystemAware + AutoScaleMode.None). build-and-test.sh / .bat build it as
+           a gate.
+2026-09-30  Review round 2: engine safety + managed parity (seac guard, view lifetime, pattern fill, undo accounting, resolver scoping)
+-------------------------------------------------------------------------------------------------------------------------------------------
+  FIXED    cs/Vector.Fonts.cs: a seac composite component chain can no longer recurse forever. Glyph building now runs
+           under a per-thread depth budget (8); a deeper chain logs and produces the .notdef glyph. A glyph that lists
+           ITSELF as a component no longer wedges the build either - the in-progress mark in the glyph cache resolves
+           such a cycle to notdef immediately. CFF and Type1 share the guard. [C-03]
+  FIXED    cs/Sprite.cs: views no longer outlive their buffer. CreateView registers the view with its owner; FreeBuffer
+           poisons every registered view first (buffer pointer nulled, dimensions and lock rect zeroed, recursively for
+           views of views), so a view used after its owner was disposed (or finalized) is a 0x0 no-op instead of writing
+           into freed memory. Dispose unregisters itself from its owner. [S-01]
+  FIXED    cs/Sprite.Pattern.cs: FillPattern used to paint through the lock rect of a locked sprite (every other verb
+           respects it), flushed no pending GDI output before touching the buffer, ignored the premultiplied flags of
+           both sprites, and its OVER mix invented destination alpha over transparent pixels (~207 instead of the
+           engine's alpha^2/256 falloff) and hand-rolled Blend with float rounding. It now clips to the lock rect,
+           calls GdiFlush, converts premultiplied in and out, and composites byte-exactly like the native per-pixel
+           ops (line_px case 3 OVER / case 4 Blend, all four bytes). [S-03]
+  FIXED    cs/EditHistory.cs: the MemoryBytes account drifts. Undo subtracted Before's bytes while the entry kept them
+           (Redo added them back), so redo-side entries were under-counted - Trim could evict valid history or the cap
+           stopped working; entries whose After was filled on Undo were never charged the clear of a discarded redo
+           tail at all. The account now charges every entry its full Before + After wherever it lives; a DEBUG-only
+           assertion cross-checks the account against the lists after every mutation. [S-06]
+  CHANGED  cs/SR2D.cs: the DLL resolver is scoped. The ancestor walk stops at the project folder (it only continues
+           while inside bin/ or obj/ - before, four arbitrary levels up were probed and the first hit won, so a
+           planted SR2D64.dll in any writable ancestor was loaded). SR2D_DLL is only honoured for a trusted absolute
+           path (existing file, no ".." segments). An assembly-level DefaultDllImportSearchPaths pins the default
+           fallback probing to the application directory - never the current directory or PATH. compat: none for
+           normal builds (the walk still finds the .so next to the project); only odd layouts that relied on probing
+           four levels up change behaviour. .editorconfig: the CA5392 suppression is gone (the rule is satisfied).
+           [I-03]
+  CHANGED  native/SR2D.vcxproj: /GS is back ON (BufferSecurityCheck true - the kernels draw caller-shaped geometry,
+           a canary turns the silent-corruption class into a loud crash, measured cost is noise) and /guard:cf is on
+           (ControlFlowGuard Guard - compatible with the custom entry point). The Win32 (x86) configuration is marked
+           EXPERIMENTAL in a comment (nothing consumes a 32-bit SR2D.dll; the P/Invoke layer is x64-only). Exception
+           handling stays off deliberately (documented in-place). compat: none - no arithmetic touched, difftest
+           parity holds. [B-01]
+  DOCS     README.md: the probing list matches the scoped resolver, and a new "DPI (deliberate)" section documents why
+           the template pins SystemAware + AutoScaleMode.None (device-pixel rendering and hit-testing, the pixel font
+           is never auto-scaled; switching to PerMonitorV2 + scaling would blur it and desynchronise the hand-computed
+           control metrics). The template csproj and MainForm.Designer.cs carry the same rationale as comments, so the
+           policy survives where the README is not read. [W-04]
+  FIXED    demo/MainForm.cs: RebuildCanvas created a fresh Ctx with Frame = null until the next test selection -
+           anything reading ctx.Frame in between dereferenced null. The rebuild now carries the current frame over,
+           and FillCtx re-asserts it on every fill. [D-02]
+  FIXED    demo/Tests.cs: BuildBlendLayers leaked its four per-build sprites on every cache rebuild (LayeredSprite
+           does not own its sources) - the stack now tracks and disposes them (the shared alpha asset stays shared).
+           [D-03]
+  TESTS    demo/Tests.cs: DemoTest grows an optional Check hook - the suite runs it once per pass after the timed
+           frames on a deterministic frame and logs/asserts the verdict (null = pass). Three checks wired: the Lines
+           old-vs-new test asserts all three fans drew; the Layer test asserts both blend halves composite over the
+           checkerboard; the Rotate test asserts DRAW_ROT and its UseWarp routing agree within the documented edge
+           tolerance. The suite is on its way from a frame generator to an asserter. [D-05]
+  TESTS    tests/cs/ctlrun: seven new pins - pattern fill OVER keeps a sane alpha over transparent pixels, the lock
+           rect protects pattern fills, the edit-history account stays bounded and non-negative through record / undo
+           / redo loops and releases a discarded redo tail, a live view draws through to its owner (and stays clipped),
+           a view whose owner died is a poisoned no-op. ctlrun: 213 checks, 0 failures.
+  TESTS    tests/Makefile: the asan target also runs linetest (500 iterations) and regchk under ASan/UBSan - the two
+           suites that pin the buffer guards and the ABI line now do it sanitised.
+2026-09-28  Selection-scoped Move + Offset (move tool / offset filter), pen cursor, grid + strip demos
+-------------------------------------------------------------------------------------------------------
+  ADDED    cs/Sprite.Move.cs: the two selection-scoped move ops. Sprite.Move(sel, dx, dy) is the Photoshop move tool
+           inside one sprite - the selected pixels travel, the source turns transparent (coverage-weighted, so a
+           feathered selection moves with soft edges), content pushed off the sprite is clipped, overlapping
+           source / destination handled by a snapshot. Sprite.Offset(sel, dx, dy, wrap) is Filter > Other > Offset
+           restricted to a selection - nothing is cleared, the content redistributes inside the selection, wrapped by
+           SelOffsetWrap.BoundingBox (around the selection's bounding box, the Photoshop behaviour) or
+           SelOffsetWrap.Spans (within the selected runs of each row / column, so a non-rectangular selection never
+           jumps across its gaps). Both keep the marquee, are exact for opaque pixels and blend
+           source * weight + old * (1 - weight) at the destination. Pure managed (no new native exports).
+  ADDED    SpriteCursors: a pen cursor - Kind.Pen (tip at the hot spot, dark nib, white body) and the
+           SpriteCursors.Pen property, for surfaces you draw on with the left button.
+  ADDED    cs/Curve.cs + cs/SpriteControls.Curve.cs: an editable 0..1 curve (the Photoshop-curves / 3ds Max
+           Color-Map style control data) and its editor control. Curve = sorted points evaluated by monotone cubic
+           interpolation (Fritsch-Carlson - passes through the points, never overshoots, safe as a speed profile or
+           a Levels-style ramp; Reset / Set / Add / Move / Remove keep the invariants, endpoints pinned, max 12
+           points; Curve.Clamp01 = false allows values above 1 / below 0 (overshoot), ClampTo01 / CompressTo01 bring
+           them back (pin, or rescale keeping the shape)). SpriteCurveEditor draws the plot (guides + the labelled
+           0 / 1 lines + identity diagonal + curve + points): left drag moves a point, a click on empty space adds
+           one (a click nearer than Curve.MinGap to a point moves THAT point - no more near-duplicate floating
+           nodes), right click on a point removes it, right click on empty space opens an SR2D menu (clamp /
+           compress / zoom to 0..1 / reset), the mouse WHEEL zooms the value axis (view 0.25..4 wide within -3..3).
+           The caption sits on its own row below the plot (it overlapped the plot before); the editor moved from a
+           canvas strip into the TEST TAB settings (visible only while the Op box has "Curve" - DemoTest.SettingsControl
+           / SettingsVisible). The selection-tool strip shrank to one compact row (the old buttons ate half the
+           window) and gained a "Reset picture" button (a fresh Lenna: no paint, no offsets, no selection); the
+           selection scenario got its missing PaintByMouse wiring back - drawing a selection and the pen were dead.
+           The tangent progress graph moved below the info lines (it was overlapped by them).
+           a point, a click on empty space adds one, right click removes it (endpoints protected). The demos' "Curve"
+           tangent feeds it straight into the motion shaping; the same class is ready for Levels / colour curves.
+  ADDED    cs/Animation.cs: keyframe tracks with the 3ds Max tangent model. TangentMode = Smooth (ease in-out),
+           Linear, Step, Fast (fast start), Slow (slow start), Spline (custom HandleIn / HandleOut slopes on the key)
+           and Auto (the default: Catmull-Rom slopes from the neighbouring keys - rests at extremes, never overshoots;
+           a standalone key pair falls back to the segment slope). Track = sorted keys, Evaluate(t) -> value for any
+           lerp (position, angle, frame index), plus the single-segment helpers Track.EaseAt(mode, u) /
+           Track.EaseSegment(a, b, u) for shaping without a track. FIXED on the way: Step delivered 0 for the WHOLE
+           segment including its end - an animation shaped by Step never reached its key (now u = 1 jumps to 1).
+  ADDED    discrete value mode for the numeric controls: Values (any predetermined set, sorted and de-duplicated,
+           every input snaps to the nearest entry) and PowersOfTwo (the powers of two inside Minimum..Maximum, the
+           list follows range changes) on SpriteKnob / SpriteSlider / SpriteWheel (SpriteRangeControl) and
+           SpriteNumeric. Wheel, arrow keys and buttons step one ENTRY at a time (never value + Step, which gets
+           stuck between entries); drags (incl. the CommitOnRelease preview) and typed text snap to the nearest
+           entry; the plain Snap + Step arithmetic grid keeps working (a Values list wins). With a list the thumb
+           spacing is EVEN (position by index, not by value), ShowNotches draws a tick per value (the list or the
+           Snap + Step grid) and NotchLabels prints it (overlapping marks skipped) - slider along the track, knob
+           around the body. Shared Discrete helper (Norm / IndexOf / Nearest / Next / Pow2). ctlrun: 13 + 15
+           checks (snapping, sorting, even spacing, notch rendering, tangents).
+  ADDED    an ABI handshake + layout pins, from the third-party review: SR2D_ABI_VERSION() exports
+           SR2D_ABI (native/sr2d_api.h - bump it with the op list / op-word encodings / struct layouts),
+           the managed resolver calls it after every load and REFUSES a mismatched library with a readable
+           error (a stale SR2D64.dll used to load and silently draw garbage), and the three mirrored
+           structs are pinned on both sides (static_asserts in sr2d_api.h: FxStage 80 / Voxel 8 /
+           VoxelScene 232 - the header's "224 bytes" headline predating the v3 append is fixed too; a
+           managed size check runs before the first native call).
+  FIXED    three native kernel defects, each now pinned by tests/regchk.cpp (new, part of make test, runs
+           on BOTH dispatch tables): BLEND / MASK_BLEND / the DRAW_WARP + DRAW_BLUR blend paths masked the
+           documented 0..256 blend factor with & 255 - k = 256 ("100 % source") blended NOTHING and
+           257..511 wrapped to arbitrary factors (it clamps now; the ORIGINAL engine wraps k through (byte)
+           the same way, so difftest asserts parity on 0..255 and regchk owns the documented boundary -
+           difftest stays at 308852 checks / 0 failed); DRAW_LINE2 wrote one pixel OUTSIDE the clip rect
+           for a zero-length segment at a half-pixel coordinate (all four Liang-Barsky axes passed the
+           +/- 0.5 slack and the major endpoint rounded past the buffer - the major axis is clamped like
+           the minor one always was); a sub-pixel dot+gap dash period made the dash enumeration span ~2^64
+           iterations with UB conversions and drew nothing (a degenerate pattern now means solid).
+  FIXED    native DRAW_FX: a DISABLED DISTORT_MAP stage with a null map aborted the whole draw although
+           DISABLED is documented as "skipped" - the validation skips disabled stages like every other
+           pass already did.
+  FIXED    hostile-file deaths in the importers: the PostScript interpreter (EPS / AI) validates array /
+           packedarray / string / put / putinterval sizes before allocating (a "1000000000 array" token
+           reached an uncatchable OutOfMemoryException; the catch list gained the two missing exception
+           types), the tokenizer skips ')' and unknown bytes in a LOOP (a run of them recursed once per
+           byte into a StackOverflowException, which kills the process) and nested '{' procedures are
+           budgeted; the .vox parser makes an XYZI voxel count fit its chunk before allocating, ReadDict
+           consumes exactly what it decodes (a negative key length moved the cursor BACKWARDS - an endless
+           loop) and the scene-graph child counts are checked against the remaining bytes;
+           VoxelGrid.ApplyProjections de-duplicates views per face and bounds its fill loop (more than six
+           views wrote past four fixed 6-entry stackalloc buffers - stack corruption).
+  FIXED    controls, from the same review: the curve editor never took mouse capture (a drag died at the
+           control border - exactly where the endpoints live), an open menu swallowed EVERY key of the
+           process including Alt+F4 and Ctrl+C (unhandled keys reach the focused control / the form;
+           modifiers never belong to the menu), the SpriteWheel drag froze at an end (RepaintRequested was
+           never set to true - the flag has its producer back), TextView.AppendLine coloured a run sized
+           by the RAW string while storing the tab-EXPANDED line (colour stopped at the first tab; runs
+           are clipped to the stored line on read too), SpriteBox.Present() cleared _dirty without running
+           the renderer (Redraw() + Present() from a constructor dropped the first frame - Present never
+           consumes a pending render now), Sprite.Effects Blur / ToBlurred honor Sprite.Premultiplied
+           (DrawBlurred already did - a hand-premultiplied sprite blurred dark with halos), the perceptual
+           wand no longer leaks its temporary native mask (and Selection gained a finalizer), the
+           LayeredSprite 64 MB parallel-scratch budget actually binds now (the batch size was clamped UP
+           to the thread count, so a huge composite allocated hundreds of MB), and Curve.Set no longer
+           grows past MaxPoints (duplicate x = 1 keys), drops near-duplicates (the MinGap rule - the paste
+           path feeds Set) and clears the point-type list with the points.
+  ADDED    build-and-test.sh / build-and-test.bat: one entry point each - native clean build + the full
+           differential suite, every headless runner, projchk, the demo (both Implicit modes, analyzers)
+           and the template; global.json pins the SDK major. The test harnesses reference cs/ through
+           RELATIVE paths now (they were absolute /home/user lists - nothing could compile away from that
+           one machine) and their output paths fall back to the defaults off Linux.
+  ADDED    curve editor, round 2: point TYPES (the 3ds Max node semantics) on the Curve points -
+           CurvePointMode = Auto (the automatic smooth slope, the default), Flat (the curve rests at the point,
+           slope 0 - a plateau at the key) and Linear (the segments meeting at the point run straight through it -
+           a corner with constant speed); Evaluate picks the slope per point (SetMode / ModeAt, every Set / Add /
+           Reset defaults to Auto). The editor's menu gained a "Point type" sub menu for the selected point
+           (Auto / Flat / Linear radio items; Flat points draw a little horizontal rest mark), "Copy as code"
+           (Curve.ToCode(): the points as a paste-able invariant-culture C# snippet) and "Paste points"
+           (SpriteCurveEditor.TryParsePoints tolerates the copied snippets, tuples and bare number pairs).
+           "Help" in the menu overlays the gesture list over the plot (the clipped caption row is GONE - the
+           control is now captionless; any click closes the overlay). The wheel zooms anchored at the BOTTOM
+           line (zero while un-panned - the curve stays in sight) and the MIDDLE button pans the value axis
+           up / down (view still 0.25..4 wide within -3..3). Menu closing fixed: ANY click on the editor now
+           closes a popped-up menu first (the click is swallowed - no more point added under the open menu),
+           a click anywhere else on the form closes it too (the editor's LostFocus + the filter's opener
+           handling for BOTH buttons). FIXED the demos' "Curve" Op doing nothing: TangentTools.BuildEditor
+           edits the curve instance the motion evaluates - the editor now rebinds Motion on creation, every
+           drag shapes the block's movement live. An overshooting curve also moves the block / strip BACK
+           (signed steps, the strip's end condition is time, not the counter). The scramble + chaos tests
+           show the same editor in their test-tab settings (shared TangentTools.Motion - one curve drives
+           every test's Op "Curve" / tangent shaping). ctlrun: +4 checks (point modes shape Evaluate,
+           ToCode / TryParsePoints round trip) - 206 total.
+  DEMO     the block demos reworked after the first live run: the offset showcase is THREE tests (per-scenario
+           controls). "Offset: grid scramble" (strip never repeats, shift snapped to the grid but capped by the
+           picture, tangent + strip width + speed + grid lines only, pen paints), "Offset: selection tool"
+           (Rectangle / Ellipse / Lasso / PEN buttons - the pen paints, the shape tools only select, never both at
+           once; the marching ants + faint tint draw on the CLEARED canvas, not onto the board - the old code
+           accumulated a solid white blob; Offset X / Y sliders push the selection 1:1, "Wrap rows / cols" =
+           Spans; no grid / speed controls) and "Offset: full scramble" (all 512 single-px lines - rows AND columns,
+           random positions / directions / amounts, width 1 - rotate CONTINUOUSLY without pauses; the Workers slider
+           picks how many lines advance at once and they really run in a Parallel.For over that window, results
+           identical for any count; tangent + workers + speed only). The move and the scramble/chaos tests draw the
+           tangent progress graph in the canvas's top-right (the info area, never over the sprite); the move test's
+           Op box gained "Curve" - the SpriteCurveEditor on its strip shapes the motion. The discrete controls'
+           notch labels now render at the smallest pixel font and only where they fit (nothing clips outside the
+           control), the knob prints its notch numbers inside the body. (+ the GControls "Discrete values" test with its own strip:
+           a Snap+Step slider, a PowersOfTwo slider, a Values-list slider (all with notches + labels), a Values knob
+           with ticks and numbers and a snapping SpriteNumeric, live values on the canvas). "Move: grid shuffle + pen paint": Lenna is cut into a grid puzzle,
+           one block erased, every step a RANDOM neighbour of the hole (never the just-moved block) is selected and
+           animated into it with Sprite.Move; the pen paints over the picture (PaintByMouse tests: pen cursor, the
+           left button paints through Ctx.PenDown / PenX / PenY) and every block carries the paint it picks up - paint
+           landing in the hole is erased by the next move-in. "Offset: strip scramble": a random full row / column
+           strip is selected and Sprite.Offset shifts it along itself by 1..3 strip widths, animated. Both are driven
+           by the new Grid (block px, a Values power-of-two list 8 16 32 64 128 256 - the cells always divide the 512 board,
+           gray semi-transparent, the "Grid lines" check box toggles it) and Speed (animation, 1..100 = 8..800 px/s)
+           sliders (Param.Grid / Param.Speed / Param.GridOn, defaults 64 / 6 / on). The MOVE test's Op box picks the
+           motion TANGENT (Smooth / Linear / Step / Fast / Slow / Spline / Auto, Param.Op) - the block travels along
+           Track.EaseAt and a little progress graph in the board's corner draws the shaping; the tests pin the "Sprite
+           size" setup to 512 (DemoTest.SpriteSize). The OFFSET test grew three scenarios (Op box): GRID SCRAMBLE (a
+           strip never repeats the previous one; the shift is snapped to the grid but capped by the picture size),
+           SELECTION TOOL (rectangle / ellipse / lasso buttons above the canvas - each shape replaces the selection,
+           the Offset X / Y sliders push it around 1:1, "Wrap rows / cols" = SelOffsetWrap.Spans instead of the
+           bounding box) and FULL SCRAMBLE (all 512 rows rotate by their own random amount, animated, in PARALLEL -
+           the Workers slider (Param.Count) sets how many rows rotate at once; rows are independent, so the result is
+           identical for any worker count). The pen paints in every scenario.
+  FIXED    demo: the grid demos drew their grid lines with swapped FillRect arguments (the y coordinate landed in
+           the width slot) - a huge translucent bar over the upper canvas (the "gray rectangle" over the viewport)
+           instead of 1 px lines.
+  TESTS    ctlrun: 34 new checks - SelectionMoveOps: move vs an independent reference (5 offsets incl. overlap and
+           edge clipping, feathered diamond coverage, opaque-pixel exactness, zero / empty no-ops, foreign-size
+           guard, immobile marquee), offset vs reference (row strip along itself, full-sprite diagonal, BoundingBox
+           across a gap vs Spans inside each block, feathered coverage, content-permutation and outside-untouched
+           properties), plus the pen-cursor picture guard in CursorSheet (sheet now 800 px wide, 6 cursors); and
+           DiscreteValues: nearest-entry snapping, sorted lists, pow2 range following, one-entry Nudge stepping,
+           the Snap+Step arithmetic grid unchanged.
+           Found on the way and fixed: ScalePix / OverPix packed (R<<16|B)*255 math overflowed a signed int
+           (per-lane math now; the native Extract avoids the same trap with unsigned *257).
+  CHANGED  LICENSE: copyright holder renamed to IntegerIsOverflowed (the account rename, applied to the file).
+
+
 2026-09-27  Edit history (undo / redo), SpriteBox dirty-rect redraw
 ---------------------------------------------------------------------------
   ADDED    cs/EditHistory.cs: rect-based undo/redo for in-place edits. EditHistory.Record(sprite, rect) (or the
@@ -94,7 +1545,7 @@ Conventions
            (enabled by this repo's .editorconfig) does not recognize, so declaring your own Sprite / Bitmap field
            flagged the form. Disposable fields are now released in Dispose(bool) (MainForm.Designer.cs; the
            designer preserves that method), the redundant OnFormClosed override is gone, and the starter comments
-           the pattern so a fresh copy starts warning-free.
+           the pattern so a fresh copy starts warning-free (for the enabled rules - see .editorconfig).
   FIXED    demo: typing into the search box (and any text control) lost most keystrokes - only 1-2 characters got
            through. The game loop's inline message drain removed the pending WM_KEYDOWNs and dispatched them WITHOUT
            TranslateMessage, so no WM_CHAR was ever generated (the mouse never noticed: buttons need no translation).
@@ -863,7 +2314,7 @@ Conventions
   CHANGED  native/sr2d_fx.inl: three inner "k" locals in DRAW_FX shadowed the blend-factor
            parameter (renamed kd; no behaviour change, the parameter was only used after the
            blocks closed), two implicit int->float conversions made explicit. Every -Wall
-           -Wextra -Wshadow build is now warning-free with g++.
+           -Wextra -Wshadow build is now warning-free with g++ (both SIMD levels; warnings not promoted to errors).
   TESTS    tests/cs/edgechk (edge-case runner, "edgechk: all passed") and tests/cs/vecfuzz
            (mutation fuzzer: `vecfuzz <iterations> <seed>`, or `vecfuzz <file>` for one file
            with a stack trace). The two fuzz-found inputs are kept as tests/vec/fuzz_oom1.pdf

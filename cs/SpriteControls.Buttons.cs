@@ -10,7 +10,7 @@ namespace Sr2d64CSport
     // on the shared SpriteControlBase (palette, TextScale, hover, synchronous repaint).
 
     /// <summary>Base of the clickable controls: pressed state, click on release inside, Space / Enter from the keyboard.</summary>
-    internal abstract class SpriteClickable : SpriteControlBase
+    public abstract class SpriteClickable : SpriteControlBase
     {
         bool _pressed;
         /// <summary>True while the left button (or Space) is held on the control.</summary>
@@ -75,7 +75,7 @@ namespace Sr2d64CSport
     }
 
     /// <summary>Shape of a <see cref="SpriteButton"/>.</summary>
-    internal enum ButtonShape
+    public enum ButtonShape
     {
         /// <summary>Rounded rectangle (corner radius 20 % of the height).</summary>
         Rounded,
@@ -93,7 +93,7 @@ namespace Sr2d64CSport
     /// (accent-coloured face). Raises <see cref="Control.Click"/> on release inside (or Space / Enter).
     /// </summary>
     [ToolboxBitmap(typeof(SpriteButton), "SpriteButton.bmp")]
-    internal sealed class SpriteButton : SpriteClickable
+    public sealed class SpriteButton : SpriteClickable
     {
         protected override AccessibleRole DefaultAccessibleRole => AccessibleRole.PushButton;
         ButtonShape _shape = ButtonShape.Rounded; bool _accented;
@@ -144,7 +144,7 @@ namespace Sr2d64CSport
     }
 
     /// <summary>Look of a <see cref="SpriteToggle"/>.</summary>
-    internal enum ToggleStyle
+    public enum ToggleStyle
     {
         /// <summary>Modern switch: a pill track, the round handle slides right and the track turns accent when ON.</summary>
         Switch,
@@ -162,7 +162,7 @@ namespace Sr2d64CSport
     /// of the control; the caption uses the rest of the width.
     /// </summary>
     [ToolboxBitmap(typeof(SpriteToggle), "SpriteToggle.bmp")]
-    internal sealed class SpriteToggle : SpriteClickable
+    public sealed class SpriteToggle : SpriteClickable
     {
         protected override AccessibleRole DefaultAccessibleRole => AccessibleRole.CheckButton;
         ToggleStyle _style = ToggleStyle.Switch; bool _checked; string _onText = "I", _offText = "O";
@@ -300,7 +300,7 @@ namespace Sr2d64CSport
     /// the group; the name lets several groups share a panel).
     /// </summary>
     [ToolboxBitmap(typeof(SpriteRadio), "SpriteRadio.bmp")]
-    internal sealed class SpriteRadio : SpriteClickable
+    public sealed class SpriteRadio : SpriteClickable
     {
         protected override AccessibleRole DefaultAccessibleRole => AccessibleRole.RadioButton;
         bool _checked; string _group = "";
@@ -356,7 +356,7 @@ namespace Sr2d64CSport
     }
 
     /// <summary>Shape of a <see cref="SpriteProgress"/>.</summary>
-    internal enum ProgressStyle
+    public enum ProgressStyle
     {
         /// <summary>Horizontal bar filling left to right.</summary>
         Horizontal,
@@ -373,7 +373,7 @@ namespace Sr2d64CSport
     /// drawn with <see cref="Segments"/> (LED-style bar).
     /// </summary>
     [ToolboxBitmap(typeof(SpriteProgress), "SpriteProgress.bmp")]
-    internal sealed class SpriteProgress : SpriteControlBase
+    public sealed class SpriteProgress : SpriteControlBase
     {
         protected override AccessibleRole DefaultAccessibleRole => AccessibleRole.ProgressBar;
         ProgressStyle _style = ProgressStyle.Horizontal;

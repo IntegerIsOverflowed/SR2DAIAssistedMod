@@ -6,7 +6,7 @@ using System.Runtime.InteropServices;
 namespace Sr2d64CSport
 {
     /// <summary>Line end style for <see cref="Sprite.StrokePolyline"/> and friends.</summary>
-    internal enum LineCap : byte
+    public enum LineCap : byte
     {
         /// <summary>The stroke stops exactly at the end point.</summary>
         Butt,
@@ -17,7 +17,7 @@ namespace Sr2d64CSport
     }
 
     /// <summary>Corner style for <see cref="Sprite.StrokePolyline"/> and friends.</summary>
-    internal enum LineJoin : byte
+    public enum LineJoin : byte
     {
         /// <summary>Sharp corner; falls back to Bevel when the spike would exceed the miter limit.</summary>
         Miter,
@@ -32,7 +32,7 @@ namespace Sr2d64CSport
     /// Dash lengths are in pixels and alternate on / off; a dash pattern with round caps gives dotted lines when
     /// the "on" length is 0.
     /// </summary>
-    internal sealed class StrokeStyle
+    public sealed class StrokeStyle
     {
         public float Width = 1f;
         public LineCap Cap = LineCap.Butt;
@@ -70,7 +70,7 @@ namespace Sr2d64CSport
     // original behaviour (round joins implied for width > 2, butt / square / round caps by flag);
     // the Stroke* methods here are the full-featured versions.
     // ------------------------------------------------------------------------
-    internal unsafe partial class Sprite
+    public unsafe partial class Sprite
     {
         [ThreadStatic] private static List<PointF>? tStrokePts, tStrokeOut, tDashPts;
         [ThreadStatic] private static List<(int start, int count, bool closed)>? tStrokeSubs, tDashSubs;

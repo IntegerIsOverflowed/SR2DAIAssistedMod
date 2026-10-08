@@ -4,7 +4,7 @@ using System.Drawing;
 namespace Sr2d64CSport
 {
     /// <summary>Where the (x, y) of <see cref="Sprite.DrawText(int,int,string,int,int,int,int,int,bool,TextAnchor,PixelFont)"/> sits on the text box.</summary>
-    internal enum TextAnchor
+    public enum TextAnchor
     {
         TopLeft, TopCenter, TopRight,
         MiddleLeft, Center, MiddleRight,
@@ -14,7 +14,7 @@ namespace Sr2d64CSport
     // Bitmap text drawn with SR2D's own fills (ClearRect for opaque text, FillRect + LineOp for blended /
     // XOR text). No GDI, no allocation per call; a label of 30 characters costs a few microseconds at
     // scale 1. Part of the Sprite partial class so it clips through the lock rect like every other primitive.
-    internal unsafe partial class Sprite
+    public unsafe partial class Sprite
     {
         /// <summary>
         /// Draws <paramref name="text"/> with a pixel font. Every glyph pixel becomes a <paramref name="scale"/> x <paramref name="scale"/>
@@ -92,6 +92,84 @@ namespace Sr2d64CSport
                 cx += advance;
             }
             return box;
+        }
+
+        /// <summary>
+        /// DrawText with a drop shadow (the spreadsheet look): the whole text is drawn first in
+        /// <paramref name="shadowColor"/>, offset by <paramref name="shadowOffset"/> glyph pixels down
+        /// and right, then the text itself on top - so it stays readable over any background.
+        /// <paramref name="shadowOffset"/> is in glyph pixels (1 = one font pixel x <paramref name="scale"/>).
+        /// Everything else works exactly like
+        /// <see cref="DrawText(int,int,string,int,int,int,int,int,SR2D.LineOp,int,TextAnchor,PixelFont)"/>; the
+        /// returned box covers the text AND its shadow. shadowColor 0 draws without a shadow.
+        /// </summary>
+        public Rectangle DrawText(int x, int y, string text, int color, int bg, int scale, int weight, int letterSpacing,
+                                  SR2D.LineOp op, int blendFactor, TextAnchor anchor, PixelFont? font,
+                                  int shadowColor, int shadowOffset = 1)
+        {
+            if (shadowColor == 0 || shadowOffset <= 0 || string.IsNullOrEmpty(text))
+                return DrawText(x, y, text, color, bg, scale, weight, letterSpacing, op, blendFactor, anchor, font);
+            if (bg != 0)
+            {   // The background box goes down BEFORE the shadow: the plain overload fills it as its first
+              // thing, so drawing it together with the text would paint over the shadow it just laid down
+              // (the box has 2 * scale padding, which swallows a 1-2 px offset completely).
+                int pad = 2 * Math.Max(1, scale);
+                var sz = MeasureText(text, scale, weight, letterSpacing, font);
+                int bw = sz.Width + 2 * pad, bh = sz.Height + 2 * pad;
+                int ax = (int)anchor % 3, ay = (int)anchor / 3;
+                Fill(x - (ax == 1 ? bw / 2 : ax == 2 ? bw : 0), y - (ay == 1 ? bh / 2 : ay == 2 ? bh : 0), bw, bh, bg, op, blendFactor);
+            }
+            int d = shadowOffset * Math.Max(1, scale);
+            var shadow = DrawText(x + d, y + d, text, shadowColor, 0, scale, weight, letterSpacing, op, blendFactor, anchor, font);
+            var main = DrawText(x, y, text, color, 0, scale, weight, letterSpacing, op, blendFactor, anchor, font);
+            return main.IsEmpty ? shadow : shadow.IsEmpty ? main : Rectangle.Union(main, shadow);
+        }
+
+        /// <summary>
+        /// The bounding box of the surface's set (non-zero) pixels. Rectangle.Empty when the surface has none.
+        /// What <see cref="MeasureTextInk"/> and anything that has to hug drawn text scan with.
+        /// </summary>
+        internal static Rectangle InkBounds(Sprite s)
+        {
+            var px = s.Pixels;
+            int minX = int.MaxValue, minY = int.MaxValue, maxX = int.MinValue, maxY = int.MinValue;
+            for (int y = 0; y < s.Height; y++)
+            {
+                int row = y * s.Width;
+                for (int x = 0; x < s.Width; x++)
+                    if (px[row + x] != 0)
+                    {
+                        if (x < minX) minX = x;
+                        if (x > maxX) maxX = x;
+                        if (y < minY) minY = y;
+                        if (y > maxY) maxY = y;
+                    }
+            }
+            return maxX < minX ? Rectangle.Empty : Rectangle.FromLTRB(minX, minY, maxX + 1, maxY + 1);
+        }
+
+        /// <summary>
+        /// Where the text's INK sits, as <see cref="DrawText(int,int,string,int,int,int,int,int,SR2D.LineOp,int,TextAnchor,PixelFont)"/>
+        /// would draw it: a rectangle relative to the draw origin - X / Y are the columns / rows from the origin to
+        /// the first set pixel, Width / Height the ink extent. The advance box <see cref="MeasureText"/> returns
+        /// includes the inter-glyph gaps and every leading / trailing space; this is the pixels the eye sees, so a
+        /// plate, a selection or an underline that has to hug the text starts here. Rectangle.Empty when the text
+        /// has no ink (only spaces, say). The text is rendered once into a scratch surface and scanned - exact by
+        /// construction, for the pixel font, its weight and the fallback glyphs alike (a few microseconds).
+        /// </summary>
+        public static Rectangle MeasureTextInk(string text, int scale = 1, int weight = 0, int letterSpacing = 0, PixelFont? font = null)
+        {
+            if (string.IsNullOrEmpty(text)) return Rectangle.Empty;
+            font ??= PixelFont.Default;
+            if (scale < 1) scale = 1;
+            if (weight < 0) weight = 0;
+            var size = MeasureText(text, scale, weight, letterSpacing, font);
+            if (size.Width <= 0 || size.Height <= 0) return Rectangle.Empty;
+            int pad = 2 * scale + weight + 2;
+            using var s = new Sprite(size.Width + pad * 2, size.Height + pad * 2);
+            s.DrawText(pad, pad, text, unchecked((int)0xFFFFFFFF), 0, scale, weight, letterSpacing, SR2D.LineOp.Set, 128, TextAnchor.TopLeft, font);
+            var ink = InkBounds(s);
+            return ink.IsEmpty ? Rectangle.Empty : new Rectangle(ink.X - pad, ink.Y - pad, ink.Width, ink.Height);
         }
 
         /// <summary>The fallback font for the character (or surrogate pair) at <paramref name="i"/>, null = draw the box.</summary>

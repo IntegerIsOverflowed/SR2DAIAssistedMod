@@ -2,6 +2,13 @@ using System;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 
+[assembly: System.Runtime.InteropServices.DefaultDllImportSearchPaths(System.Runtime.InteropServices.DllImportSearchPath.ApplicationDirectory | System.Runtime.InteropServices.DllImportSearchPath.System32)]
+    // the resolver's fallback (nothing found) probes default paths - keep it to the application directory
+    // and System32, never the current directory or PATH (a planted DLL there would run with the app's
+    // rights). System32 MUST stay in the set: gdi32 / user32 / kernel32 are KnownDLLs and load regardless,
+    // but winmm is NOT - with ApplicationDirectory alone the demo died on its timeBeginPeriod P/Invoke
+    // (DllNotFoundException winmm) the moment it left System32 out.
+
 namespace Sr2d64CSport
 {
     /// <summary>
@@ -9,7 +16,7 @@ namespace Sr2d64CSport
     /// All entry points use blittable arguments only (no marshalling stubs,
     /// no SetLastError, no security checks) so a call is a plain native call.
     /// </summary>
-    internal static class SR2D
+    public static class SR2D
     {
         public const string DllName = "SR2D64";
 
@@ -50,9 +57,43 @@ namespace Sr2d64CSport
                 return ok;
             }
         }
+        /// <summary>The ABI version the managed layer was built for (see SR2D_ABI in native/sr2d_api.h). Bump both together.</summary>
+        internal const int AbiVersion = 1;
+        /// <summary>The mirrored struct sizes the native side compiles static_asserts for (sr2d_api.h). A drift means
+        /// the native reads garbage pointers - refuse to run instead. Looked up by name: the headless runners
+        /// compile subsets of cs/, so a mirror type may legitimately be absent from a given build.</summary>
+        internal static void CheckAbiLayouts()
+        {
+            Check("Sr2d64CSport.Effects.Stage", 80);        // native SR2D_FxStage
+            Check("Sr2d64CSport.Voxel", 8);           // native SR2D_Voxel
+            Check("Sr2d64CSport.VoxelGrid+Scene", 232);         // native SR2D_VoxelScene
+            static void Check(string typeName, int bytes)
+            {
+                var t = Type.GetType(typeName, throwOnError: false);
+                if (t == null) return;                      // not part of this build
+                if (System.Runtime.InteropServices.Marshal.SizeOf(t) != bytes)
+                    throw new TypeLoadException($"SR2D ABI: {typeName} must be {bytes} bytes - the C# mirror and the native struct (see sr2d_api.h static_asserts) drifted apart.");
+            }
+        }
+        /// <summary>Loads a candidate library and demands the ABI handshake export; a library that does not match is freed and refused.</summary>
+        static bool TryLoadAbiChecked(string path, ref string? fail, out IntPtr h)
+        {
+            if (!NativeLibrary.TryLoad(path, out h)) return false;
+            int v = 0; bool has = true;
+            try { v = System.Runtime.InteropServices.Marshal.GetDelegateForFunctionPointer<AbiVersionFn>(NativeLibrary.GetExport(h, "SR2D_ABI_VERSION"))(); }
+            catch (EntryPointNotFoundException) { has = false; }
+            if (has && v == AbiVersion) return true;
+            fail = $"The SR2D64 native library at '{path}' does not match the managed code: " +
+                   (has ? $"it reports ABI {v}, the managed layer expects {AbiVersion}." : "it has no SR2D_ABI_VERSION export (too old, or not the SR2D64 engine at all).") +
+                   " Rebuild the native DLL from native/ so both come from the same source state.";
+            NativeLibrary.Free(h);
+            return false;
+        }
+        delegate int AbiVersionFn();                                       // the marshaller needs a named (non-generic) delegate type
         internal static void EnsureResolver()
         {
             if (resolverSet) return;
+            CheckAbiLayouts();
             resolverSet = true;
             try { NativeLibrary.SetDllImportResolver(typeof(SR2D).Assembly, Resolve); }
             catch (InvalidOperationException) { /* a resolver is already registered for this assembly (host app did it): keep it */ }
@@ -60,16 +101,18 @@ namespace Sr2d64CSport
         static IntPtr Resolve(string name, System.Reflection.Assembly asm, DllImportSearchPath? path)
         {
             if (name != DllName) return IntPtr.Zero;
-            if (dllPath != null && NativeLibrary.TryLoad(dllPath, out var h0)) return h0;
+            string? fail = null;
+            if (dllPath != null && TryLoadAbiChecked(dllPath, ref fail, out var h0)) return h0;
             string? env = Environment.GetEnvironmentVariable("SR2D_DLL");
-            if (!string.IsNullOrEmpty(env) && NativeLibrary.TryLoad(env, out var h1)) { dllPath = env; return h1; }
+            if (!string.IsNullOrEmpty(env) && TrustworthyPath(env) && TryLoadAbiChecked(env, ref fail, out var h1)) { dllPath = env; return h1; }
             foreach (string dir in CandidateDirs(asm))
                 foreach (string file in FileNames)
                 {
                     string f = System.IO.Path.Combine(dir, file);
-                    if (System.IO.File.Exists(f) && NativeLibrary.TryLoad(f, out var h)) { dllPath = f; return h; }
+                    if (System.IO.File.Exists(f) && TryLoadAbiChecked(f, ref fail, out var h)) { dllPath = f; return h; }
                 }
-            return IntPtr.Zero;                                       // fall back to the default probing
+            if (fail != null) throw new PlatformNotSupportedException(fail);   // found, but not ours: a clear error instead of garbage pixels
+            return IntPtr.Zero;                                       // nothing found: fall back to the default probing
         }
         static readonly string[] FileNames = OperatingSystem.IsWindows() ? new[] { DllName + ".dll" }
                                            : new[] { "lib" + DllName + ".so", DllName + ".so", "lib" + DllName + ".dylib" };   // the headless test runners
@@ -85,16 +128,39 @@ namespace Sr2d64CSport
                 string? d = md.Value.EndsWith(".dll", StringComparison.OrdinalIgnoreCase) ? System.IO.Path.GetDirectoryName(md.Value) : md.Value;
                 if (d != null && seen.Add(d)) yield return d;
             }
-            // walk up from both (bin\x64\Debug\net10.0-windows\ -> project folder etc.)
+            // walk up from both, but ONLY out of a build-output tree (bin\x64\Debug\net10.0-windows -> the
+            // project folder). Beyond the project the walk probed ANY writable ancestor - a repo root,
+            // Downloads, the Desktop - and the first hit won (CWE-427). The dev convenience it exists for
+            // ends at the project folder, and so does the walk.
             foreach (string? start in new[] { loc == null ? null : System.IO.Path.GetDirectoryName(loc), b })
             {
                 string? d = start;
-                for (int i = 0; i < 4 && d != null; i++)
+                bool underBuild = d != null && UnderBuildOutput(d);
+                while (underBuild && d != null)
                 {
                     d = System.IO.Path.GetDirectoryName(d.TrimEnd('\\', '/'));
-                    if (d != null && seen.Add(d)) yield return d;
+                    if (d == null) break;
+                    if (seen.Add(d)) yield return d;               // Release -> bin -> the project folder itself
+                    underBuild = UnderBuildOutput(d);
                 }
             }
+        }
+        /// <summary>True while <paramref name="path"/> still sits inside a bin / obj output tree (the walk may continue above it).</summary>
+        static bool UnderBuildOutput(string path)
+        {
+            foreach (var piece in PathSegments(path)) if (piece is "bin" or "obj") return true;
+            return false;
+        }
+        /// <summary>A path the environment variable may point at: absolute, no .. segments, an existing file. Anything else is ignored - anything that can set an env var must not redirect the engine.</summary>
+        static bool TrustworthyPath(string path)
+        {
+            if (!System.IO.Path.IsPathRooted(path) || !System.IO.File.Exists(path)) return false;
+            foreach (var piece in PathSegments(System.IO.Path.GetFullPath(path))) if (piece == "..") return false;
+            return true;
+        }
+        static System.Collections.Generic.IEnumerable<string> PathSegments(string path)
+        {
+            foreach (var piece in path.Split('/', '\\')) if (piece.Length > 0) yield return piece;
         }
 
         public enum Op : int

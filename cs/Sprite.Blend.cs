@@ -8,7 +8,7 @@ namespace Sr2d64CSport
     // accepts them as well; these overloads just add the opacity argument and the geometry
     // shortcuts. Everything is done in the DLL (BLEND_MODE / MASK_BLEND_MODE / DRAW_WARP / DRAW_FX
     // with a blend-mode op word).
-    internal unsafe partial class Sprite
+    public unsafe partial class Sprite
     {
         /// <summary>
         /// Draws <paramref name="Src"/> at (x, y) with an editor blend mode, like a layer set to that

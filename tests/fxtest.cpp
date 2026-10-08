@@ -56,6 +56,10 @@ static SR2D_FxStage st_morph(int r, bool erode = false, bool square = false)
 { SR2D_FxStage s = {}; s.kind = SR2D_FX_MORPH; s.i[0] = r; s.flags = (erode ? SR2D_FXF_MORPH_ERODE : 0) | (square ? SR2D_FXF_MORPH_SQUARE : 0); return s; }
 static SR2D_FxStage st_shadow(int blur, int grow, int rgb, float opacity, float dx, float dy, int flags = 0)
 { SR2D_FxStage s = {}; s.kind = SR2D_FX_SHADOW; s.i[0] = blur; s.i[1] = grow; s.i[2] = rgb; s.f[0] = opacity; s.f[1] = dx; s.f[2] = dy; s.flags = flags; return s; }
+static SR2D_FxStage st_motion(int samples, float deg, float len, int flags = 0)
+{ SR2D_FxStage s = {}; s.kind = SR2D_FX_MOTION; s.i[0] = samples; s.f[0] = deg; s.f[1] = len; s.flags = flags; return s; }
+static SR2D_FxStage st_motion_path(const float* pts, int npts, float len, int samples, int flags = 0)
+{ SR2D_FxStage s = {}; s.kind = SR2D_FX_MOTION; s.i[0] = samples; s.i[1] = npts; s.f[1] = len; s.map = (const int32_t*)pts; s.flags = flags; return s; }
 
 static void quad_rect(float* q, float x, float y, float w, float h) { q[0] = x; q[1] = y; q[2] = x + w; q[3] = y; q[4] = x + w; q[5] = y + h; q[6] = x; q[7] = y + h; }
 static void quad_rot(float* q, float cx, float cy, float w, float h, float ang)
@@ -106,6 +110,13 @@ static void ref_sample_bilinear(RefImg& img, double u, double v, double* out)
         out[c] = floor((t * (256 - wy) + b * wy) / 256.0);
     }
 }
+static int ref_premul(int p)
+{
+    uint32_t a = (uint32_t)p >> 24;
+    int r = (int)(a << 24);
+    for (int c = 0; c < 24; c += 8) { uint32_t t = ((p >> c) & 255) * a + 128; r |= (int)(((t + (t >> 8)) >> 8) << c); }
+    return r;
+}
 static int ref_pack(const double* q)
 {
     int r = 0;
@@ -130,6 +141,7 @@ int main(int argc, char** argv)
 {
     int iters = argc > 1 ? atoi(argv[1]) : 200;
     sr2d_ops S, A; sr2d_fill_ops_sse2(S); sr2d_fill_ops_avx2(A);
+    fprintf(stderr, "AT: ops filled\n");
     const int sw = 64, sh = 48;
     std::vector<int> spr = make_sprite(sw, sh, true), opq = make_sprite(sw, sh, false);
     const int DW = 200, DH = 160;
@@ -483,6 +495,94 @@ int main(int argc, char** argv)
         }
     }
 
+    // ---- 5b. motion blur vs reference: linear (nearest taps exact, bilinear vs double) + custom path
+    {
+        fprintf(stderr, "AT: 5b enter\n");
+        const int M = 10;
+        const int W = sw + 2 * M, H = sh + 2 * M;
+        // linear, direction 0, length 2 px, 3 samples: the taps sit at whole pixels - the nearest-sampled
+        // result must be the plain (p[x] + p[x-1] + p[x-2]) / 3 average over transparent surroundings
+        {
+            std::vector<int> d1((size_t)W * H, 0);
+            float q[8]; quad_rect(q, M, M, sw, sh);
+            SR2D_FxStage s = st_motion(3, 0, 2, SR2D_FXF_SAMPLE_NEAREST);
+            fprintf(stderr, "AT: before nearest DRAW_FX (M=%d W=%d)\n", M, W);
+            A.DRAW_FX(spr.data(), sw, sh, d1.data(), W, 0, 0, W, H, q, 0, 0, 1, 0, 0, &s, 1);
+            fprintf(stderr, "AT: after nearest DRAW_FX\n");
+            int worst = 0;
+            for (int y = 0; y < H; y++) for (int x = 0; x < W; x++)
+            {
+                int acc[4] = { 0, 0, 0, 0 };
+                for (int k = 0; k < 3; k++)
+                {
+                    int sx = x - M - k, sy = y - M;
+                    int p = (sx >= 0 && sx < sw && sy >= 0 && sy < sh) ? spr[(size_t)sy * sw + sx] : 0;
+                    p = ref_premul(p);                          // the kernel averages PREMULTIPLIED bytes
+                    for (int c = 0; c < 32; c += 8) acc[c / 8] += (p >> c) & 255;
+                }
+                int e = 0; for (int c = 0; c < 4; c++) e |= ((acc[c] + 1) / 3) << (c * 8);
+                int g = d1[(size_t)y * W + x];
+                int d = 0; for (int c = 0; c < 32; c += 8) d = std::max(d, abs(((e >> c) & 255) - ((g >> c) & 255)));
+                if (d > worst) worst = d;
+            }
+            CHECK(worst <= 1, "motion linear nearest != integer 3-tap average (max diff %d)", worst);
+            fprintf(stderr, "AT: nearest case done\n");
+        }
+        // bilinear linear + a curved path, both against the double reference (average of the taps)
+        struct MC { int samples; float deg, len; const float* path; int npts; float str; int flags; const char* what; };
+        static const float arc[6] = { 0, 0, 6, -4, 12, -2 };            // a little hop up and back
+        static const float line[4] = { 0, 0, 8, 0 };
+        MC mcases[] = {
+            { 9, 20, 8, nullptr, 0, 0, 0, "linear bilinear" },
+            { 5, 0, 0, arc, 3, 1.0f, 0, "arc path" },
+            { 7, 0, 0, line, 2, 2.5f, 0, "line path scaled 2.5" },
+            { 9, 200, 8, nullptr, 0, 0, SR2D_FXF_SAMPLE_NEAREST, "linear nearest 200 deg" },
+        };
+        for (const MC& m : mcases)
+        {
+            fprintf(stderr, "AT: case %s\n", m.what);
+            SR2D_FxStage s = m.path ? st_motion_path(m.path, m.npts, m.str, m.samples, m.flags) : st_motion(m.samples, m.deg, m.len, m.flags);
+            float ext = m.path ? 0.0f : fabsf(m.len);
+            if (m.path) for (int k = 0; k < m.npts; k++) { float px = m.path[k * 2], py = m.path[k * 2 + 1]; ext = std::max(ext, sqrtf(px * px + py * py) * m.str); }
+            const int MM = (int)ceilf(ext) + 2;
+            const int WW = sw + 2 * MM, HH = sh + 2 * MM;
+            std::vector<int> d1((size_t)WW * HH, 0);
+            float q[8]; quad_rect(q, MM, MM, sw, sh);
+            A.DRAW_FX(spr.data(), sw, sh, d1.data(), WW, 0, 0, WW, HH, q, 0, 0, 1, 0, 0, &s, 1);
+            RefImg img(WW, HH); ref_load(spr, sw, sh, img, MM);
+            int worst = 0;
+            for (int y = 0; y < HH; y++) for (int x = 0; x < WW; x++)
+            {
+                double o[4] = { 0, 0, 0, 0 };
+                for (int k = 0; k < m.samples; k++)
+                {
+                    float t = (float)k / (float)(m.samples - 1), ox, oy;
+                    if (m.path)
+                    {
+                        float pos = t * (m.npts - 1); int seg = (int)pos; if (seg > m.npts - 2) seg = m.npts - 2; float fr = pos - seg;
+                        ox = (m.path[seg * 2] + (m.path[seg * 2 + 2] - m.path[seg * 2]) * fr) * m.str;
+                        oy = (m.path[seg * 2 + 1] + (m.path[seg * 2 + 3] - m.path[seg * 2 + 1]) * fr) * m.str;
+                    }
+                    else { float rad = m.deg * (float)M_PI / 180.0f; ox = cosf(rad) * m.len * t; oy = sinf(rad) * m.len * t; }
+                    double tap[4];
+                    if (m.flags & SR2D_FXF_SAMPLE_NEAREST)
+                    {   // nearest: match warp_sample<0> - floor the clamped centre coordinate
+                        double uu = x + 0.5 - ox, vv = y + 0.5 - oy;
+                        int iu = (int)uu, iv = (int)vv; iu = iu < 0 ? 0 : iu > img.w - 1 ? img.w - 1 : iu; iv = iv < 0 ? 0 : iv > img.h - 1 ? img.h - 1 : iv;
+                        double* q = img.at(iu, iv); for (int c = 0; c < 4; c++) tap[c] = q[c];
+                    }
+                    else ref_sample_bilinear(img, x + 0.5 - ox, y + 0.5 - oy, tap);
+                    for (int c = 0; c < 4; c++) o[c] += tap[c] / m.samples;
+                }
+                int e = ref_pack(o), g = d1[(size_t)y * WW + x];
+                int d = 0; for (int c = 0; c < 32; c += 8) d = std::max(d, abs(((e >> c) & 255) - ((g >> c) & 255)));
+                if (d > worst) worst = d;
+            }
+            CHECK(worst <= 3, "motion %s: max diff %d vs double reference", m.what, worst);
+        }
+    }
+
+    fprintf(stderr, "AT: 5b done\n");
     // ---- 6/7. random chains: clipping, SSE2 == AVX2, PRE/POST, geometry variants
     const int mw = 16, mh = 16; std::vector<int> map((size_t)mw * mh);
     for (size_t i = 0; i < map.size(); i++) { int h = rnd() & 255; map[i] = (int)0xff000000 | (h << 16) | (h << 8) | h; }
@@ -492,7 +592,7 @@ int main(int argc, char** argv)
         SR2D_FxStage st[4]; int n = 1 + (int)(rnd() % 3);
         for (int i = 0; i < n; i++)
         {
-            switch (rnd() % 8)
+            switch (rnd() % 9)
             {
             case 5: st[i] = st_morph(1 + (int)(rnd() % 4), (rnd() & 1) != 0, (rnd() & 1) != 0); break;
             case 6: st[i] = st_shadow((int)(rnd() % 30), (int)(rnd() % 3), (int)(rnd() & 0xffffff), frnd(), frnd() * 12 - 6, frnd() * 12 - 6, (int)(rnd() % 16)); st[i].i[3] = (int)(rnd() % 6) - 1; break;
@@ -503,6 +603,7 @@ int main(int argc, char** argv)
             case 1: st[i] = st_color(frnd() * 0.6f - 0.3f, 0.5f + frnd(), frnd() * 2, 0.5f + frnd(), frnd() * 360 - 180, 0.3f + frnd() * 0.7f, frnd() * 0.5f, (int)(rnd() & 0xffffff), (rnd() & 1) != 0); break;
             case 2: st[i] = st_dist((int)(rnd() % 4), 5 + frnd() * 30, frnd() * 6 - 3, frnd() * 6, frnd() * 6, frnd() * 40, rnd() & 1 ? frnd() * 40 : 0, (int)(rnd() % 3) | (rnd() & 1 ? SR2D_FXF_SAMPLE_BICUBIC : 0)); break;
             case 3: st[i] = st_map(map.data(), mw, mh, 0.5f + frnd() * 3, frnd() * 8 - 4, frnd() * 20, frnd() * 20, (rnd() & 1) ? SR2D_FXF_SAMPLE_NEAREST : 0); break;
+            case 8: { static const float rp[8] = { 0, 0, 5, 3, -2, 7, 6, 6 }; st[i] = (rnd() & 1) ? st_motion(2 + (int)(rnd() % 12), frnd() * 360, frnd() * 10, (int)(rnd() % 3)) : st_motion_path(rp, 4, 0.5f + frnd(), 2 + (int)(rnd() % 12), (int)(rnd() % 3)); } break;
             default: st[i] = st_color(0, 1, 1, 1, 0, frnd()); break;
             }
         }

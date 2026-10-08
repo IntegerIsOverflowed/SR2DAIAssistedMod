@@ -7,8 +7,9 @@ calling convention, argument order and bit-exact pixel results.**
 ```
 SR2D/
 ├─ CHANGELOG.txt           what changed, newest first (kept up to date with every addition / change)
+├─ SpriteForm-fixes.txt    the window chrome bug list: what broke, how each fix works, and the measurement that proves it
 ├─ build_release.bat       one click: DLL (clang-cl, x64, Release) + bench (Release) + DLL copied next to the exe; OK / FAILED summary
-├─ template/               empty WinForms app (net10.0-windows, x64) wired to SR2D: a SpriteBox canvas + a few controls; copy it and start (template/README.txt)
+├─ EmptySR2DFormTemplate/  as empty as Visual Studio's own WinForms template (stock Program.cs + a blank Form1) - only the form derives from SpriteForm, so a new app has the SR2D chrome from the start; copy it and start
 ├─ native/                 C++ DLL (Visual Studio 2022 solution, ClangCL toolset + x64 by default, Win32 still available)
 │  ├─ sr2d_api.h           single X-macro list of all exports (54 original + DRAW_WARP, DRAW_LINE2)
 │  ├─ sr2d_simd.h          SSE2 / AVX2 vector traits
@@ -34,9 +35,13 @@ SR2D/
 │  ├─ SpriteTransform.cs   general 2-D transform (scale / rotate / pivot / matrix / perspective / opacity / filter): LayeredSprite.Transform, layer.Transform, Sprite.DrawTransformed
 │  ├─ WebP.cs              managed WebP decoder (lossy VP8, lossless VP8L, alpha, VP8X); Sprite.FromWebP, auto in Sprite(file)
 │  ├─ Sprite.Effects.cs    partial Sprite: DrawBlurred / DrawBlurredAt / Blur / ToBlurred (Gaussian-like blur, soft edges)
-│  ├─ Effects.cs           Effects chain class (Blur / Wave / Ripple / Noise / Turbulence / DistortMap / Color / Shadow / Glow / Outline / Dilate / Erode, per-stage Enable) + Sprite.DrawFx*
+│  ├─ Effects.cs           Effects chain class (Blur / Wave / Ripple / Noise / Turbulence / DistortMap / Color / Shadow / Glow / Outline / Dilate / Erode / MotionBlur, per-stage Enable) + MotionEcho (real-time feedback blur) + Sprite.DrawFx* / Sprite.DrawMotionTaps (real-time multi-tap blur)
 │  ├─ LayeredSprite.cs     stack of sprites (own effects / placement / op each) that composes itself into one premultiplied sprite, re-composing only what changed
+│  ├─ Animation.cs         keyframe tracks with in / out tangents (3ds Max model): TangentMode (Smooth / Linear / Step / Fast / Slow / Spline / Auto), Keyframe, Track.Evaluate - shapes any lerp's speed
+│  ├─ Curve.cs             an editable 0..1 curve: sorted points + monotone cubic (Fritsch-Carlson, never overshoots) - the data behind the curve editor; usable as a speed profile or a Levels-style ramp
+│  ├─ SpriteControls.Curve.cs  SpriteCurveEditor: the Photoshop-curves / 3ds Max Color-Map style control - drag points, click adds, right click selects one and opens its menu (node type, Delete node); evaluates through Curve
 │  ├─ Selection.cs         8-bit coverage selection (magic wand, polygon, ellipse, rect, from alpha / luma; Add / Subtract / Intersect, Feather, Grow, Border) + Sprite.FloodFill / ReplaceColor / Fill / Apply / CopyThrough / Extract
+│  ├─ Sprite.Move.cs       selection-scoped Sprite.Move (Photoshop move tool) and Sprite.Offset (Photoshop offset, wrap = bounding box or along the selected spans), coverage-weighted (feathered selections travel soft)
 │  ├─ VoxelGrid.cs         Voxel (8 B: ARGB, emit, material, user) + VoxelGrid (w x h x d, faces / light caches, edits, Pick) + VoxelCamera (presets, Free) + Sprite.DrawVoxels
 │  ├─ VoxelGrid.Edit.cs    VoxelSelection (3-D masks, VOXEL_FLOOD), VoxelNoise (fractal Perlin), editing: selections, Fill / Paint / Map, Shell / Hollow / Invert / FloodFill, solids (sphere, cylinder, cone, capsule, torus, line, box), transforms, noise / terrain / scatter
 │  ├─ VoxelGrid.Objects.cs Merge / Merged / Stacked (Over, Under, Replace, Erase, Intersect) and named objects: VoxelObject (material-tagged or selection-backed), Select / Hide / Show / Remove / Recolor / Extract by name
@@ -51,13 +56,15 @@ SR2D/
 │  ├─ SpriteControls.Wheel.cs    SpriteWheel: thumb wheel / drum picker (Detailed / Flat style, WrapMouse, WrapAround, Edit = Beside / DoubleClick / Click SR2D field)
 │  ├─ SpriteControls.Scroll.cs   SpriteScrollBar (flat track, page-sized thumb, arrows) - used by SpriteBox.ScrollBars
 │  ├─ SpriteControls.Menu.cs     SpriteMenu: SR2D-drawn popup menu (commands, checks, radios, sub-menus, inline sliders, keyboard) - replaces ContextMenuStrip on SR2D controls
+│  ├─ SpriteForm.cs             SpriteForm: a form whose title bar is ONE SR2D sprite (nothing can cover or dispose it): skewed colour bars in the left corner (StripeMode / StripeBarWidth / StripeBarCount / StripeBarExtra / StripeSkew / StripeStyle / StripeSeed / StripeColors / StripeColorList / StripeOffset / StripeAlignment / StripeBrightness - the length the run mirrors is the ICON + TEXT block it is furniture for, in pixels; the two pairings are custom width / auto amount (StripeBarWidth > 0: that width exactly, and just as many bars as cover the block) and auto width / custom amount (StripeBarWidth = 0: the block divided between the mode's bar count, so count 10 over a 327 px block is 32,7 px per bar); StripeBarsMode.FixedCount is the mode where both numbers are yours literally and nothing is derived; StripeBarExtra then adds (or takes off, negative) bars on TOP of whichever number the mode derived, so "caption length + one more bar" is StripeBarExtra = 1 in any mode - the length mirrored stays the same, so on a width-derived run an extra bar makes every bar one share thinner and on a literal width it makes the run longer; StripeAlignment WithText centres the run ON that block instead of in the bar), the window icon on a rounded chip (IconBackdrop), the caption + extra tags each with a drop shadow by default (TitleTextShadow) and drawn IN FRONT of the bars (StripesBehindText=false puts them after), the darkening plate behind the texts (TitleDarkenMode None / BehindTitle / BehindAllText, TitleDarkenExtraWidth / TitleDarkenExtraHeight / TitleDarkenFeatherWidth / TitleDarkenFeatherHeight / TitleDarkenOpacity - a black rectangle sized to the covered texts' INK pixels (Sprite.MeasureTextInk: the set pixels, not the advance box - a leading space or a trailing glyph gap are not ink), grown by the extra width / height on each side, its left / right edges fading over the feather WIDTH and its top / bottom edges over the feather HEIGHT, drawn under the icon and the texts), a caption in a REAL font instead of the pixel font (TitleTextFont, or TitleTextFontFamily / TitleTextFontSize), minimise / maximise / close, right click on maximise = full screen, right-click window menu, DOUBLE-CLICK the bar = maximize / restore - the bar defaults to its smallest 18 px with the 1 px pixel font, the frame is BorderColor / BorderThickness drawn as Padding with the eight resize grabs (corners included) answered in WM_NCHITTEST, MinimumSize is derived from the chrome so it can never be resized away, dragging a maximized window restores it, and NativeWindowFrame keeps a real WS_CAPTION / WS_THICKFRAME frame that WM_NCCALCSIZE makes invisible again - which is what gives the Windows 11 minimize / restore animations, the DWM shadow and the corner rounding (off in full screen); the frame never repaints on WM_NCACTIVATE (losing focus cannot expose a native caption), never writes your BackColor, SmoothChrome buffers the chrome so a resize drag does not rebuild the bar for every pixel, and WM_NCPAINT is left to the default handler so the surface a resize hands the window is painted whole rather than showing the desktop behind it for a frame at a time
+│  ├─ ChromeDesign.cs      designer support for the chrome palette: the SpriteForm colour properties (TitleBarColor / BorderColor / TitleTextColor / TitleTextShadowColor) are System.Drawing.Color, so the grid gives them the NATIVE Color cell - swatch rectangle, the colour's name or [A=, R=, G=, B=] values, the drop-down arrow with the Custom / Web / System pages, exactly like BackColor. What remains here is for the palette: ArgbColorConverter parses every spelling (AARRGGBB, RRGGBB, #RRGGBB, 0xRRGGBB, a decimal ARGB integer, a name) for StripeColorList, which parses ONCE in the setter into the int[] the bars paint from (the string is only the editor's text). StripePaletteEditor is that list's "..." dialog - a swatch + AARRGGBB list with Add / Edit / Remove over the standard colour dialog, writing back the same comma-separated text the box holds - the caption font gets Visual Studio's own font dialog through TitleTextFont
 │  ├─ SpriteControls.Static.cs   SpriteLabel (5 styles), SpriteSeparator, SpriteLed, SpritePanel, SpriteStackPanel (column / row layout, wrap, scroll), SpriteGroupBox (check in the caption), SpriteTabControl / SpriteTabPage
 │  ├─ SpriteControls.TextView.cs SpriteTextView: read-only multi-line text (log / description / code) - wrap, line numbers, colour runs, selection + copy, scroll bars
 │  ├─ SpriteControls.Input.cs    SpriteTextBox (caret, selection, clipboard, Committed), SpriteNumeric (spinner Right / Below / None, drag-to-change, WrapMouse), SpriteCombo (SpriteMenu drop-down), SpriteListBox (multi select, check boxes, group headers)
 │  ├─ SpriteCursors.cs     procedural cursors WinForms lacks: open hand / grabbing hand / rotate / zoom in / zoom out (drawn by SR2D -> HCURSOR, system size)
 │  ├─ PixelFont.cs         bitmap font (built-in 5x7, or your own glyph pictures)
 │  ├─ PixelFont.Unicode.cs the built-in font beyond ASCII: Cyrillic / Greek / symbols hand-drawn, Latin-1 + Ext-A accents composed, real-font fallback (FallbackFamilies) for the rest
-│  └─ Sprite.Text.cs       Sprite.DrawText / MeasureText (colour, scale, weight, ops, anchors)
+│  └─ Sprite.Text.cs       Sprite.DrawText / MeasureText (colour, scale, weight, ops, anchors, drop shadow)
 ├─ demo/                   C# WinForms demo / visual test app (SR2DDemo, formerly "bench")
 │  ├─ SR2DDemo.csproj      net10.0-windows x64, compiles ../cs/*.cs into the exe
 │  ├─ Tests.cs             one test per SR2D capability (original + new API); embedded in the exe for the Code view
@@ -96,17 +103,20 @@ SR2D/
    └─ Makefile             `make test` / `make bench`
 ```
 
-## Starting your own app (`template/`)
+## Starting your own app (`EmptySR2DFormTemplate/`)
 
-`template/SR2DApp.csproj` is an empty WinForms application for **.NET 10, x64**
-that compiles `cs/*.cs` into itself (no references, no packages) and copies
-`SR2D64.dll` from `native/bin/x64` (or from a copy beside the csproj) next to
-the exe. `MainForm.cs` holds the one pattern to keep — draw in the
-`SpriteBox.Render` handler, call `canvas.Redraw()` when a value changes — with a
-knob, a slider, a toggle and a button on a `SpritePanel` driving a rotated
-sprite; the layout is in `MainForm.Designer.cs` so the WinForms designer opens
-it. Build the DLL once with `build_release.bat`, open the csproj, F5. To move
-it out of the repo set `<Sr2dCs>` / `<Sr2dDll>` (details in `template/README.txt`).
+`EmptySR2DFormTemplate/` is the same build wiring with nothing in it: a stock
+`Program.cs` and a blank `Form1` (800x450, no controls) exactly like Visual
+Studio's empty WinForms app — only `Form1 : SpriteForm`, so a brand-new window
+already has the SR2D title bar (colour bars, icon, caption with its shadow, the
+three buttons, the resizable border) without writing a line of chrome. Copy it
+when you want your own look, and the demo's source when you want to see the
+controls in action.
+It opens in the Visual Studio designer like any other form: `SpriteForm` is
+public and carries `[DesignerCategory("Form")]` (the attribute is inherited, so a
+`"Code"` base would silently force every derived form into the code editor), and
+`Form1` is `public partial` in both of its files — right-click `Form1.cs` → *View
+Designer*, `F7` cycles the two views.
 
 ### How `SR2D64.dll` is found (and the form designer)
 
@@ -114,13 +124,38 @@ it out of the repo set `<Sr2dCs>` / `<Sr2dDll>` (details in `template/README.txt
 does not have to sit next to the exe. It is looked up, first hit wins:
 
 1. `SR2D.DllPath` if you set it before the first native call;
-2. the `SR2D_DLL` environment variable (full path);
+2. the `SR2D_DLL` environment variable — a TRUSTED full path only: absolute, no `..` segments, an
+   existing file; anything else is ignored (whatever can set an env var must not redirect the engine);
 3. the folder of the assembly's own file (`Assembly.Location` — the build output);
 4. `AppContext.BaseDirectory` (the running exe);
 5. the `[assembly: AssemblyMetadata("SR2D.DllPath", …)]` hint the template and
    demo csproj bake in (the absolute path of the DLL the build used);
-6. the parents of 3. and 4., four levels up (`bin\x64\Debug\net10.0-windows` → project folder);
-7. the normal probing (`PATH`).
+6. the parents of 3. and 4., but only while they still sit inside a build-output tree
+   (`bin\x64\Debug\net10.0-windows` → `Release` → `bin` → the **project folder**, then stop). The walk
+   used to go four arbitrary levels up, so a planted `SR2D64.dll` in any writable ancestor — the repo
+   root, Downloads, the Desktop — would have been loaded;
+7. the default probing, pinned to the application directory and System32 by an assembly-level
+   `[DefaultDllImportSearchPaths(ApplicationDirectory | System32)]` — never the current directory or
+   `PATH`. (System32 must stay in the set: system DLLs that are not KnownDLLs, like `winmm`, resolve
+   through this very search.)
+
+Every candidate that LOADS is also checked against the ABI handshake before it is
+accepted: the library must export `SR2D_ABI_VERSION` and report the number the
+managed layer was built for (`SR2D_ABI` in `native/sr2d_api.h`; bump both together
+whenever the op list, an op-word encoding or a mirrored struct layout changes). A
+stale or foreign `SR2D64.dll` is freed and refused with a readable error instead of
+silently drawing garbage, and the mirrored struct sizes are asserted at first use on
+both sides (`static_assert` in the header, a managed check before the first call).
+
+### DPI (deliberate)
+
+The engine renders and hit-tests in **device pixels**, and the pixel font is never
+auto-scaled — so the template declares `SystemAware` DPI mode and sets
+`AutoScaleMode.None`: no WinForms scaling of the chrome. On a higher-DPI monitor the
+DWM scales the window as a bitmap, drawn pixels and hit rectangles together, and
+100 % zoom stays 1:1 crisp. Do not switch the template to `PerMonitorV2` with
+`AutoScaleMode.Dpi` / `Font` without rewriting the control metrics — that would
+blur the pixel font and desynchronise the hand-computed control geometry.
 
 Step 5 is what keeps the **Visual Studio form designer** working: the designer
 hosts the controls in its own process (`DesignToolsServer.exe`) and loads the
@@ -137,6 +172,26 @@ file was loaded.
 is on; the template now has it on): the files that use a WinForms `Timer` carry a
 `using Timer = System.Windows.Forms.Timer;` alias, so the implicit
 `System.Threading` import does not make `Timer` ambiguous.
+
+**The chrome's properties in the grid.** Every colour of the title bar
+(`TitleBarColor`, `BorderColor`, `TitleTextColor`, `TitleTextShadowColor`) is a
+`System.Drawing.Color`, so the property grid gives it the native Color cell — the
+swatch rectangle painted in front of the value, the value shown as `[A=255, R=46,
+G=52, B=60]` (or as the name, `Red`, when the value is one of the known Windows
+colours) and the drop-down arrow with the Custom / Web / System pages, exactly
+what `BackColor` offers. A fully transparent colour means "off" where the
+documented default says so (shadow colour, border). `StripeColorList` takes every
+colour spelling per entry, comma separated — `FF2E343C`, `2E343C`, `#2E343C`,
+`0x2E343C`, the decimal ARGB integer `4278190080`, a name (`Red`, `SteelBlue`) —
+and parses them ONCE in the setter: the bars paint from the cached `int[]`
+(`StripeColors`) and the string is only what the editor shows, so a resize or a
+repaint never converts text to numbers. Its "..." opens a small list editor
+instead of one colour dialog (swatch + one entry per row, Add / Edit / Remove over
+the same Windows dialog, written back as the comma-separated text). `StripeColors`
+(the `int[]` form) stays `[Browsable(false)]` so the grid does not offer the same
+palette twice. `TitleTextFont` uses Visual Studio's own font dialog. `TitleTags` is
+`[Browsable(false)]` deliberately: extra coloured runs of title text are set in
+code, `SetTitleTags(new TitleTag("kernels: SSE2", 0xFF8A94A6))`.
 
 ## What changed in the native library
 
@@ -341,6 +396,71 @@ int SR2D_SET_SIMD_LEVEL(int lvl); // force 1/2, or 0 = auto; returns level in us
 
 MSVC with LTCG (as configured in the .vcxproj) is typically on par or better.
 
+## The original DLL against the current one, measured here (`tests/cs/legacybench`)
+
+The table above compares kernels inside one build. This one answers the question the other way round: take
+`legacy/original-engine/*.cpp`, compile it **unchanged** with this MSVC (`tests/cs/legacybench/build_native.bat`,
+`SR2DOLD64.dll`, 54 exports, names identical), bind it in a second copy of the managed layer, and run the same
+workload through both. Every row below also asserts that the two engines produced the **same surface pixel hash**,
+so it is the same work being timed, and the numbers are medians (5 passes, best-of-3 process runs) on an
+AMD FX-4300 — a CPU without AVX2, so the current engine ran its **SSE2** tier. µs per call.
+
+| workload (both DLLs export it) | original | current | current / original |
+|---|---:|---:|---:|
+| `Sprite.Draw` Paint, 256×256 | 23.0 | 15.3 | **0.67×** |
+| `Sprite.Draw` AlphaBlend, 256×256 | 258.8 | 52.2 | **0.20×** |
+| `Sprite.Draw` AlphaTest, 256×256 | 83.7 | 22.6 | **0.27×** |
+| rotate 256×256 through `DRAW_ROT` | 324.7 | 220.3 | **0.68×** |
+| rotate 256×256 through `DRAW_WARP` | — (new) | 235.6 | — |
+| scale 256→512 through `RESIZE` | 12 475 | 2 076 | **0.17×** (0.17–0.24× across runs) |
+| `CLEAR_C` over 1280×800 | 381 | 418 | 0.89–1.10× — parity |
+| `BLEND` k=128, 256×256 | 339.0 | 36.7 | **0.11×** |
+| one simulated frame (clear + 40 paint + 8 blend + 4 rotate) | 5 349 | 2 302 | **0.43×** |
+
+Read it as: nothing the rewrite did made a common kernel slower by more than this machine's ±25 % run-to-run
+noise, and the alpha path is where the win is (5× blending, 9× `BLEND`, 5–6× `RESIZE`). Only the plain
+full-surface `CLEAR_C` sits at parity — it was already memory-bandwidth bound, and it still is. Part of the
+gain is structural rather than SIMD: the original blits in and out of GC-pinned `int[]` arrays, the current
+layer owns unmanaged aligned pixel buffers and pins nothing.
+
+## What the new output control costs: raw blit vs `SpriteBox` (`tests/cs/outbench`, demo test "Output paths")
+
+`Sprite` has always reached the window the same way — `GetDC(control.Handle)`, `Sprite.PaintToDevice(HandleRef)`,
+`ReleaseDC` — and `SpriteBox` is the newer control that owns that job (its own surface, a `Render` event,
+`Present()`, and the `SizeMode` zoom / stretch / pan view). The question is how much the newer route costs, so it
+is measured instead of argued: `tests/cs/outbench` renders ONE deterministic scene (640×480, 200 tile copies)
+through four present paths and times composition and present separately, and the demo's "Output paths: raw blit vs
+SpriteBox" test shows the same four side by side with a per-pane stopwatch plus an uncapped fullscreen route
+selector. `outbench` fails its own run (exit 1) if a path drew nothing, because a tidy table of zeros is the exact
+way this measurement lies.
+
+Per frame, 640×480, 200 copies, best of 3 × 240-frame passes, two independent runs of the same binary (this box
+moves ±25 %, so the ratios matter more than the absolutes):
+
+| route | window hidden | window on screen | total vs the raw route (shown) |
+|---|---:|---:|---:|
+| 1 raw `GetDC` + `PaintToDevice` + `ReleaseDC` | 0.267 ms | 0.634 ms | 1.00× |
+| 2 `SpriteBox` surface + `Present()` | 0.277 ms | 0.507 ms | **≈ 1.0×** (0.80× measured here — the two runs disagree by less than the noise) |
+| 3 `SpriteBox` through a real `WM_PAINT` (`Redraw()` → paint message) | 0.350 ms | 0.654 ms | **1.03–1.31×** |
+| 4 `SpriteBox` in a view `SizeMode` (half-res surface, bilinear 2× upscale) | 0.790 ms | 1.059 ms | **1.7–3.0×** |
+
+`outbench` also prints the same runs split into composition and present, which is where the two costs actually
+live (three runs of the same binary, 180 frames each, totals per 180 frames): the 1:1 `SpriteBox` present is
+9.8–12.1 ms against the raw blit's 11.4–15.0 ms — the same `BitBlt`, so the same money; the `WM_PAINT` present
+is 27.8–32.2 ms, i.e. ~16–21 ms of message round trip; and the view `SizeMode` present is 117–124 ms, i.e.
+~106–114 ms of resample on top of the blit. The render half does not carry the difference: it moves only with
+the surface it paints (35.1–39.4 ms for the full-res routes, 25.1–32.3 ms for the zoom pane's half-res surface).
+
+So: **the control itself is free.** A `SpriteBox` presented 1:1 costs the same as the hand-written `GetDC` blit it
+replaces (same single `BitBlt` into the same HDC — `cs/SpriteBox.cs` `OnPaint` / `Present` call exactly
+`Sprite.PaintToDevice`), and driving it through `WM_PAINT` adds only the message round trip on top of that blit.
+What actually costs is the **resample**: a `SizeMode` view routes the present through `BlitView` → `Compose` →
+`Sprite.DrawScaled` (`cs/SpriteBox.View.cs`), i.e. it writes every destination pixel instead of copying the block,
+and that is where the 2–3× goes. Two notes for anyone benchmarking this themselves, both learned from these runs:
+`SpriteBox.Present()` deliberately falls back to `Invalidate()` when the control is not `Visible` (so a minimised
+test window measures a no-op — park it off screen instead, which keeps a real HDC), and `Redraw()` queues a paint
+message that `Present()` does not consume, so a loop that calls both re-blits once per frame for free.
+
 ## Verification
 
 `tests/difftest.cpp` compiles the *untouched* original `.cpp` files (with a
@@ -350,9 +470,8 @@ odd widths (tail handling), and both SIMD levels:
 
 ```
 $ cd tests && make test
-308672 checks passed, 0 failed
-warp: 1200 checks, 0 with differences, 0 / 15627530 pixels differ
-line2: 4000 iterations, 0 failures        (+ alpha_over/premul: 0 mismatches, dots: 0 problems)
+308852 checks passed, 0 failed
+line2: 4000 iterations, 0 failures
 poly: 0 failures                           (integer rects == CLEAR_C, AA coverage == area, union, OOB fuzz)
 blur: 300 iterations, max channel diff vs double reference 2, 0 failures   (+ all 11 ops x flags SSE2 == AVX2, clip, energy 99.3-100 %)
 area: 0 failures                           (2048->256: area keeps 32/32 lines, plain keeps 0; no-op at factor 1; box average == reference)
@@ -361,6 +480,12 @@ fringe: 0 failures                         (filtered alpha ops: no dark halo, tr
 fx: 0 failures                             (chains: blur == DRAW_BLUR, colour <= 2/255 vs reference, distortions vs reference, dilate/erode == brute force, shadow == blur+tint+shift, disabled stages, clip, SSE2 == AVX2)
 fuzz: 1500 iterations ok                   (hostile inputs: NaN / inf / 1e30 coordinates, 1x1 sprites, extreme stage params - no OOB write, no clip violation)
 threads: 6 rounds x 8 threads, 0 failures  (DrawParallel pattern with contended scratch buffers: parallel == sequential, canaries intact)
+flood: 0 failures
+dissolve: 0.500 of pixels took the source (expect ~0.502), 0 foreign values
+blendtest: all passed
+regchk: all checks passed                  (+ degenerate DRAW_LINE2 / dash geometry, ABI line: SR2D_ABI_VERSION() == SR2D_ABI)
+dispatch: 4 rounds x 8 threads, level 2, 0 failures
+voxtest: 200 iterations, raycast pixels checked 2835344 (766593 hit a voxel, ambiguous skipped 10626 = 0.37%), point pixels 2845970 (39841 hits)
 ```
 
 `make asan` rebuilds the kernels with AddressSanitizer + UBSan and runs the
@@ -369,12 +494,48 @@ and the dispatch test under ThreadSanitizer. The whole suite is clean under all
 three, also with `-fsanitize=float-cast-overflow,float-divide-by-zero` and the
 leak checker on (audit of 2026-09-23, see CHANGELOG).
 
+### What every check covers (and what it needs)
+
+`projchk.py` asserts this table stays complete: every check project under
+`tests/cs/` must be listed here. "needs DLL" = the native `SR2D64` library must
+be loadable (on Linux: build it with `make so` in `tests/` and copy
+`build/libSR2D64.so` next to the runner exe as `SR2D64.so`).
+
+| Check | Covers | Needs | Does NOT cover |
+|---|---|---|---|
+| `make so` + `make test` (native) | the whole native suite: differential test (new kernels vs the untouched originals, byte-exact, SSE2 == AVX2 == scalar), line2 / poly / blur / area / bicubic / fringe / fx / flood / dissolve parity, hostile-input fuzz, thread test, blendtest, regchk (guards, degenerate geometry, ABI line), dispatch test, voxtest | POSIX make, g++/clang++ | anything managed; the Windows DLL build (that is `build_release.bat`) |
+| `make asan` / `make tsan` | the fuzz + thread + blend + linetest + regchk suites under AddressSanitizer/UBSan, and the thread/dispatch tests under ThreadSanitizer | as `make test` | byte-exact parity (sanitizer builds replace, not compare) |
+| `tests/cs/ctlrun` | the managed end-to-end runner: SpriteControls (knobs, sliders, menus, wheel, curve editor) on a fake WinForms layer, SpriteBox view modes, TransformFrame interactions, edit history, view lifetime, pattern fill, quad warp, ABI mirror sizes | DLL; exit code = failures | the native kernels' parity (that is difftest) |
+| `tests/cs/benchrun` | renders demo bench-test bodies headlessly, dumps the canvas as raw RGBA (`topng.py` to view) | DLL | correctness assertions - it is a rendering smoke + visual dump |
+| `tests/cs/vecrun` | vector rendering pipeline: writes `<name>.rgba` + shape counts / warnings / timings into an out dir | DLL; takes the out dir as argv[1] | import robustness (that is vecfuzz) |
+| `tests/cs/selchk` | Selection / FloodFill properties: wand == fill, tolerance, global, ops, feather / grow / border, boolean combine, lock-rect interplay | DLL; compiles a cs/ SUBSET (no VoxelGrid) | voxels, controls |
+| `tests/cs/autochk` | prints the `SR2D.Resolve` filter-resolution table (Auto -> Nearest / Linear / Smooth at each scale) | DLL | - informational, no asserts (diff the output to regression-test it) |
+| `tests/cs/codechk` | demo source integrity: every `T(...)` test name parses, descriptions and code-view references stay consistent | DLL | engine behaviour |
+| `tests/cs/fontchk` | Png codec round-trips (every colour type, 16 bit, interlace, tRNS) against Pillow-written references, Stroke caps / joins / dashes, the glyph pipeline (cmap, surrogates, seac), ImageCodec formats | DLL **and** generated references: run `python3 tests/cs/fontchk/mkimg.py` first (deterministic, seeded); `mkpng.py` refreshes the optional `ref/` set | JPEG / WebP pixel exactness (webpchk owns WebP) |
+| `tests/cs/webpchk` | cs/WebP.cs decode vs libwebp reference PNGs (17 files, exact) + mutation fuzz; the `Sprite.FromWebP` / `new Sprite(file)` loader half needs the DLL - `WebP.Decode` (bytes -> pixels) is managed-only and runs without it | reference PNGs in `tests/webp/`; DLL for the loader half | other codecs |
+| `tests/cs/layerchk` | LayeredSprite: composite == manual layer-by-layer draw (bit-exact), prefix cache == recompose, dirty tracking, transformed layers | DLL | the editor blend-mode UX (demo) |
+| `tests/cs/edgechk` | disposed / empty sprites as source and destination, empty ops - the managed hostile edge | DLL | native hostile-input fuzz |
+| `tests/cs/voxchk` | VoxelGrid end-to-end on the native kernels (scene mirror, projections, render) | DLL | native voxtest parity (that is in make test) |
+| `tests/cs/vecfuzz` | mutation fuzz for the vector importers (SVG / EPS / PDF / AI); single-file mode prints the full trace | DLL (draws samples) | render parity |
+| `tests/cs/blur` | visual smoke: soft-edge shapes on a checkerboard, raw dump | DLL | - visual only |
+| `tests/cs/curvetest.csproj` | headless render of the Curve editor; `dotnet curvetest.dll out.raw` + `topng.py` | DLL | - visual only |
+| `tests/cs/benchchk` | build-only orchestrator (compiles the demo bench sources, net10.0-windows) - nothing to run | Windows targeting | - |
+| `tests/cs/outbench` | the four output paths measured, not argued: the same scene presented 1) raw `GetDC` + `Sprite.PaintToDevice(HandleRef)` + `ReleaseDC`, 2) `SpriteBox.Present()`, 3) `SpriteBox` through a real `WM_PAINT`, 4) `SpriteBox` in a view `SizeMode` (resample) - render ms and present ms split per variant, with a non-background pixel check that fails the run if a path drew nothing (`--noshow` parks the window off screen, `--frames/--copies/--w/--h` size the workload). Exit code = blank frames | DLL, Windows, a desktop session (a hidden window still owns a real HDC) | the fullscreen uncapped fps (that is the demo's own bench, `demo/OutputDemo.cs`) |
+| `tests/cs/legacybench` | the ORIGINAL engine (`legacy/original-engine`, built unchanged to `SR2DOLD64.dll` by `build_native.bat`) against the current one on the workloads both export: Draw Paint / AlphaBlend / AlphaTest, DRAW_ROT, RESIZE, CLEAR_C, BLEND, plus a 40-sprite frame simulation. Every common-kernel row asserts the two surfaces have the same pixel hash first, so a timing row is only printed for identical work | DLL **and** `SR2DOLD64.dll` beside the exe (the csproj copies it; `tests/cs/legacybench/build_native.bat` rebuilds it with MSVC) | kernels the original never had (warp, line2, area / bicubic filters, polys, voxels) - those rows print n/a for the old side |
+| `tests/cs/projchk.py` | drift guard: demo csproj lists every cs/*.cs, template is complete, THIS table lists every check project | python3 | - |
+| demo suite (`demo/`, "Run suite") | every demo test body runs without throwing, once per suite pass, plus the per-test `Check` hooks | DLL, Windows (WinForms) | byte-exact anything - it is the interactive app's smoke |
+| demo shot harness (`SR2DDemo.exe --shots <dir>`) | every test selected through the real UI path and rendered for one deterministic frame (`Ctx.Time = 0.25`, pointer centred), overlays and control strip composed in, into `NNN_group_name.png` + `manifest.tsv` (status, strip, colour count, ink pixels, hash) — the make-sense audit instrument; see *Shot harness* under the demo section | DLL, Windows (WinForms), a visible desktop session | plain WinForms children of a control strip (native TrackBar / Label / NumericUpDown have no SR2D picture, so they are not in the shot) |
+| `build-and-test.sh` / `.bat` | the driver: native clean build + `make test`, builds every managed check, the demo (both Implicit modes) and EmptySR2DFormTemplate with analyzers, runs ctlrun / benchrun / selchk (+ vecrun with an out dir), fails on the first red gate | per-OS toolchain | webpchk / fontchk / codechk / edgechk / layerchk / voxchk / vecfuzz runs (build-only there; run them directly) |
+
 ## Analyzers and the `.editorconfig`
 
-`demo/SR2DDemo.csproj` and `template/SR2DApp.csproj` enable the .NET analyzers
+`demo/SR2DDemo.csproj` and `EmptySR2DFormTemplate/EmptySR2DFormTemplate.csproj` enable the .NET analyzers
 (`AnalysisLevel` latest-recommended); the rule set lives in the repo-root
-`.editorconfig`. cs/ and demo/ are warning-free under it. The file says next to
-each silenced rule why the code does what it does (catch-all in the importers
+`.editorconfig`. cs/ and demo/ are warning-free **for the rules that are
+enabled** - which is the only claim that can be made honestly: the file
+explicitly switches 25 rules to `none`, each with its reason in the line's
+comment (see the list there before trusting the phrase "warning-free"). It
+says next to each silenced rule why the code does what it does (catch-all in the importers
 means "damaged object → skip it", and since 2026-09-23 they report what they
 skipped, see below; `Contains(string)` is ordinal by definition;
 MD5 is a content hash; the DLL is resolved by SR2D's own resolver). Rules the
@@ -444,7 +605,8 @@ stay silent: there is nothing to attach a warning to and nothing to fix.
 * Fixed: `MaskMulAddS2X` passed `-Convert.ToInt32(NotMask)`; sign is now
   consistent with all other calls (native treats any non-zero as "not").
 * Requires `<AllowUnsafeBlocks>true</AllowUnsafeBlocks>` and .NET 6+
-  (`NativeMemory`). Compiles warning-free with `<Nullable>enable</Nullable>`.
+  (`NativeMemory`). Compiles warning-free (for the enabled rules, see
+`.editorconfig`) with `<Nullable>enable</Nullable>`.
 
 ## New: `DrawLine2` / `DrawPolyline2` (`DRAW_LINE2`)
 
@@ -693,6 +855,9 @@ Stages:
 | `ShadowAt(angleDeg, distance, blur, argb, ...)` / `ShadowOnlyAt(...)` | °, px | the same, Photoshop style: the shadow is cast *towards* `angleDeg` (0 = right, 90 = down on screen) by `distance` px |
 | `Outline(thickness, argb, Opacity)` | px | solid border around the shape (= grow + tint, no blur), sprite on top |
 | `Dilate(r, Square)` / `Erode(r, Square)` | px | morphology: grow / shrink the shape (per-channel max / min over a disc); thin parts vanish on erode |
+| `MotionBlur(degree, strength, Samples, Sampling)` / `MotionBlurPath(path, strength, Samples, Sampling)` | °, px | the picture averaged over 2..64 taps along a trail - the classic motion streak. `degree` 0 = right, 90 = down, `strength` = trail length in px; the path overload follows a polyline of relative offsets (2..32 points), scaled by `strength`. Samples 0 = automatic from the extent (2..32; an explicit count is taken up to 64); the trail counts into the draw's margin, nothing clips |
+| `MotionEcho(width, height)` | px, 0..0.99 | the real-time friendly feedback blur: a persistent accumulator sprite - each `Step(frame)` fades it by `Persistence` and draws the frame over it (two whole-surface passes at ANY trail length, no resampling). Draw the returned sprite every frame; moving objects leave a decaying trail. Not frame-rate independent - `Persistence` applies per step |
+| `canvas.DrawMotionTaps(sprite, x, y, path, taps)` | px, 2..32 | the other real-time blur: `taps` whole copies along `path` (the same polyline `MotionBlurPath` takes), AVERAGED in one reused premultiplied surface instead of resampled. Taps passes over the SPRITE plus three, whatever the trail length - `MotionBlur` resamples the sprite-plus-trail image taps times, so its cost grows with the trail. Deterministic (a still object, a screenshot and any frame rate are fine, unlike the echo), and a tap is a whole copy: few taps on a long trail read as separate ghosts, not as a smooth sweep |
 
 **Cheap blurs.** The Gaussian-like blur is three box passes; its cost is independent of
 the radius but not free (0.65 ms per 256² layer, 21 ms at 1080p on AVX2). Two knobs make it
@@ -1009,6 +1174,30 @@ Two selections combine with `a.Add(b) / Subtract / Intersect / Xor` (in place) o
 combined per byte (max / saturating minus / min / |a−b|), so feathered edges stay soft.
 If you write to `sel.Pixels` yourself, call `sel.Invalidate()` afterwards (bounds + version).
 
+### Moving / offsetting the selection: `cs/Sprite.Move.cs`
+
+```csharp
+canvas.Move(sel, 24, -10);                                        // the move tool: cut the selection, paste it 24 left / 10 up
+canvas.Offset(sel, 64, 0);                                        // Photoshop offset: wraps around the selection's bounding box
+canvas.Offset(sel, 64, 0, SelOffsetWrap.Spans);                   // non-rectangular selections: wraps along the selected spans
+canvas.Shift(64, 0, Wrap: true);                                  // (the whole-sprite shift is still Shift / Scroll)
+```
+
+`Move` is the Photoshop Move tool inside one sprite: the selected pixels travel by Dx / Dy,
+the vacated source turns transparent, content pushed outside the sprite (or the lock rect)
+is clipped away like when you drag over the canvas edge, and overlapping source / destination
+are handled (the source is snapshotted first). `Offset` is Photoshop Filter > Other > Offset
+restricted to a selection: nothing is cleared, the pixels just redistribute inside the
+selection - what leaves on one side comes back on the other, routed by `SelOffsetWrap`:
+`BoundingBox` wraps around the selection's bounding box (the Photoshop behaviour; for a
+rectangle that is the strip itself), `Spans` wraps within the selected spans of each row /
+column so a non-rectangular selection never carries pixels across its unselected gaps.
+
+Both are coverage-weighted, so a **feathered selection moves / offsets with soft edges**: the
+content and its coverage travel together, the source is faded out by the same coverage, the
+destination receives `source * weight + old * (1 - weight)` - an opaque pixel survives the trip
+bit-identical. The marquee itself never moves; both ops return the number of pixels touched.
+
 **The selection as pixels.** Any shape is a list of horizontal runs, and each run is a
 contiguous piece of one sprite row - so the selected pixels are available as real
 `Span<int>`s with **no copy**:
@@ -1110,6 +1299,16 @@ visible faces blended by how much each faces the camera. `Cubes`: every exposed,
 camera-facing face rasterised as a parallelogram (pixel-centre rule, shared edges computed
 from the same lattice points → watertight, no cracks, no double writes). `Mode = Auto`
 (default) picks Points for a preset at scale 1 and Cubes otherwise.
+
+**Transparency.** Alpha 1..254 is translucent: the side of a voxel toward a neighbour of
+LOWER alpha is drawn (outside the grid counts as 0, so equal-alpha neighbours — the inside
+of a uniform glass block — stay hidden), and a translucent face composites over whatever is
+behind it with its own alpha (straight-alpha over, alpha channel included). The walk's
+far-to-near painter's order IS the correct back-to-front order, so no depth buffer is
+needed — and grids that only use alpha 0 / 255 render bit-identical to before. `KeepAlpha`
+keeps its alpha-tag contract: every drawn voxel is stamped verbatim (own alpha in the
+destination, nothing blended). Translucent voxels still block propagated light like solid
+ones (a glass wall shades like a stone one).
 
 **Lighting tiers** (`VoxelLighting`, each includes the previous):
 
@@ -2117,6 +2316,7 @@ canvas.DrawText(10, 10, "fps 61.2", white, black);                              
 canvas.DrawText(cx, cy, "GAME OVER", SR2D.ARGB(255, 255, 64, 64), 0, 4, 2, 0, SR2D.LineOp.Set, 128, TextAnchor.Center);
 canvas.DrawText(x, y, "ghost", SR2D.ARGB(120, 255, 255, 255), 0, 2, 0, 0, SR2D.LineOp.AlphaBlend);
 canvas.DrawText(x, y, "cursor", white, 0, 1, 0, 0, SR2D.LineOp.Xor);                 // draw twice to erase
+canvas.DrawText(x, y, "over anything", white, 0, 2, 0, 0, SR2D.LineOp.AlphaBlend, 128, TextAnchor.TopLeft, null, black);   // + drop shadow
 Size sz = Sprite.MeasureText("hello", scale: 2, weight: 1);
 ```
 
@@ -2126,6 +2326,9 @@ Size sz = Sprite.MeasureText("hello", scale: 2, weight: 1);
 * `letterSpacing` = extra pixels between glyphs, may be negative.
 * `op` = any `SR2D.LineOp` (Set is a ClearRect per run = fastest; Xor,
   AlphaBlend, Blend, Add, Max, Min through the polygon filler).
+* `shadowColor` (the trailing overload parameter) = the drop-shadow colour (the spreadsheet
+  look): the text is drawn once in it, offset down-right by `shadowOffset` x `scale` px, then
+  the text itself on top - readable over any background; 0 = no shadow.
 * `anchor` = which point of the text box lands on (x, y) (9 positions); `
 `
   starts a new line; the returned `Rectangle` is the drawn box (handy for
@@ -2309,6 +2512,28 @@ var (w, h, argb) = Png.Decode(bytes);                     // raw pixels; Png.Enc
 
 ## SR2D-drawn value controls (`SpriteKnob`, `SpriteSlider`, `SpriteWheel`, `cs/SpriteControls.cs`)
 
+The colour selector comes in both shapes: `SpriteColorPicker`
+(`cs/SpriteControls.Color.cs`) is the on-form control - a square and a strip
+whose meaning `Mode` chooses (`HueSquare`: x = saturation, y = value, hue
+strip below; `Brightness`: x = hue, y = value, saturation strip; `Wheel`:
+angle = hue, radius = saturation, value strip), an optional alpha bar over a
+checkerboard, a numeric entry column switched by `Scheme` (`Rgb`, `Hsb`,
+`Hsl`, `Yiq`, `Lab`, `Cmyk`) and a hex entry: `Hex` reads / writes
+`#AARRGGBB` and accepts `#RGB`, `#RRGGBB`, `#AARRGGBB` with or without `#`.
+All six conversions are pure static functions (`RgbToHsv`, `RgbToHsl`,
+`RgbToYiq`, `RgbToLab` D65, `RgbToCmyk`, each with the inverse) and pinned by
+ctlrun - an achromatic colour keeps the current hue, and the gamut is a
+square that lives at the value of the axis it does not show (the wheel
+re-lights with its value bar). The preview is also the eyedropper: click it
+(or call `BeginPick()`) and the cursor becomes a pipette over the whole
+screen - one click takes that desktop pixel into `Value`, Esc / right click
+cancels. `SpriteColorDialog` is the modal
+`ColorDialog` stand-in around it (`ShowDialog(owner)`, read `Value` on
+`DialogResult.OK`; the SR2D OK / Cancel buttons close it, Enter = OK,
+Esc = Cancel) - or embed it in a form with `CloseOnButton = false`
+(TopLevel = false): the buttons then set `DialogResult` and raise
+`ButtonClick` and stay.
+
 Three WinForms controls derived from `SpriteBox`, rendered entirely with SR2D
 shape calls (anti-aliased polylines / discs, `DrawText`):
 
@@ -2336,6 +2561,20 @@ shape calls (anti-aliased polylines / discs, `DrawText`):
     on the body make the free spin visible).
 * **`SpriteSlider`** — horizontal or vertical (`Orientation`), rounded track,
   round thumb, optional `Ticks`, caption left / value right.
+
+**Discrete values.** `SpriteKnob`, `SpriteSlider`, `SpriteWheel` and `SpriteNumeric`
+share a snapping mode (the entries are spread EVENLY - the thumb sits between the entries,
+not at their numeric position): `Values` (any predetermined set - `2 4 6 8 10 12`, gear ratios,
+`new double[]{ 0.5, 1, 2, 4 }`) or `PowersOfTwo = true` (the powers of two inside
+Minimum..Maximum, e.g. `8 16 32 64 128 256` - the demo's grid slider). Every input snaps
+to the nearest entry - drags (the `CommitOnRelease` preview too), typed text, wheel,
+arrow keys, buttons, code - and the wheel / arrows / buttons step one ENTRY at a time
+(never `value + Step`, which would get stuck between two entries). The list is sorted and
+de-duplicated automatically, `PowersOfTwo` follows Minimum / Maximum changes, and the
+plain `Snap` + `Step` arithmetic grid keeps working (a set `Values` list wins).
+`ShowNotches` draws a tick per value (the list, or the Snap + Step grid), `NotchLabels`
+prints the value next to it (marks that would overlap the numbers are skipped) - on the
+slider along the track, on the knob around the body.
 * **`SpriteWheel`** (`cs/SpriteControls.Wheel.cs`) — a thumb wheel / drum
   picker: a cylinder seen from the side with a ridge per `Step` and the
   neighbouring values printed on it (they foreshorten and fade towards the
@@ -2557,11 +2796,16 @@ light rim, accent, pixel font — so a whole form can be built from SR2D control
 Containers are real WinForms containers (`ParentControlDesigner`, so the
 designer lets you drop controls into them; `DisplayRectangle` honours the
 frame and the group caption). One convention makes them work without setup:
-**a SpriteControl whose `BackColor` was never set takes the face colour of the
-SpriteControl container it is put into** (a knob dropped on a sunken panel is
-drawn on the panel's darker face; a label on a tab page on the page's colour)
-and follows the container when its colour changes. Set `BackColor` explicitly
-to opt out (`BackColorIsExplicit`).
+**a SpriteControl whose `BackColor` was not set by you takes the face colour of
+what it sits on** - the `SpriteForm`'s own `BackColor` for a control docked into
+the form, the face of a SpriteControl container (a knob dropped on a sunken panel
+is drawn on the panel's darker face; a label on a tab page on the page's colour) -
+and follows it when that colour changes. "Not set by you" includes the case the
+designer used to create: a generated `BackColor = Color.FromArgb(32, 36, 40)` is
+exactly the SR2D default, so it does not count as a choice, and `ShouldSerializeBackColor`
+returns false for it (the grid will drop that line the next time it writes the
+file). Any other colour is yours to keep: the control stops adopting it. Right-click
+/ Reset the property to put it back on the ambient colour. `BackColorIsExplicit` tells you which side a control is on.
 
 ```csharp
 var tabs = new SpriteTabControl { Dock = DockStyle.Fill };
@@ -2817,7 +3061,7 @@ open .vox / .obj) and an edit toggle.
 
 `Cursors.Hand` is the web-link pointing finger; there is no "you can grab this" open
 hand and no "grabbed" fist. `SpriteCursors` has them: the two hands are a **traced
-vector drawing** (from `uploads/cursor/hand_cursor.svg`; the path data lives in the
+vector drawing** (from `legacy/reference/cursor/hand_cursor.svg`; the path data lives in the
 source as four constants — outline + fill per hand — so nothing is loaded at run
 time), the rotate arrow and the magnifiers are drawn procedurally. SR2D rasterises
 them anti-aliased at the wanted size, the sprite becomes a real `HCURSOR` with a hot
@@ -2914,6 +3158,34 @@ protected override void OnPaint(PaintEventArgs e)
 If `CreateDIBSection` fails (out of GDI handles) the sprite silently falls back to
 a normal buffer; `IsGdiSurface` tells you which you got.
 
+## Quad warp: `Sprite.DrawQuadWarp` (`cs/Sprite.Warp.cs`)
+
+Four-corner warp: the part of a source sprite framed by one quadrilateral is
+re-projected so its corners land on another quadrilateral of the target.
+
+```csharp
+var src = new PointF[] { new(8, 8), new(24, 8), new(24, 20), new(8, 20) };   // clockwise: TL, TR, BR, BL
+var dst = new PointF[] { new(8, 8), new(30, 12), new(30, 18), new(8, 20) };  // the right edge pulled out
+canvas.DrawQuadWarp(picture, src, dst);                                      // Op.Paint (replace, alpha included)
+canvas.DrawQuadWarp(picture, src, dst, SR2D.Op.AlphaBlend);                  // or straight-alpha over
+```
+
+The map is the bilinear patch named by the two quads, sampled by per-pixel
+inversion (Heckbert's inverse bilinear, nearest-neighbour fetch). Properties
+that make it the cage-warp primitive:
+
+* an **identity** quad (dest == source) reproduces the region byte for byte;
+* each quad **edge maps linearly** between its (moved) corners — two quads that
+  share two corners share the deformed edge too, so moving a shared vertex
+  drags every adjacent face with **no crack along the seam**;
+* pixels whose centre falls outside the destination quad, and self-intersecting
+  (bowtie) quads, are left untouched — a degenerate quad warps nothing instead
+  of throwing (corners may also be dragged outside the source; sampling clamps).
+
+`Sprite.QuadInvert(quad, p)` is the published inverse (a `(u, v)` in 0..1 or
+null outside) — that is the point-in-quad test for cage editing. The lock rect
+protects pixels like on every other verb.
+
 ## Threads: `DrawParallel`
 
 SR2D has no locks (neither had the original). Two threads drawing into the same
@@ -2998,6 +3270,43 @@ audit notes). The rule of thumb that catches this class of problem: if a cache i
 by threads, either make it immutable after construction, or update it with one atomic
 operation, or give each thread its own copy (`[ThreadStatic]`, as the curve flattener and
 `DrawTransparent` already do).
+
+## `MulAddS2X` / `MaskMulAddS2X`: `Mul` and `Add` are packed per-channel byte vectors
+
+```csharp
+public int MulAddS2X(Sprite Src, int Sx, int Sy, int Mul, int Add)
+```
+
+`Mul` and `Add` are **not** scalars. Each is four bytes, one per channel — `SR2D.ARGB(m, m, m, m)`
+for a uniform value — where the `Mul` byte is a 7-bit fixed-point factor (128 = x1.00) and the
+`Add` byte a signed offset in steps of 2 (128 = +0). The kernel works per byte:
+
+```
+dest_channel = clamp( ((src_channel * mul_byte) >> 7) + add_byte * 2 - 256 )
+```
+
+so the neutral, do-nothing pair is **`Mul = 128` per byte, `Add = 128` per byte**
+(x1.000, +0). An `Add` byte of `0` is `−256`, i.e. it crushes that channel to nothing —
+including the **alpha** byte, which is why a wrong constant silently erases the picture
+instead of tinting it.
+
+| want | Mul | Add |
+|---|---|---|
+| pass through | `SR2D.ARGB(128,128,128,128)` | `SR2D.ARGB(128,128,128,128)` |
+| x0.75 all channels | `SR2D.ARGB(96,96,96,96)` | 128/byte |
+| x0.75 + 64 (frosted panel) | `SR2D.ARGB(96,96,96,96)` | `SR2D.ARGB(160,160,160,160)` |
+| tint red only | `SR2D.ARGB(128, 192, 128, 128)` (A stays x1, R x1.5, G/B x1) | 128/byte |
+| drop alpha to 0, keep colour | `SR2D.ARGB(0, 128, 128, 128)` | 128/byte |
+
+(`SR2D.ARGB` takes `A, R, G, B` — see `cs/SR2D.cs:430`.)
+
+Passing bare scalars compiles and *looks* plausible but is wrong: `MulAddS2X(p, 0, 0, 96, 160)`
+scales only the **blue** channel by 0.75 (96 = `0x60` lands in the blue byte), multiplies
+green / red / **alpha** by 0, and adds `160*2-256 = +64` to blue while the alpha byte gets
+`0*2-256 = −256` → the result is a fully transparent sprite. Two demos were broken exactly
+this way (the frosted-glass backdrop, and the knob strip's colour tile); the engine is
+correct and matches `pMulAdd` in `legacy/original-engine/SR2D.cpp`, where `vmul` / `vadd`
+are read as four bytes. The XML doc on `Sprite.MulAddS2X` carries the same warning.
 
 ## Audit notes (second pass)
 
@@ -3084,6 +3393,88 @@ so a local variable named `small` compiles on Linux and fails under MSVC / clang
 downscaled blur, area warp, flood stack) were renamed. `make test` now starts with
 `make wincheck`, which syntax-checks every translation unit with those macros defined, so
 the Linux harness catches this class of error before the Windows build does.
+
+## Demo make-sense audit
+
+Every one of the ~108 demonstrations in `demo/Tests.cs` was screened twice: against the
+shot harness (does the picture show what the caption says it shows) and against its own
+description text (does every claim in the prose hold in the code). The descriptions were
+written by a model that got sloppy at the end of the project, and several of them made
+**false promises** — claims about a behaviour that had been dropped, renamed or never wired
+up. All of them were corrected rather than softened; where the text was right and the code
+was wrong, the code changed. Classes of defect found:
+
+* **A demo that does not demonstrate.** The motion-blur test — the report that opened the
+  round — now really picks its mode from the Op selector, with the echo driven by a
+  `MotionEcho` feedback history instead of a still sprite claimed as a trail. The
+  knob / slider / wheel canvas rendered *completely blank*: its colour tile was copied once
+  into the 2S×2S scratch (three empty quadrants, and `Op.Blend` ignores alpha, so they
+  painted flat grey over the disc) and then run through `MulAddS2X` with scalar constants —
+  see the `MulAddS2X` section above — which zeroed red, green and **alpha**. The same second
+  bug in the frosted-glass backdrop: only the blue channel survived, and the panel came out
+  transparent. Both fixed; the neutral pair is `Mul = 128/byte`, `Add = 128/byte`.
+* **Prose that overstates the UI.** The knob / slider / wheel text described font sizing,
+  strip layout, drag behaviour and double-click resets in ways the controls do not
+  implement — it implied `TextScale` derived the font size from the control's `Size`, while
+  `SpriteControlBase.AutoTextScale` deliberately *discards* its size hint (`0` means the
+  smallest pixel-font size, not "auto"). Each claim was checked against `SpriteControls.cs`
+  and rewritten to what actually happens; the `Paint` op's lack of an opacity, which makes
+  the "Paint" radio quietly draw through `Blend` while a job runs, is now stated instead of
+  hidden.
+* **Dead or clobbering strip controls.** A one-member radio group that could never be
+  unchecked and whose value nothing read; a numeric field that overwrote the slider's own
+  variable instead of its own; an unused `WheelV`; a `cx / cy` term built from an offset no
+  control ever set. Removed or wired up, and the canvas readout now prints both discrete
+  values.
+* **Layout collisions in the shot.** The colour-picker swatch sat under the embedded
+  dialog; two button captions were elided by `FitText` because their columns were too
+  narrow. Widened.
+* **Two engine bugs the audit exposed.** An SR2D control nested through a *plain* container
+  (`TableLayoutPanel`, `FlowLayoutPanel`) inherited no face colour, because the handoff
+  stopped at the first non-`SpriteControlBase` parent — it now walks up through containers.
+  A right-click context menu ate the next left click on its opener (the classic "first click
+  does nothing"); the swallow now applies only to menus opened by that same left click, and
+  `ctlrun` asserts both directions.
+* **The last two components, checked as units and not just as demos.** `SpriteCurveEditor` drew its
+  plot *under* the caption band — and a curve's endpoints sit at `y = 0`, i.e. on the bottom edge,
+  so the caption ran straight through the two endpoint nodes and the `0.0` line. Its Help overlay
+  could not fit the sizes the app uses either: 17 lines at the 13 px row step need 221 px while the
+  docked editor is 320×150 (a 134 px plot), so the lower rows painted outside the control. The
+  listing is now 9 lines, the wheel scrolls it while the overlay is up, and it is drawn through
+  `Sprite.CreateView` so a clipped row ends at the frame. And its context menu opened with the
+  *default* left `openButton`, which made the next left click on the plot the menu-close click
+  rather than a gesture. `SpriteColorPicker` / `SpriteColorDialog`: a failed desktop grab in the
+  eyedropper (a coordinate off every monitor mid-sweep) used to leave `Picking` true, the mouse
+  capture held and the cursor swapped for the rest of the session — it lays the pipette down now;
+  `SchemeValuesToRgb` carried a `Cmyk` arm that could never run, because `FromNumeric` handles CMYK
+  (its fourth channel is K, not alpha) before reaching it. The colour *test* also promised
+  "Cancel reverts" and did nothing — it now restores the last accepted viewport colour.
+* **One real leak.** `Effects.RemoveLast()` dropped the stage but left its native scratch in
+  `bufs`, so the lists drifted apart, the buffer leaked until `Clear`, and `Clear` bumped
+  `Version` on a chain that already looked empty (invalidating the prefix cache for
+  nothing). `layerchk` had been crashing on the missing DLL and never reached the assert.
+
+Not everything that looks wrong is wrong. The empty band in the knob strip's screenshot is
+the harness's inability to photograph native WinForms children, the washed-out effects test
+is a legitimate `Opacity: c.Blend / 255f`, the scroll bars that "should not" be there in
+`SizeMode` are the documented overscroll of the Free pan mode, and the colour dialog's
+pixel-literal sizes are *not* a DPI bug: `SpriteTextBox`, `SpriteNumeric` and `SpriteCombo`
+are `SpriteControlBase` — engine-drawn at the pixel font, so they scale with the control, not
+with the device. (Contrast `ChromeDesign.PaletteForm`, which hosts a native ListBox and really
+does need its `Dpi(v) => v * DeviceDpi / 96` helper.)
+
+After the round: two consecutive full shot runs of the final build are byte-identical for 98 of
+the 105 photographed tests (the other three are the file-picker tests, which have no picture).
+The seven
+that move are the ones that print a measured time of their own into the canvas (the PNG
+codec's encode / decode ms, `VoxelGrid.Update` / draw ms in the voxel tests, the big
+grid's timing line, the depth-of-field stack and the `VoxelBox` info line) — `colors` is
+identical for all seven and `ink_px` for six of them (the seventh differs by 2 px because the
+printed digit count changed). `harness/shotcmp.sh <runA> <runB>` lists the movers with their
+`colors` / `ink_px` side by side, which is what tells a digit change apart from a regression.
+`ctlrun` / `autochk` / `codechk` / `edgechk` / `layerchk` / `selchk` / `voxchk` / `webpchk` /
+`blur` / `vecrun` are green (`vecfuzz` needs the vector corpus from the original author's
+paths, so it only builds here).
 
 ## Building the DLL
 
@@ -3196,6 +3587,35 @@ renders `SlowFrames` full frames back to back and reports the steady ms/frame an
 2..N (the first may carry a build), so the cost of the progress reporting itself can be measured.
 **File tests** (`DemoTest.FileFilter`, `FileMulti`) show an "Open file..." button in the
 panel (the .vox / .obj loader; up to six PNGs for the projection test).
+
+**Shot harness — `SR2DDemo.exe --shots <dir>`.** The instrument of the make-sense audit
+(`MainForm.RunShots`). It walks the whole test list the way a user would — set
+`lstTests.SelectedIndex`, `FillCtx()`, the test's own start parameters — with the pointer
+parked at the canvas centre and `Ctx.Time = 0.25f` so the frame is the same one every run,
+renders it once, and writes `NNN_group_name.png` plus `manifest.tsv`
+(`index group test file status strip colors ink_px hash note`). The control strip is
+composed *above* the canvas in the same picture, so the strip demos are photographed too,
+and `DrawOverlays()` runs before the capture — a test is its render *plus* the `Ctx.Label`
+names and the info panel readouts, which for many tests is the only place the numbers a
+control drives are visible. `statsLine` (the fps / ms line) is blanked for the shot, since
+it is the one thing on screen that is not a function of the test, and the message queue is
+pumped after each selection — selecting a test shortens or lengthens the canvas below the
+strip, and without a layout pass every test after a strip test would be shot at whatever
+height the previous strip left behind.
+`status` is `SKIP-DLL` (needs exports the loaded DLL lacks), `SKIP-NOFILE` (a file test with
+no file — the harness cannot pick one), `BLANK` (zero ink pixels) or `OK` / `OK-SLOW`;
+`hash` is a stable digest of the pixels, so two runs diff to the single test that moved.
+Two known limits: **plain WinForms children of a strip** (a native `TrackBar`, `Label`,
+`RadioButton`, `NumericUpDown`) own no SR2D picture and therefore do not appear in the shot
+— an empty band in a screenshot is not by itself a demo defect; and ink / colour counts
+cannot see an all-*transparent* canvas, so `harness/alphascan.ps1` (LockBits, flags images
+with >1 % alpha < 128) runs beside it. A third, harmless one: seven tests print a measured
+millisecond figure of their own, so their hash moves by a glyph or two between runs while
+`colors` and `ink_px` stay identical — `harness/imgdiff.ps1 -A -B` reports the differing
+pixels and their bounding box, which is how those were pinned to the timing readouts rather
+than to the render.
+`harness/sheet.ps1` tiles a directory into one contact
+sheet for eyeballing.
 
 `SR2DDemo` is a WinForms application that exercises every `Sprite` method with
 live sliders and shows FPS, ms per frame and ms per single call. Its whole window
@@ -3374,6 +3794,48 @@ double hue = 0;
 Tween.To(box, () => hue, v => hue = v, 360, 800, Tween.EaseOut);   // invalidates the box every step
 ```
 The shared 60 Hz pump drives all tweens; `Tween.Pump()` exists for headless/tests.
+
+### 8b. Shape a motion with keyframe tangents (`cs/Animation.cs`)
+
+```csharp
+var track = new Track();
+track.Add(0.0, y0);                                          // tangents default to Auto (Catmull-Rom: rests, no overshoot)
+track.Add(0.5, yMid, TangentMode.Step);                      // hold, then jump (a frame change)
+track.Add(1.0, y1, TangentMode.Fast);                        // fast start, ease into the key
+double y = track.Evaluate(seconds);                          // any lerp: a position, an angle, a frame index
+double p = Track.EaseAt(TangentMode.Slow, u);                // single-segment helper (0..1 -> 0..1)
+```
+The tangent modes are the 3ds Max key tangents: `Smooth` (ease in-out), `Linear`, `Step`
+(holds the left value, jumps at the segment end), `Fast` (fast start), `Slow` (slow start),
+`Spline` (custom handle slopes on the key: `HandleIn` / `HandleOut`, 0 = flat) and `Auto`
+(the default: Catmull-Rom slopes from the neighbouring keys - the curve passes through the
+key without overshooting it, exactly what 3ds Max computes for an auto tangent). `Spline` is the
+manual cousin: the key's `HandleIn` / `HandleOut` slopes are the track-view's line handles -
+slopes steeper than the segment overshoot the key's value and come back (what a drawn
+Bezier handle does). For full control there is `SpriteCurveEditor` + `Curve` (`cs/Curve.cs`):
+a Photoshop-curves / 3ds Max Color-Map style 0..1 editor - left drag moves a point, a click
+adds one (a click nearer than `Curve.MinGap` to a point moves THAT point instead), right
+click selects the point under the cursor (if there is one) and opens the menu - the press
+never edits by itself, since the point whose menu it opens would be gone before the menu
+could say anything: the selected point's
+type (`Auto` / `Flat` / `Linear` - the 3ds Max node semantics: automatic smooth, rest at the
+point, straight through), "Delete node" (`Curve.Remove` refuses the two endpoints, so the
+entry is greyed while one of them is selected), "Copy as code" (`Curve.ToCode()` - a paste-able C# snippet) and
+"Paste points" (accepts the copied snippets), clamp values into 0..1, compress into 0..1
+keeping the shape, zoom back, reset, Help (the gesture list over the plot). The mouse WHEEL
+zooms the value axis anchored at the zero line and the MIDDLE button pans it, so the curve
+can be shaped above 1 and below 0 (overshoot: `curve.Clamp01 = false`, Evaluate then returns
+values outside the range). The 0 / 1 axis lines are labelled. The context menu is opened by the
+RIGHT button, so the next left click on the plot is a gesture (move / add a point) and not the
+click that merely lays the menu down — a menu opened by a left click is the one that swallows the
+click on its opener. `Help` overlays the gesture list on the plot; it is 9 lines and scrolls with
+the wheel when the plot is too short for it (a docked editor can easily be 320×150), clipped at the
+frame. The plot stops above the caption band: a curve's endpoints sit at `y = 0`, i.e. on the bottom
+edge, so a plot that ran under `Text` drew the caption through the two endpoint nodes. The monotone-cubic curve evaluates as any
+transfer function (`curve.Evaluate(u)`): a motion speed profile (the demos' "Curve"
+tangent), a brightness ramp for future Levels, or whatever else needs a drawn curve.
+`Keyframe.In` governs a segment when the previous key's Out is Auto. `Tween` animates a
+property over time; `Track` shapes HOW the value travels.
 
 ### 9. Fill a shape with an image (pattern brush)
 

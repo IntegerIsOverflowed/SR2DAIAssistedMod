@@ -124,9 +124,9 @@ namespace Sr2d64CSport
 
             // 9. CommitOnRelease for every knob / slider / wheel on the strip: the value (and the canvas) follows on release only
             var deferred = new System.Collections.Generic.List<SpriteRangeControl> { angle, offset, blend, tiny1, tiny2, tiny3, scale, brite, bip, level, hue, hue2 };
-            var tDefer = new SpriteToggle { Text = "CommitOnRelease (all)", Style = ToggleStyle.CheckBox, Size = new Size(160, 24), Margin = new Padding(4, 4, 4, 0), AccentColor = Color.FromArgb(0xE0, 0x60, 0xC0) };
+            var tDefer = new SpriteToggle { Text = "CommitOnRelease (all)", Style = ToggleStyle.CheckBox, Size = new Size(212, 24), Margin = new Padding(4, 4, 4, 0), AccentColor = Color.FromArgb(0xE0, 0x60, 0xC0) };
             tDefer.CheckedChanged += (s, _) => { foreach (var d in deferred) d.CommitOnRelease = tDefer.Checked; Bump("CommitOnRelease " + tDefer.Checked); };
-            var tRight = new SpriteToggle { Text = "RightButtonCommits (all)", Style = ToggleStyle.CheckBox, Size = new Size(170, 24), Margin = new Padding(4, 2, 4, 0), AccentColor = Color.FromArgb(0xE0, 0x60, 0xC0) };
+            var tRight = new SpriteToggle { Text = "RightButtonCommits (all)", Style = ToggleStyle.CheckBox, Size = new Size(226, 24), Margin = new Padding(4, 2, 4, 0), AccentColor = Color.FromArgb(0xE0, 0x60, 0xC0) };
             tRight.CheckedChanged += (s, _) => { foreach (var d in deferred) d.RightButtonCommits = tRight.Checked; Bump("RightButtonCommits " + tRight.Checked); };
             var deferLbl = new Label { Text = "CommitOnRelease: the thumb / knob lifts\nwhile you drag, a ghost marks the old\nvalue, release drops it and applies;\nEsc cancels. Wheel / keys apply at once.\nRightButtonCommits: left drag slides live,\nright drag commits on release only.", ForeColor = Color.Gainsboro, AutoSize = true, Margin = new Padding(4, 2, 0, 0), Font = new Font(SystemFonts.DefaultFont.FontFamily, 7.5f) };
             var deferCol = new FlowLayoutPanel { FlowDirection = FlowDirection.TopDown, AutoSize = true, Margin = new Padding(0), BackColor = Color.Transparent };
@@ -152,14 +152,15 @@ namespace Sr2d64CSport
         public static bool Running, Spin = true, Bilinear = true, Backdrop, Grid;
         public static int OpChoice, SizeChoice = 1;     // radios: 0 Paint 1 AlphaBlend 2 Add 3 Blend; 0 small 1 normal 2 big
 
-        public const int ButtonsStripHeight = 330;
+        public const int ButtonsStripHeight = 330;   // the picker column lives on the canvas now: four content columns plus a percent filler
 
         public static Control BuildButtons()
         {
-            var strip = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 4, RowCount = 1, BackColor = Color.FromArgb(0x20, 0x24, 0x28), Padding = new Padding(4, 2, 4, 2) };
+            var strip = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 5, RowCount = 1, BackColor = Color.FromArgb(0x20, 0x24, 0x28), Padding = new Padding(4, 2, 4, 2) };
             strip.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 300));
             strip.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 250));
             strip.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 290));
+            strip.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 270));
             strip.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
             Label Head(string t) => new Label { Text = t, ForeColor = Color.Gainsboro, Font = new Font(SystemFonts.DefaultFont, FontStyle.Bold), AutoSize = true, Margin = new Padding(0, 2, 0, 4) };
 
@@ -253,12 +254,83 @@ namespace Sr2d64CSport
                 r.CheckedChanged += (_, _) => { if (r.Checked) { SizeChoice = ii; Bump("Size radio " + sizes[ii]); } }; animated.Add(r);
                 radios.Controls.Add(r, 1, i + 1);
             }
-            var rBig = new SpriteRadio { Text = "big radio, own group", GroupName = "solo", Checked = true, Size = new Size(230, 40), Margin = new Padding(0, 6, 0, 0) }; animated.Add(rBig);
-            radios.Controls.Add(rBig, 0, 5); radios.SetColumnSpan(rBig, 2);
-
+            // (the colour controls moved to their own test - see ColorDemo below; the strip is about
+            // knobs / sliders / wheels / buttons, the canvas shows the sprite they drive)
             strip.Controls.Add(col1, 0, 0); strip.Controls.Add(col2, 1, 0); strip.Controls.Add(col3, 2, 0); strip.Controls.Add(radios, 3, 0);
             strip.Disposed += (_, _) => timer.Dispose();
             Show();
+            return strip;
+        }
+    }
+
+    /// <summary>
+    /// Strip of the colour-controls test: a <see cref="SpriteColorPicker"/> inline (the same HSV pickers
+    /// the dialog uses, as a plain control) plus the <see cref="SpriteColorDialog"/> embedded on the
+    /// canvas beside the corner viewport - OK paints the viewport's background, Cancel reverts. Moved
+    /// here from the buttons test: the dialog needs canvas room the button strip never had.
+    /// </summary>
+    internal static class ColorDemo
+    {
+        /// <summary>Height the strip wants (the bench sizes its row to this; the canvas below shrinks accordingly).</summary>
+        public const int StripHeight = 210;
+        /// <summary>The corner viewport's background - OK on the embedded dialog paints it.</summary>
+        public static int ViewBack = unchecked((int)0xFF101418);
+        /// <summary>The demo's render surface (set by MainForm) - hosts the embedded colour dialog.</summary>
+        public static Control? CanvasSurface;
+        /// <summary>The embedded colour dialog; ShowStrip shows / hides it with the test.</summary>
+        public static Form? ColorOverlay;
+        /// <summary>The inline picker's colour (the canvas shows a big swatch of it).</summary>
+        public static int PickerArgb = unchecked((int)0xFF40A0FF);
+        /// <summary>The viewport colour the dialog last accepted - Cancel puts the viewport back to it.</summary>
+        static int committed = unchecked((int)0xFF101418);
+        public static string LastAction = "none";
+        public static int Edits;
+
+        static void Bump(string src) { Edits++; LastAction = src; }
+
+        public static Control Build()
+        {
+            var strip = new FlowLayoutPanel { Dock = DockStyle.Fill, BackColor = Color.FromArgb(0x20, 0x24, 0x28), Padding = new Padding(4, 2, 4, 2), WrapContents = false };
+            Label Head(string t) => new Label { Text = t, ForeColor = Color.Gainsboro, Font = new Font(SystemFonts.DefaultFont, FontStyle.Bold), AutoSize = true, Margin = new Padding(0, 2, 8, 4) };
+
+            // the inline picker: the dialog's pickers as a plain control (Value / ValueChanged, alpha optional)
+            var pick = new SpriteColorPicker { Value = Color.FromArgb(PickerArgb), Size = new Size(360, 196), Margin = new Padding(0, 0, 10, 0) };
+            pick.ValueChanged += (_, _) => { PickerArgb = pick.Value.ToArgb(); Bump("picker"); };   // any picker edit: drag, hex, numeric, wheel
+            strip.Controls.Add(pick);
+
+            // hints + reset
+            var col = new FlowLayoutPanel { FlowDirection = FlowDirection.TopDown, AutoSize = true, Margin = new Padding(0, 0, 10, 0), BackColor = Color.Transparent };
+            col.Controls.Add(Head("Colour controls, on their own test"));
+            col.Controls.Add(new Label { Text = "Left: SpriteColorPicker as a plain control (the canvas swatch follows it).\r\nThe canvas also hosts the embedded SpriteColorDialog, beside the corner viewport:\r\nits OK paints the viewport's background, Cancel reverts.\r\nThe dialog's preview doubles as the eyedropper: press it, sweep anywhere on the\r\nscreen, release - one click (or the release) takes that pixel's colour.", ForeColor = Color.Gainsboro, AutoSize = true, Margin = new Padding(0, 0, 0, 6) });
+            var reset = new SpriteButton { Text = "Reset viewport colour", Size = new Size(160, 30), Margin = new Padding(0, 2, 0, 0) };
+            reset.Click += (_, _) => { ViewBack = committed = unchecked((int)0xFF101418); Bump("viewport colour reset"); };
+            col.Controls.Add(reset);
+            strip.Controls.Add(col);
+
+            // the embedded dialog on the canvas, right of the corner viewport (built once, shown / hidden with the test)
+            if (ColorOverlay == null)
+            {
+                var embed = new SpriteColorDialog { Value = Color.FromArgb(ViewBack), CloseOnButton = false };
+                embed.ButtonClick += (_, _) =>
+                {
+                    if (embed.DialogResult == DialogResult.OK)
+                    {
+                        committed = ViewBack = embed.Value.ToArgb();                    // OK paints the viewport - visible, instant
+                        Bump("viewport background #" + embed.Value.ToArgb().ToString("X8", System.Globalization.CultureInfo.InvariantCulture));
+                    }
+                    else if (embed.DialogResult == DialogResult.Cancel && ViewBack != committed)
+                    {   // what the test text promises: Cancel takes the viewport back to the last accepted colour
+                        ViewBack = committed;
+                        Bump("viewport colour reverted #" + committed.ToString("X8", System.Globalization.CultureInfo.InvariantCulture));
+                    }
+                };
+                embed.TopLevel = false; embed.FormBorderStyle = FormBorderStyle.None;
+                embed.ClientSize = new Size(276, 316);
+                embed.Location = new Point(12 + 470 + 16, 12);
+                if (CanvasSurface != null) CanvasSurface.Controls.Add(embed);
+                embed.Show();
+                ColorOverlay = embed;
+            }
             return strip;
         }
     }
@@ -1029,6 +1101,117 @@ namespace Sr2d64CSport
             Preset("Lines", "Line one\nLine two is longer than the first\nThree");
             txtCol.Controls.Add(presets);
             strip.Controls.Add(txtCol, 2, 0); strip.SetRowSpan(txtCol, 2);
+            return strip;
+        }
+    }
+
+    /// <summary>The selection-tool scenario's strip: rectangle / ellipse / lasso / clear buttons (a separate class so the headless runners can stub it).</summary>
+    internal static class OffsetTools
+    {
+        static readonly SpriteButton[] toolButtons = new SpriteButton[5];
+        static readonly string[] names = { "Rectangle", "Ellipse", "Lasso", "Pen", "Clear" };
+        public static System.Windows.Forms.Control Strip()
+        {
+            var row = new FlowLayoutPanel { Dock = DockStyle.Fill, FlowDirection = FlowDirection.LeftToRight, WrapContents = false, AutoScroll = true, Margin = new Padding(0), BackColor = Color.Transparent };
+            for (int i = 0; i < names.Length; i++)
+            {
+                int kind = i;                                                    // 0..3 = the tools, 4 = clear
+                var b = new SpriteButton { Text = names[i], Accented = kind == 0, Size = new Size(92, 26), Margin = new Padding(1) };
+                b.Click += (_, _) => { if (kind == 4) OffsetDemo.ClearSelection(); else OffsetDemo.SetTool(kind); };
+                toolButtons[i] = b;
+                row.Controls.Add(b);
+            }
+            var reset = new SpriteButton { Text = "Reset picture", Size = new Size(92, 26), Margin = new Padding(1) };
+            reset.Click += (_, _) => OffsetDemo.ResetBoard();
+            row.Controls.Add(reset);
+            return row;
+        }
+        /// <summary>The active tool's button is accented (the clear button never is).</summary>
+        public static void SyncAccent(int tool)
+        {
+            for (int i = 0; i < 4; i++) if (toolButtons[i] != null) toolButtons[i].Accented = i == tool;
+        }
+    }
+
+    /// <summary>The move test's tangent strip: a SpriteCurveEditor (the "Color Map" style curve control) whose curve shapes
+    /// the motion when the tangent selector is on "Curve" - the same data class (cs/Curve.cs) can later drive Levels.</summary>
+    internal static class TangentTools
+    {
+        public static Curve Motion = new();
+        static SpriteCurveEditor? editor;
+        /// <summary>The curve editor as a TEST TAB setting (shown only while the Op box has "Curve" selected). The
+        /// editor edits the instance the demos evaluate - assigning it into Motion makes every change shape the motion live.</summary>
+        public static System.Windows.Forms.Control BuildEditor()
+        {
+            editor = new SpriteCurveEditor { Size = new Size(320, 150), Margin = new Padding(2) };
+            editor.Curve = Motion;
+            Motion = editor.Curve;
+            return editor;
+        }
+    }
+
+    /// <summary>The "Discrete values" controls test: the snapping modes and the notch / label rendering of the range controls.</summary>
+    internal static class DiscreteDemo
+    {
+        public static double Steps = 6, Pow2 = 64, List = 1.5, Num = 25, NumV = 32;
+        public static string Last = "-";
+
+        public const int StripHeight = 132;
+        public static System.Windows.Forms.Control Build()
+        {
+            var row = new FlowLayoutPanel { Dock = DockStyle.Fill, FlowDirection = FlowDirection.LeftToRight, WrapContents = false, AutoScroll = true, Margin = new Padding(0), BackColor = Color.Transparent };
+            void Lbl(string text)
+            {
+                row.Controls.Add(new SpriteLabel { Text = text, Style = LabelStyle.Muted, AutoSize = true, Margin = new Padding(10, 8, 2, 0) });
+            }
+            void Bind(SpriteRangeControl ctl, string name, Action<double> set)
+            {
+                ctl.ValueChanged += (_, _) => { set(ctl.Value); Last = $"{name} -> {ctl.Value:0.###}"; ControlsDemo.Events++; };
+            }
+            Lbl("Snap 2");
+            var steps = new SpriteSlider { Text = "Snap+Step 2", Minimum = 0, Maximum = 12, Snap = true, Step = 2, Value = 6, ShowNotches = true, NotchLabels = true, Size = new Size(210, 56), Margin = new Padding(4) };
+            Bind(steps, "snap2", v => Steps = v);
+            row.Controls.Add(steps);
+            Lbl("Pow2");
+            var pow2 = new SpriteSlider { Text = "Powers of two", Minimum = 8, Maximum = 256, PowersOfTwo = true, Value = 64, ShowNotches = true, NotchLabels = true, Size = new Size(210, 56), Margin = new Padding(4) };
+            Bind(pow2, "pow2", v => Pow2 = v);
+            row.Controls.Add(pow2);
+            Lbl("List");
+            var list = new SpriteSlider { Text = "Predetermined", Minimum = 0, Maximum = 4, Values = new double[] { 0, 0.5, 1.5, 3, 4 }, Value = 1.5, ShowNotches = true, NotchLabels = true, CommitOnRelease = true, Size = new Size(210, 56), Margin = new Padding(4) };
+            Bind(list, "list", v => List = v);
+            row.Controls.Add(list);
+            Lbl("Knob");
+            var knob = new SpriteKnob { Text = "Gear", Minimum = 0, Maximum = 100, Values = new double[] { 0, 10, 25, 50, 75, 100 }, Value = 25, ShowNotches = true, NotchLabels = true, Size = new Size(130, 128), Margin = new Padding(4) };
+            Bind(knob, "gear", v => Num = v);
+            row.Controls.Add(knob);
+            Lbl("Numeric");
+            var num = new SpriteNumeric { Minimum = 8, Maximum = 256, PowersOfTwo = true, Value = 32, Size = new Size(120, 26), Margin = new Padding(4, 14, 4, 0) };
+            num.ValueChanged += (_, _) => { NumV = num.Value; Last = $"numeric -> {num.Value:0.###}"; ControlsDemo.Events++; };
+            row.Controls.Add(num);
+            return row;
+        }
+    }
+    /// <summary>
+    /// Strip of the motion blur test (the WinForms part, kept next to the other strips): the trail curve
+    /// editor (SpriteCurveEditor over MotionDemo.TrailCurve). The pure half (the curve, the sampled path)
+    /// lives in Tests.cs; the headless runner stubs this class in Stubs.cs.
+    /// </summary>
+    internal static class MotionStrip
+    {
+        public static Control Build()
+        {
+            var strip = new FlowLayoutPanel { Dock = DockStyle.Fill, BackColor = Color.FromArgb(0x20, 0x24, 0x28), Padding = new Padding(4, 2, 4, 2), WrapContents = false };
+            var ed = new SpriteCurveEditor { Size = new Size(360, 204), Margin = new Padding(0, 0, 10, 0) };
+            ed.Curve = MotionDemo.TrailCurve;                                            // copies the current points, modes and clamping into the editor
+            ed.Curve.Changed += (_, _) => MotionDemo.TrailCurve.Set(ed.Curve.Points, ed.Curve.Modes);   // and every edit goes back into the shared curve
+            var col = new FlowLayoutPanel { FlowDirection = FlowDirection.TopDown, AutoSize = true, Margin = new Padding(0, 0, 10, 0), BackColor = Color.Transparent };
+            Label Head(string t) => new Label { Text = t, ForeColor = Color.Gainsboro, Font = new Font(SystemFonts.DefaultFont, FontStyle.Bold), AutoSize = true, Margin = new Padding(0, 2, 0, 4) };
+            col.Controls.Add(Head("The trail curve (CURVE / TAPS modes)"));
+            col.Controls.Add(new Label { Text = "x = along the trail (first tap left, last right),\r\ny = the bend perpendicular to the direction\r\n(the centre line = straight; up / down = the trail\r\nhops). Drag points, a click on empty space adds\r\none, right click selects one and opens its\r\nmenu (the node type, Delete node), double click\r\nswitches the tangent type; the wheel zooms the\r\nvalue axis, middle drag pans it.\r\nThe test samples this curve every frame -\r\nno Apply button. Angle rotates the whole\r\ntrail, Blend scales how much the bend applies,\r\nScale = the trail length in px.", ForeColor = Color.Gainsboro, AutoSize = true, Margin = new Padding(0, 0, 0, 6) });
+            var reset = new SpriteButton { Text = "Reset to the straight line", Size = new Size(180, 30), Margin = new Padding(0, 2, 0, 0) };
+            reset.Click += (_, _) => { ed.Curve.Set(MotionDemo.Flat().Points); ed.Redraw(); };
+            col.Controls.Add(reset);
+            strip.Controls.Add(ed); strip.Controls.Add(col);
             return strip;
         }
     }

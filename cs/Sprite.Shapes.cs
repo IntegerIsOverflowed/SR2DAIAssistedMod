@@ -29,7 +29,7 @@ namespace Sr2d64CSport
     //     rasterised as ONE union: with alpha ops every pixel is blended exactly
     //     once, no seams and no double-blended joints.
     // ------------------------------------------------------------------------
-    internal unsafe partial class Sprite
+    public unsafe partial class Sprite
     {
         /// <summary>Anti-aliasing quality for the shape methods: 4 (default, 4 sub-scanlines +
         /// exact horizontal coverage) or 16 (slower, for very flat edges / large gradients).</summary>

@@ -15,7 +15,7 @@ using Timer = System.Windows.Forms.Timer;   // ImplicitUsings also brings System
 namespace Sr2d64CSport
 {
     /// <summary>Look of a <see cref="SpriteLabel"/>.</summary>
-    internal enum LabelStyle
+    public enum LabelStyle
     {
         /// <summary>Plain text in ForeColor.</summary>
         Plain,
@@ -34,7 +34,7 @@ namespace Sr2d64CSport
     /// (it grows with the text; turn it off for a fixed box), five styles (<see cref="LabelStyle"/>). It is not selectable.
     /// </summary>
     [ToolboxBitmap(typeof(SpriteLabel), "SpriteLabel.bmp")]
-    internal sealed class SpriteLabel : SpriteControlBase
+    public sealed class SpriteLabel : SpriteControlBase
     {
         protected override AccessibleRole DefaultAccessibleRole => AccessibleRole.StaticText;
         LabelStyle _style; ContentAlignment _align = ContentAlignment.MiddleLeft;
@@ -84,6 +84,7 @@ namespace Sr2d64CSport
         }
         void Fit() { if (_autoSize) Size = Measure(Sc); }
         protected override void OnTextFontChanged() { Fit(); Redraw(); }
+        protected override void OnTextScaleChanged() { Fit(); base.OnTextScaleChanged(); }   // the box is measured in the text scale, so a new scale is a new size
         protected override void OnTextChanged(EventArgs e) { base.OnTextChanged(e); Fit(); Redraw(); }
         protected override void OnPaddingChanged(EventArgs e) { base.OnPaddingChanged(e); Fit(); Redraw(); }
         protected override void OnResize(EventArgs e) { base.OnResize(e); Redraw(); }
@@ -109,7 +110,7 @@ namespace Sr2d64CSport
             int lineH = TextLineHeight(sc) + _lineGap, totalH = m.Height + _lineGap * (lines - 1);
             int av = (int)_align, ay = av >= 256 ? 2 : av >= 16 ? 1 : 0, row = av >> (ay * 4);   // ContentAlignment: 1 / 2 / 4 = left / centre / right, shifted by 4 bits per row
             int ax = row == 1 ? 0 : row == 2 ? 1 : 2;
-            if (_ellipsis && !_wrap && lines == 1 && m.Width > box.Width) { t = FitText(t, box.Width, sc); m = T.Measure(t, sc, weight, 0); }
+            if (_ellipsis && !_wrap && lines == 1 && m.Width > box.Width) { t = FitText(t, box.Width, sc, weight); m = T.Measure(t, sc, weight, 0); }
             int y = box.Y + (ay == 0 ? 0 : ay == 1 ? (box.Height - totalH) / 2 : box.Height - totalH);
             // each line placed on its own so centre / right alignment works per line
             int li = 0;
@@ -131,7 +132,7 @@ namespace Sr2d64CSport
 
     /// <summary>A thin rule (horizontal or vertical) with an optional centred caption: "── or ──".</summary>
     [ToolboxBitmap(typeof(SpriteSeparator), "SpriteSeparator.bmp")]
-    internal sealed class SpriteSeparator : SpriteControlBase
+    public sealed class SpriteSeparator : SpriteControlBase
     {
         Orientation _orient = Orientation.Horizontal;
         public SpriteSeparator()
@@ -160,7 +161,7 @@ namespace Sr2d64CSport
     }
 
     /// <summary>Shape of a <see cref="SpriteLed"/>.</summary>
-    internal enum LedShape { Round, Square, Bar }
+    public enum LedShape { Round, Square, Bar }
 
     /// <summary>
     /// An indicator light with a caption: <see cref="On"/> lights it in <see cref="LedColor"/> (a lit LED glows: bright core,
@@ -168,7 +169,7 @@ namespace Sr2d64CSport
     /// <see cref="Clickable"/> - then it toggles and raises <see cref="OnChanged"/>, which makes it a very small toggle.
     /// </summary>
     [ToolboxBitmap(typeof(SpriteLed), "SpriteLed.bmp")]
-    internal sealed class SpriteLed : SpriteControlBase
+    public sealed class SpriteLed : SpriteControlBase
     {
         bool _on, _clickable, _phase = true; int _blink; Color _led = DefaultLed; LedShape _shape; Timer? _timer;
         public SpriteLed()
@@ -250,7 +251,7 @@ namespace Sr2d64CSport
     }
 
     /// <summary>Frame of a <see cref="SpritePanel"/>.</summary>
-    internal enum PanelStyle
+    public enum PanelStyle
     {
         /// <summary>No frame: just the background (a coloured area / a layout host).</summary>
         Flat,
@@ -269,7 +270,7 @@ namespace Sr2d64CSport
     /// </summary>
     [Designer("System.Windows.Forms.Design.ParentControlDesigner, System.Design", typeof(IDesigner))]
     [ToolboxBitmap(typeof(SpritePanel), "SpritePanel.bmp")]
-    internal class SpritePanel : SpriteControlBase
+    public class SpritePanel : SpriteControlBase
     {
         protected override AccessibleRole DefaultAccessibleRole => AccessibleRole.Client;
         PanelStyle _style = PanelStyle.Sunken; int _radius = 6;
@@ -336,7 +337,7 @@ namespace Sr2d64CSport
     /// </summary>
     [Designer("System.Windows.Forms.Design.ParentControlDesigner, System.Design", typeof(IDesigner))]
     [ToolboxBitmap(typeof(SpriteGroupBox), "SpriteGroupBox.bmp")]
-    internal sealed class SpriteGroupBox : SpritePanel
+    public sealed class SpriteGroupBox : SpritePanel
     {
         protected override AccessibleRole DefaultAccessibleRole => AccessibleRole.Grouping;
         bool _showCheck, _checked = true, _hotCheck; HorizontalAlignment _capAlign = HorizontalAlignment.Left;
@@ -407,7 +408,7 @@ namespace Sr2d64CSport
 
     /// <summary>One page of a <see cref="SpriteTabControl"/>: a flat panel with the tab's caption in <see cref="Control.Text"/>.</summary>
     [Designer("System.Windows.Forms.Design.ParentControlDesigner, System.Design", typeof(IDesigner))]
-    internal sealed class SpriteTabPage : SpritePanel
+    public sealed class SpriteTabPage : SpritePanel
     {
         protected override AccessibleRole DefaultAccessibleRole => AccessibleRole.PageTab;
         public SpriteTabPage() { Style = PanelStyle.Flat; Padding = new Padding(8); Visible = false; }
@@ -420,7 +421,7 @@ namespace Sr2d64CSport
     }
 
     /// <summary>Where the tab strip of a <see cref="SpriteTabControl"/> is.</summary>
-    internal enum TabSide { Top, Bottom }
+    public enum TabSide { Top, Bottom }
 
     /// <summary>
     /// Tabbed pages. Pages are <see cref="SpriteTabPage"/> children: <see cref="AddPage(string)"/> (or <c>Controls.Add(page)</c>)
@@ -428,7 +429,7 @@ namespace Sr2d64CSport
     /// strip has the focus; the wheel over the strip does too. The rest of the client area is the page (Dock = Fill inside it).
     /// </summary>
     [ToolboxBitmap(typeof(SpriteTabControl), "SpriteTabControl.bmp")]
-    internal sealed class SpriteTabControl : SpriteControlBase
+    public sealed class SpriteTabControl : SpriteControlBase
     {
         protected override AccessibleRole DefaultAccessibleRole => AccessibleRole.PageTabList;
         readonly System.Collections.Generic.List<SpriteTabPage> _pages = new();
@@ -590,7 +591,7 @@ namespace Sr2d64CSport
     /// </summary>
     [Designer("System.Windows.Forms.Design.ParentControlDesigner, System.Design", typeof(IDesigner))]
     [ToolboxBitmap(typeof(SpriteStackPanel), "SpriteStackPanel.bmp")]
-    internal sealed class SpriteStackPanel : SpritePanel
+    public sealed class SpriteStackPanel : SpritePanel
     {
         Orientation _orient = Orientation.Vertical; int _gap = 6; bool _stretch = true, _wrap, _autoSize, _inLayout;
 #pragma warning disable CA2213 // _bar is added to Controls: WinForms disposes child controls with the parent
@@ -615,6 +616,13 @@ namespace Sr2d64CSport
         public bool Wrap { get => _wrap; set { _wrap = value; PerformLayout(); } }
         [Category("Layout"), DefaultValue(false), Description("Size the panel to its content (height for a column or a wrapped row, width for a row).")]
         public override bool AutoSize { get => _autoSize; set { _autoSize = value; PerformLayout(); } }
+        bool _frameInset = true;
+        /// <summary>Keep the panel frame's fixed 2 px layout inset (default). false lays the children out edge to edge:
+        /// a nested row then aligns its children exactly with the direct rows of the parent stack. (Padding is NOT part
+        /// of <see cref="SpritePanel.DisplayRectangle"/> - the inset is hard-coded - which is why padding cannot align a
+        /// nested row; this switch can.)</summary>
+        [Category("Layout"), DefaultValue(true), Description("Keep the 2 px frame inset in the layout area. false = children edge to edge: a nested row aligns with its parent stack's direct rows.")]
+        public bool FrameInset { get => _frameInset; set { _frameInset = value; PerformLayout(); } }
         /// <summary>Height (column) or width (row) the content needs, padding included.</summary>
         [Browsable(false)] public int ContentSize { get; private set; }
 
@@ -649,7 +657,7 @@ namespace Sr2d64CSport
         }
         bool StackPass()
         {
-            var r = DisplayRectangle;
+            var r = _frameInset ? DisplayRectangle : ClientRectangle;   // FrameInset = false: children start at the border (a nested row aligns with its parent's rows)
             int x = r.X, y = r.Y, rowH = 0, used;
             var kids = new List<Control>(Controls.Count);
             foreach (Control c in Controls) if (c != _bar && c.Visible) kids.Add(c);

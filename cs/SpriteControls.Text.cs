@@ -21,7 +21,7 @@ namespace Sr2d64CSport
     // ------------------------------------------------------------------------------------------------------------------------
 
     /// <summary>The font a control draws with: <see cref="Font"/> null = the built-in <see cref="PixelFont"/>.</summary>
-    internal readonly struct ControlText
+    public readonly struct ControlText
     {
         /// <summary>Regular face, or null for the pixel font.</summary>
         public readonly SpriteFont? Font;
@@ -135,12 +135,14 @@ namespace Sr2d64CSport
             while (want > 1 && Measure(text, want).Width > width) want--;
             return want;
         }
-        /// <summary>Shortens <paramref name="text"/> with an ellipsis so it fits <paramref name="width"/> px.</summary>
-        public string FitText(string text, int width, int scale)
+        /// <summary>Shortens <paramref name="text"/> with an ellipsis so it fits <paramref name="width"/> px.
+        /// <paramref name="weight"/> has to be the weight the caller draws with: bold glyphs are one or more
+        /// pixels wider each, so a fit measured as regular still overflows the box it was measured for.</summary>
+        public string FitText(string text, int width, int scale, int weight = 0)
         {
-            if (string.IsNullOrEmpty(text) || Measure(text, scale).Width <= width) return text;
+            if (string.IsNullOrEmpty(text) || Measure(text, scale, weight).Width <= width) return text;
             int n = text.Length;
-            while (n > 1 && Measure(text.Substring(0, n) + "\u2026", scale).Width > width) n--;
+            while (n > 1 && Measure(text.Substring(0, n) + "\u2026", scale, weight).Width > width) n--;
             return text.Substring(0, n) + "\u2026";
         }
         /// <summary>Word-wraps to <paramref name="width"/> px ('\n' kept; words longer than the width are cut).</summary>
@@ -193,7 +195,7 @@ namespace Sr2d64CSport
         }
     }
 
-    internal abstract partial class SpriteControlBase
+    public abstract partial class SpriteControlBase
     {
         static SpriteFont? _defFont; static string _defFamily = ""; static float _defSize = 12f;
         SpriteFont? _font; string _family = ""; float _fontSize;

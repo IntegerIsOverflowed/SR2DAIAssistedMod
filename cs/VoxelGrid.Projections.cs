@@ -17,7 +17,7 @@ using System.Collections.Generic;
 namespace Sr2d64CSport
 {
     /// <summary>Which side of the grid a projection sprite shows.</summary>
-    internal enum VoxelView
+    public enum VoxelView
     {
         /// <summary>Looking north from the south (-y): sprite x = grid x, sprite y (down) = grid -z. What you draw as the "front".</summary>
         Front,
@@ -34,7 +34,7 @@ namespace Sr2d64CSport
     }
 
     /// <summary>How a view sprite whose size differs from the grid face is mapped onto it.</summary>
-    internal enum VoxelFit
+    public enum VoxelFit
     {
         /// <summary>Stretch to the face (independent x / y factors).</summary>
         Stretch,
@@ -45,7 +45,7 @@ namespace Sr2d64CSport
     }
 
     /// <summary>How the colours of two opposite views meet in the middle of the model.</summary>
-    internal enum VoxelBlend
+    public enum VoxelBlend
     {
         /// <summary>Each cell takes the colour of the nearer view (hard seam half-way).</summary>
         Nearest,
@@ -58,7 +58,7 @@ namespace Sr2d64CSport
     }
 
     /// <summary>Options for <see cref="VoxelGrid.FromProjections(int, int, int, IEnumerable{(VoxelView, Sprite)}, ProjectionOptions?)"/>.</summary>
-    internal sealed class ProjectionOptions
+    public sealed class ProjectionOptions
     {
         public VoxelFit Fit = VoxelFit.Stretch;
         /// <summary>Filter used when a view is resampled (Nearest keeps pixel art crisp; Bilinear / Area for photos).</summary>
@@ -88,7 +88,7 @@ namespace Sr2d64CSport
         public int EmissiveAbove = 250;
     }
 
-    internal sealed unsafe partial class VoxelGrid
+    public sealed unsafe partial class VoxelGrid
     {
         /// <summary>
         /// Build a grid from up to six view sprites (front / back / left / right / top / bottom). A cell is solid where
@@ -129,6 +129,8 @@ namespace Sr2d64CSport
             foreach (var (view, spr) in views)
             {
                 if (spr == null) continue;
+                bool dup = false; foreach (var m in maps) if (m.View == view) { dup = true; break; }
+                if (dup) continue;                             // one map per face: the fill loop below hands each map a slot in a fixed 6-entry stack buffer
                 var (fw, fh) = FaceSize(view);
                 maps.Add(new ViewMap(view, Resample(spr, fw, fh, opt), fw, fh, opt));
             }
@@ -148,6 +150,7 @@ namespace Sr2d64CSport
                     bool inside = true; int n = 0;
                     foreach (var m in order)
                     {
+                        if (n >= 6) break;                         // the per-face buffers above hold six entries (the VoxelView count) - a seventh view cannot participate
                         var (u, v, depthIn) = m.Map(x, y, z, this);
                         uint c = m.Pixel(u, v);
                         if (c == 0) { inside = false; break; }

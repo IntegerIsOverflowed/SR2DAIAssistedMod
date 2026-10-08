@@ -361,7 +361,7 @@ namespace Sr2d64CSport
     internal enum PngColorType : byte { Gray = 0, Rgb = 2, Palette = 3, GrayAlpha = 4, Rgba = 6 }
 
     /// <summary>Output colour model for <see cref="Png.Encode"/>.</summary>
-    internal enum PngColor
+    public enum PngColor
     {
         /// <summary>Smallest lossless representation of the pixels (palette / grey / RGB / RGBA, alpha only when used).</summary>
         Auto,

@@ -10,7 +10,7 @@ namespace Sr2d64CSport
     // the picture (font, text, size, colour, wrap width, alignment, bold / italic / sub-pixel settings) under a byte
     // budget. Use it for text that is drawn every frame (HUDs, labels, read-outs): DrawString is right for text that
     // changes every frame, the cache for text that repeats. The pixel font (DrawText) is untouched.
-    internal sealed partial class SpriteFont
+    public sealed partial class SpriteFont
     {
         /// <summary>
         /// Renders one line of text into a new premultiplied sprite (<see cref="SR2D.Op.AlphaOver"/>, transparent
@@ -67,7 +67,7 @@ namespace Sr2d64CSport
     /// <c>dst.Draw(r.Bitmap, x - r.OriginX, y - r.OriginY, Op.AlphaOver)</c> puts the line box's top-left at (x, y) - the
     /// same place <c>dst.DrawString(x, y, ...)</c> with TopLeft anchor draws it). <see cref="DrawAt"/> does the anchor maths.
     /// </summary>
-    internal sealed class RenderedText : IDisposable
+    public sealed class RenderedText : IDisposable
     {
         public static readonly RenderedText Empty = new RenderedText(null, 0, 0, 0, 0, 0);
         /// <summary>The premultiplied sprite (Op AlphaOver); null for empty text.</summary>

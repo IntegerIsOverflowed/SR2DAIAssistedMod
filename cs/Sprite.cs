@@ -21,7 +21,7 @@ namespace Sr2d64CSport
     /// The public API is unchanged.
     /// </summary>
     [SuppressMessage("Style", "IDE1006:Naming rule violation", Justification = "Public API kept as-is.")]
-    internal unsafe partial class Sprite : IDisposable
+    public unsafe partial class Sprite : IDisposable
     {
         [StructLayout(LayoutKind.Sequential)]
         private struct BITMAPINFOHEADER
@@ -639,6 +639,15 @@ namespace Sr2d64CSport
             return SR2D.Native.MaskIS(k.S, k.D, k.W, k.H, Src.meWidth, meWidth, Mask);
         }
 
+        /// <summary>
+        /// Per-channel multiply and add: <c>byte_out = clamp(((byte_src * mul_byte) &gt;&gt; 7) + add_byte * 2 - 256)</c>,
+        /// applied to each of the four bytes of every pixel. <paramref name="Mul"/> and <paramref name="Add"/> are therefore
+        /// PACKED VECTORS, one byte per channel (alpha, red, green, blue) - build them with
+        /// <see cref="SR2D.ARGB(int,int,int,int)"/>, not as plain numbers. Passing <c>96</c> means "x0.75 on blue, x0 on
+        /// green / red / ALPHA", which is normally not what was meant. Neutral: Mul = 128 per byte (x1.00), Add = 128 per
+        /// byte (+0). An Add byte of 0 is -256, i.e. black / transparent. The alpha byte is transformed like the others, so
+        /// a non-neutral alpha multiplier fades the sprite out (or in) as it does the colours.
+        /// </summary>
         public void MulAddS2X(Sprite Src, int Sx, int Sy, int Mul, int Add)
         {
             if (!Clip2(Sx, Sx + Src.meWidth, Sy, Sy + Src.meHeight, Src.meWidth, Src.pBuf, out Clip k)) return;
@@ -895,8 +904,28 @@ namespace Sr2d64CSport
             NativeMemory.Clear(pBuf, bytes);          // same "all zero" start state as new int[]
         }
 
+        /// <summary>Turns every live view of this sprite's buffer into an empty 0x0 surface, so a view that
+        /// outlived its owner becomes a no-op instead of drawing into freed memory.</summary>
+        void PoisonViews()
+        {
+            if (meViews == null) return;
+            lock (meViews)
+            {
+                foreach (var v in meViews)
+                {
+                    v.pBuf = null;                                 // the buffer dies with the owner
+                    v.meWidth = v.meHeight = 0;                    // the verbs' meRight <= meLeft guards make the view a no-op
+                    v.meLeft = v.meRight = v.meTop = v.meBottom = 0;
+                    v.meOwner = null;
+                    v.PoisonViews();                               // views of views die too
+                }
+                meViews.Clear();
+            }
+        }
+
         private void FreeBuffer()
         {
+            if (!meBorrowed) PoisonViews();                        // first: nothing may keep a raw pointer to the memory being freed
             if (meBorrowed) { pBuf = null; return; }
             if (hDib != IntPtr.Zero)
             {
@@ -1319,10 +1348,16 @@ namespace Sr2d64CSport
         // to single-threaded rendering because every band applies the operations in
         // the same order.
 
+        internal Sprite? meOwner;                              // set on views (CreateView): the sprite whose buffer they borrow
+        internal System.Collections.Generic.List<Sprite>? meViews;                        // owner side: the live views of this sprite's buffer
         /// <summary>
         /// Creates a light-weight view that shares this sprite's pixels but has its own
         /// lock rect (clipped to the given rectangle). Disposing the view never frees
         /// the pixels. Views must not outlive the owner.
+        /// <para>The lock rect clips WRITES only. Blitting a view as a SOURCE (Draw,
+        /// DrawScaled, TileDraw, Warp, ...) reads the owner's full meWidth x meHeight
+        /// buffer, so it is NOT a crop - TileDraw even strides by the owner's size.
+        /// Use <see cref="Clone(Rectangle)"/> when you need a real sub-rectangle.</para>
         /// </summary>
         public Sprite CreateView(int Left, int Top, int Right, int Bottom)
         {
@@ -1331,6 +1366,8 @@ namespace Sr2d64CSport
             v.pBuf = pBuf; v.meWidth = meWidth; v.meHeight = meHeight;
             v.meOp = meOp; v.mePremul = mePremul; v.bi32BitInfo = bi32BitInfo;
             v.SetLockRect(Left, Right, Top, Bottom);
+            v.meOwner = this;
+            (meViews ??= new System.Collections.Generic.List<Sprite>()).Add(v);           // the owner frees its views with itself (see FreeBuffer)
             return v;
         }
 
@@ -1415,6 +1452,7 @@ namespace Sr2d64CSport
 
         public void Dispose()
         {
+            if (meOwner != null) lock (meOwner) { meOwner.meViews?.Remove(this); meOwner = null; }   // a view unregistering itself
             FreeBuffer();
             // A disposed sprite becomes an empty 0x0 surface: every operation on it
             // (or with it as a source) clips to nothing instead of touching freed memory.

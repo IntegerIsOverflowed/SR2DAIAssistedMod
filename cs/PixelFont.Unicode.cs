@@ -17,7 +17,7 @@ namespace Sr2d64CSport
     // Everything still missing (CJK, Arabic, Hebrew, emoji, rare symbols) is drawn with PixelFont.FallbackFont when one
     // is installed - see Sprite.Text.cs. PixelFont.Has(ch) tells the two apart.
     /// <summary>A vector font the pixel font can borrow glyphs from (<see cref="SpriteFont"/> implements it; see <see cref="PixelFont.FallbackFonts"/>).</summary>
-    internal interface IFallbackFont
+    public interface IFallbackFont
     {
         /// <summary>True when the font has a glyph for the code point.</summary>
         bool HasGlyph(int codePoint);
@@ -27,7 +27,7 @@ namespace Sr2d64CSport
         void DrawFallback(Sprite target, float x, float baselineY, ReadOnlySpan<char> text, float em, int color, SR2D.LineOp op, int blendFactor);
     }
 
-    internal sealed partial class PixelFont
+    public sealed partial class PixelFont
     {
         /// <summary>True when the font has a picture for <paramref name="ch"/> (own glyph, built-in extension or a composable accent); false = the box / the fallback font.</summary>
         public bool Has(char ch) => Find(ch) != null;

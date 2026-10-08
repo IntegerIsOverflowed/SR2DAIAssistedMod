@@ -153,7 +153,10 @@ int main(int argc, char** argv)
 #undef RECT
 #undef MRECT
         {
-            int k = rr(0, 255) | (rnd() & 1 ? (int)(rnd() & 0xffffff00) : 0);
+            // The ORIGINAL wraps k through (byte) - its own documented domain "k (0..256)" is broken there
+            // (k = 256 blends nothing). The new engine clamps to the documented domain (k = 256 = full source,
+            // see regchk), so parity is asserted on 0..255, where both engines must agree byte for byte.
+            int k = rr(0, 255);
             run3("BLEND", S, A, [&](const sr2d_ops* o, std::vector<int>& d){ R(BLEND)(src.a.data(), d.data(), w, h, ws, wd, k); }, dst);
             run3("MASK_BLEND", S, A, [&](const sr2d_ops* o, std::vector<int>& d){ R(MASK_BLEND)(src.a.data(), d.data(), mask.a.data(), w, h, maskex, ws, wd, wm, notm, k); }, dst);
             int ms = rr(0, 7), md = rr(0, 7);   // MOVE_BYTE masks & 3 internally; MASK_ variant does NOT (original quirk) -> keep 0..3 for it
