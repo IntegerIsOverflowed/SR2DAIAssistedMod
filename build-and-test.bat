@@ -24,20 +24,29 @@ python tests\cs\projchk.py || set FAIL=1
 echo ==== build demo (Implicit off / on) + template
 dotnet build demo -c Release --no-incremental -p:Implicit=disable -p:EnableWindowsTargeting=true -p:EnableNETAnalyzers=true -p:AnalysisLevel=latest-recommended || set FAIL=1
 dotnet build demo -c Release --no-incremental -p:Implicit=enable -p:EnableWindowsTargeting=true -p:EnableNETAnalyzers=true -p:AnalysisLevel=latest-recommended || set FAIL=1
-dotnet build template -c Release --no-incremental -p:EnableWindowsTargeting=true -p:EnableNETAnalyzers=true -p:AnalysisLevel=latest-recommended || set FAIL=1
-dotnet build apps\SpriteBox -c Release --no-incremental -p:EnableWindowsTargeting=true -p:EnableNETAnalyzers=true -p:AnalysisLevel=latest-recommended || set FAIL=1
+dotnet build EmptySR2DFormTemplate -c Release --no-incremental -p:EnableWindowsTargeting=true -p:EnableNETAnalyzers=true -p:AnalysisLevel=latest-recommended || set FAIL=1
+
+echo ==== native loader (same DLL asset as the template)
+dotnet build tests\cs\nativeload -c Release --no-incremental -p:Sr2dDll="%CD%\native\bin\x64\SR2D64.dll" || set FAIL=1
+if exist "tests\cs\nativeload\bin\Release\net10.0\nativeload.exe" "tests\cs\nativeload\bin\Release\net10.0\nativeload.exe" || set FAIL=1
 
 echo ==== run headless suites
 for %%R in (ctlrun benchrun) do (
   if exist "%USERPROFILE%\.cache\%%R\bin\Release\net10.0\%%R.exe" (
-    copy /y tests\build\SR2D64.dll "%USERPROFILE%\.cache\%%R\bin\Release\net10.0\" >nul 2>&1
+    copy /y native\bin\x64\SR2D64.dll "%USERPROFILE%\.cache\%%R\bin\Release\net10.0\" >nul 2>&1
     "%USERPROFILE%\.cache\%%R\bin\Release\net10.0\%%R.exe" || set FAIL=1
   ) else if exist "tests\cs\%%R\bin\Release\net10.0\%%R.exe" (
-    copy /y tests\build\SR2D64.dll "tests\cs\%%R\bin\Release\net10.0\" >nul 2>&1
+    copy /y native\bin\x64\SR2D64.dll "tests\cs\%%R\bin\Release\net10.0\" >nul 2>&1
     "tests\cs\%%R\bin\Release\net10.0\%%R.exe" || set FAIL=1
   )
 )
 if exist "tests\cs\selchk\bin\Release\net10.0\selchk.exe" "tests\cs\selchk\bin\Release\net10.0\selchk.exe" || set FAIL=1
+
+echo ==== animated vectors (SMIL / CSS / precompose / fixed-resolution grid)
+copy /y native\bin\x64\SR2D64.dll tests\cs\vecrun\bin\Release\net10.0\ >nul 2>&1
+set VECANIM=1
+if exist "tests\cs\vecrun\bin\Release\net10.0\vecrun.exe" "tests\cs\vecrun\bin\Release\net10.0\vecrun.exe" tests\build\vecanim-out || set FAIL=1
+set VECANIM=
 
 echo ==================================
 if "%FAIL%"=="0" (echo ALL GREEN) else (echo RED - %FAIL% gate(s) failed)

@@ -1397,6 +1397,17 @@ namespace Sr2d64CSport
             protected override void OnPaint(PaintEventArgs e)
             {
                 BarPaintCount++;
+                if (!SR2D.IsAvailable)
+                {   // The chrome is a Control, not a SpriteBox: it needs the same no-native safety path. A missing
+                    // DLL/dependency must not disable the entire inherited form in the out-of-process designer.
+                    using var background = new SolidBrush(Color.FromArgb(f.barColor));
+                    e.Graphics.FillRectangle(background, ClientRectangle);
+                    using var foreground = new SolidBrush(Color.FromArgb(f.titleColor));
+                    using var format = new StringFormat { LineAlignment = StringAlignment.Center, Trimming = StringTrimming.EllipsisCharacter };
+                    var bounds = new RectangleF(8, 0, Math.Max(0, Width - 8 - f.bClose.Width - f.bMax.Width - f.bMin.Width), Height);
+                    e.Graphics.DrawString(f.Text + "  (SR2D64.dll unavailable)", Font, foreground, bounds, format);
+                    return;
+                }
                 int w = Math.Max(1, Width), h = Math.Max(1, Height);
                 string s = Signature();
                 if (buf == null || s != stamp || buf.Height != h || w > capW || (LayoutFollowsWidth && w != layoutW))

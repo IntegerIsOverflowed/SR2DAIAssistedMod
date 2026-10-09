@@ -409,9 +409,10 @@ static class Program {
         aimg.ClipViewport = true;
         using (var film = new VectorSprite(aimg) { Precomposed = true })
         {
-            var matrix = aimg.FitMatrix(new RectangleF(0, 0, CW, CH));
-            // Default bitmap caches snap placement to whole pixels; compare the direct reference on that SAME grid.
-            matrix.M31 = MathF.Floor(matrix.M31 + 0.5f); matrix.M32 = MathF.Floor(matrix.M32 + 0.5f);
+            // Use a small explicit INTERNAL grid, and compare direct rendering on that exact same pixel grid.
+            // The film no longer gets its resolution from the destination rectangle / matrix.
+            film.FilmResolution = new Size(Math.Max(1, (int)(aimg.ViewBox.Width / 10)), 0);
+            var matrix = Matrix3x2.CreateScale(film.FilmResolution.Width / aimg.ViewBox.Width);
             Check(film.PrepareFilm(matrix) && film.FilmFrames == aimg.FrameCount && film.FilmScale == 1,
                   $"{Path.GetFileName(f)}: full-rate / full-resolution film prepared");
             using var film0 = FilmRender(film, 0, matrix, CW, CH);
@@ -515,9 +516,12 @@ static class Program {
     Check(vs.PrepareFilm(Matrix3x2.Identity) && vs.FilmBakes == ++bakes, "mutating render options also invalidates");
     vs.Opacity = 1;
     Check(!vs.FilmActive && vs.FilmPixels == 0, "a render-option setter releases the film immediately");
-    Check(vs.PrepareFilm(Matrix3x2.CreateScale(1.2f)), "a new zoom prepares a replacement");
-    bakes = vs.FilmBakes;
-    Check(vs.PrepareFilm(Matrix3x2.CreateScale(1.2f)) && vs.FilmBakes == bakes, "unchanged zoom reuses the replacement");
+    Check(vs.PrepareFilm(), "parameterless preparation uses the internal image grid");
+    bakes = vs.FilmBakes; var storedSize = vs.FilmSize;
+    Check(vs.PrepareFilm(Matrix3x2.CreateScale(1.2f)) && vs.PrepareFilm(Matrix3x2.CreateScale(3f, 0.7f))
+          && vs.FilmBakes == bakes && vs.FilmSize == storedSize, "display zoom / aspect changes NEVER rebake or alter internal resolution");
+    using (var c = FilmRender(vs, 0.4, Matrix3x2.CreateScale(0.3f) * Matrix3x2.CreateRotation(0.7f) * Matrix3x2.CreateTranslation(50, 20)))
+      Check(vs.FilmBakes == bakes && vs.FilmSize == storedSize && c.Pixels.ToArray().Any(p => p != unchecked((int)0xFF111111)), "display rotation transforms the existing film without re-baking");
     img.ClipViewport = true; img.VisibleArea = new RectangleF(30, 20, 80, 60);
     using (var visible = FilmRender(vs, 0.5, Matrix3x2.Identity)) {
       Check(visible.GetPixel(0, 0) == unchecked((int)0xFF111111) && visible.GetPixel(200, 100) == unchecked((int)0xFF111111), "VisibleArea is baked rather than lost");
@@ -527,7 +531,7 @@ static class Program {
     using (var c = FilmRender(vs, 1.0, rotated))
     using (var d = new Sprite(240, 150, SR2D.Op.AlphaOver)) {
       d.ClearBuffer(unchecked((int)0xFF111111)); img.FrameAt(1.0).Draw(d, rotated);
-      Check(FilmDiff(c, d) == 0, "rotated viewport clips match direct rendering");
+      Check(FilmDiff(c, d) < c.Width * c.Height / 50, "rotated bitmap playback matches direct geometry within filtered-edge tolerance");
     }
     vs.MaxFilmPixels = 100000;
     Check(!vs.FilmActive && vs.PrepareFilm(Matrix3x2.Identity), "a small budget replaces, not doubles, the allocation");
@@ -580,6 +584,74 @@ static class Program {
     var shortLoop = VectorImage.FromSvg("<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><rect width='8' height='8' fill='red'><animateTransform attributeName='transform' type='translate' values='0 0;2 0' dur='0.01s' repeatCount='indefinite'/></rect></svg>");
     using var sf = new VectorSprite(shortLoop) { Precomposed = true };
     Check(sf.PrepareFilm(Matrix3x2.Identity) && sf.FilmFrames == 1, "very short loops may legitimately have a single frame");
+    FilmGridTest(check);
+  }
+
+
+  static void FilmGridTest(Action<bool, string> check) {
+    void Check(bool ok, string s) => check(ok, "film grid: " + s);
+    var img = VectorImage.FromSvg("<svg xmlns='http://www.w3.org/2000/svg' viewBox='20 10 160 80'><rect x='20' y='10' width='160' height='80' fill='#202840'/><circle cx='60' cy='40' r='12' fill='#ffaa00'><animateTransform attributeName='transform' type='translate' values='0 0;60 0;0 0' dur='1s' repeatCount='indefinite'/></circle></svg>");
+    img.ClipViewport = true;
+    using var film = new VectorSprite(img) { Precomposed = true, FilmResolution = new Size(480, 0) };
+    Check(film.PrepareFilm() && film.FilmSize == new Size(482, 242), "width-only internal grid preserves SVG aspect (with padding)");
+    int bakes = film.FilmBakes; var size = film.FilmSize;
+    foreach (var matrix in new[] {
+      Matrix3x2.Identity, Matrix3x2.CreateScale(0.3f), Matrix3x2.CreateScale(2, 0.6f),
+      Matrix3x2.CreateScale(-0.4f, 0.4f) * Matrix3x2.CreateTranslation(90, 0),
+      Matrix3x2.CreateRotation(0.35f) * Matrix3x2.CreateTranslation(45, 0),
+      new Matrix3x2(0.4f, 0.1f, 0.2f, 0.6f, 15, 20)
+    }) {
+      using var output = FilmRender(film, 0.5, matrix);
+      Check(film.FilmBakes == bakes && film.FilmSize == size, $"scale / rotate / skew / mirror reuses internal grid ({matrix.M11:0.##},{matrix.M12:0.##})");
+    }
+    film.SubPixel = true; film.FilmSampling = SR2D.Filter.BicubicArea;
+    using (var output = FilmRender(film, 0.5, Matrix3x2.CreateScale(0.4f) * Matrix3x2.CreateTranslation(0.35f, 0.2f)))
+      Check(film.FilmBakes == bakes && film.FilmSize == size, "sampling and fractional placement are playback-only changes");
+    film.FilmResolution = new Size(320, 160);
+    Check(!film.FilmActive && film.PrepareFilm() && film.FilmSize == new Size(322, 162) && film.FilmBakes == bakes + 1, "changing INTERNAL resolution is what rebakes");
+    film.FilmResolution = new Size(0, 240);
+    Check(film.PrepareFilm() && film.FilmSize == new Size(482, 242), "height-only internal grid preserves aspect too");
+    film.FilmResolution = new Size(320, 240);
+    Check(film.PrepareFilm() && film.FilmSize == new Size(322, 242), "explicit width and height allow an anisotropic texture grid");
+    film.FilmResolution = Size.Empty;
+    Check(film.PrepareFilm() && film.FilmSize == new Size(162, 82), "auto resolution means SVG intrinsic units, NOT the destination size");
+    film.FilmResolution = new Size(4096, 2048); film.MaxFilmPixels = 100000;
+    Check(film.PrepareFilm() && film.FilmPixels <= 100000 && film.FilmScale < 1 && film.FilmFrames == 30, "explicit supersample requests still respect total memory budget without dropping fps");
+    film.Precomposed = false;
+
+    // Fine black/white source stripes: the internal bitmap is much larger than the displayed container.
+    // Area averaging must collect EVERY contributing texel rather than sample just a few and alias the pattern.
+    var svg = new System.Text.StringBuilder("<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 16'><rect width='32' height='16' fill='white'/><g>");
+    for (int x = 0; x < 32; x++) svg.Append("<rect x='").Append(x).Append("' width='.5' height='16' fill='black'/>");
+    svg.Append("<animateTransform attributeName='transform' type='translate' values='0 0;0 0' dur='1s' repeatCount='indefinite'/></g></svg>");
+    var stripes = VectorImage.FromSvg(svg.ToString()); stripes.ClipViewport = true;
+    using var ss = new VectorSprite(stripes) { Precomposed = true, FilmResolution = new Size(256, 128) };
+    using (var output = FilmRender(ss, 0, Matrix3x2.CreateScale(0.5f), 40, 24)) {
+      int grey = 0; for (int y = 2; y < 6; y++) for (int x = 2; x < 14; x++) {
+        int p = output.GetPixel(x, y); int r = p >> 16 & 255, g = p >> 8 & 255, b = p & 255;
+        if (r > 100 && r < 155 && Math.Abs(r - g) < 3 && Math.Abs(r - b) < 3) grey++;
+      }
+      Check(grey >= 40, "supersampling averages dense detail to grey (area prefilter, not point sampling)");
+    }
+
+    // Temporal quality is independent of bitmap dimensions: 30 fps repeats frames at a 120 Hz rendering cadence;
+    // baking 60/120 fps provides twice/four times as many unique motion samples with the SAME internal resolution.
+    var motion = VectorImage.FromSvg("<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 320 32'><rect x='4' y='8' width='10' height='10' fill='#00ff80'><animateTransform attributeName='transform' type='translate' values='0 0;240 0' dur='2s' repeatCount='indefinite'/></rect></svg>");
+    motion.ClipViewport = true;
+    using var mf = new VectorSprite(motion) { Precomposed = true, FilmResolution = new Size(320, 32) };
+    int MotionSamples(int fps) {
+      mf.FilmFrameRate = fps; mf.PrepareFilm();
+      int unique = 0; int[]? previous = null;
+      for (int i = 0; i < 60; i++) {
+        using var output = FilmRender(mf, i / 120.0, Matrix3x2.Identity, 320, 32);
+        var now = output.Pixels.ToArray(); if (previous == null || !now.AsSpan().SequenceEqual(previous)) unique++;
+        previous = now;
+      }
+      return unique;
+    }
+    int samples30 = MotionSamples(30), samples60 = MotionSamples(60), samples120 = MotionSamples(120);
+    Check(samples30 == 15 && samples60 == 30 && samples120 == 60, $"motion samples over 0.5 s: 30 fps={samples30}, 60 fps={samples60}, 120 fps={samples120}");
+    Check(mf.FilmSize == new Size(322, 34), "higher temporal fps does not change the requested spatial grid");
   }
 
 

@@ -21,28 +21,18 @@ namespace Sr2d64CSport
         public const string DllName = "SR2D64";
 
         // ------------------------------------------------------------------ locating SR2D64.dll
-        // The default probe (next to the entry assembly / PATH) is fine for a running app. It is NOT
-        // fine inside the Visual Studio WinForms designer: the designer (DesignToolsServer.exe) loads
-        // the assembly from a shadow-copy / cache folder, so "SR2D64" is not found and every control
-        // dies with "Unable to load DLL 'SR2D64'". The resolver below runs for every P/Invoke of this
-        // assembly and probes, in order:
-        //   1. SR2D_DLL environment variable (full path of the DLL, for odd setups)
-        //   2. the folder of this assembly's ORIGINAL location (Assembly.Location - the build output,
-        //      where the csproj copies the DLL; the designer shadow copy keeps Location pointing there)
-        //   3. AppContext.BaseDirectory (the running exe)
-        //   4. the [assembly: AssemblyMetadata("SR2D.DllPath", ...)] hint the template / demo csproj bake in
-        //      (the absolute path of the DLL the project was built against - this is what rescues the designer
-        //      when it loads the assembly from a cache folder; harmless in a shipped exe: 2. wins there)
-        //   5. the parent folders of 2. and 3., up to 4 levels (bin\x64\Debug\net10.0-windows -> project folder)
-        //   6. the plain name (PATH / default probing)
-        // Set SR2D.DllPath BEFORE the first native call to force a specific file.
-        static string? dllPath; static bool resolverSet; static bool? available;
+        // Modern WinForms designers load a managed assembly in DesignToolsServer / a shadow-copy folder.
+        // Assembly.Location and AppContext.BaseDirectory can therefore BOTH be outside the app's bin folder.
+        // The shared SR2D.Native.targets records the actual build output plus the selected None/Content DLL
+        // asset. Probe those trusted assembly hints after the running assembly/app directories; never CWD/PATH.
+        // The project/native repository layout is not a runtime dependency. SR2D.DllPath remains an explicit override.
+        static string? dllPath, nativeLoadError; static bool resolverSet; static bool? available;
         /// <summary>Full path of the DLL to load (set before the first native call), or the path the resolver picked after it (null = default probing).</summary>
-        public static string? DllPath { get => dllPath; set { dllPath = value; available = null; EnsureResolver(); } }
-        /// <summary>
-        /// True when SR2D64.dll could be loaded. Probes once (the result is cached) and never throws, so UI code can fall
-        /// back gracefully - the WinForms designer paints a placeholder instead of disabling the control.
-        /// </summary>
+        public static string? DllPath { get => dllPath; set { dllPath = value; available = null; nativeLoadError = null; EnsureResolver(); } }
+        /// <summary>Reason the last availability probe failed (missing DLL/dependency, bitness, ABI or export); null on success.</summary>
+        public static string? NativeLoadError => nativeLoadError;
+        /// <summary>True when the ABI-compatible engine loads. Missing/bad native libraries return false so designers
+        /// can paint placeholders instead of disabling a control; NativeLoadError provides the diagnostic.</summary>
         public static bool IsAvailable
         {
             get
@@ -50,9 +40,11 @@ namespace Sr2d64CSport
                 if (available.HasValue) return available.Value;
                 bool ok;
                 try { EnsureResolver(); _ = Native.SR2D_SIMD_LEVEL(); ok = true; }
-                catch (DllNotFoundException) { ok = false; }
-                catch (BadImageFormatException) { ok = false; }        // wrong bitness (x86 host, arm64 ...)
-                catch (EntryPointNotFoundException) { ok = true; }     // an (old) DLL is there at least
+                catch (DllNotFoundException ex) { ok = false; nativeLoadError = ex.Message; }
+                catch (BadImageFormatException ex) { ok = false; nativeLoadError = ex.Message; }   // wrong bitness
+                catch (EntryPointNotFoundException ex) { ok = false; nativeLoadError = ex.Message; }
+                catch (PlatformNotSupportedException ex) { ok = false; nativeLoadError = ex.Message; } // wrong ABI: designer still stays editable
+                if (ok) nativeLoadError = null;
                 available = ok;
                 return ok;
             }
@@ -78,7 +70,13 @@ namespace Sr2d64CSport
         /// <summary>Loads a candidate library and demands the ABI handshake export; a library that does not match is freed and refused.</summary>
         static bool TryLoadAbiChecked(string path, ref string? fail, out IntPtr h)
         {
-            if (!NativeLibrary.TryLoad(path, out h)) return false;
+            // Loading by a full path must also allow dependencies BESIDE that DLL (the designer's exe folder
+            // is unrelated). Keep search confined to that file's directory, the application and System32.
+            bool loaded = OperatingSystem.IsWindows()
+                ? NativeLibrary.TryLoad(System.IO.Path.GetFullPath(path), typeof(SR2D).Assembly,
+                    DllImportSearchPath.UseDllDirectoryForDependencies | DllImportSearchPath.ApplicationDirectory | DllImportSearchPath.System32, out h)
+                : NativeLibrary.TryLoad(path, out h);
+            if (!loaded) return false;
             int v = 0; bool has = true;
             try { v = System.Runtime.InteropServices.Marshal.GetDelegateForFunctionPointer<AbiVersionFn>(NativeLibrary.GetExport(h, "SR2D_ABI_VERSION"))(); }
             catch (EntryPointNotFoundException) { has = false; }
@@ -105,33 +103,47 @@ namespace Sr2d64CSport
             if (dllPath != null && TryLoadAbiChecked(dllPath, ref fail, out var h0)) return h0;
             string? env = Environment.GetEnvironmentVariable("SR2D_DLL");
             if (!string.IsNullOrEmpty(env) && TrustworthyPath(env) && TryLoadAbiChecked(env, ref fail, out var h1)) { dllPath = env; return h1; }
-            foreach (string dir in CandidateDirs(asm))
-                foreach (string file in FileNames)
-                {
-                    string f = System.IO.Path.Combine(dir, file);
-                    if (System.IO.File.Exists(f) && TryLoadAbiChecked(f, ref fail, out var h)) { dllPath = f; return h; }
-                }
+            foreach (string f in CandidateFiles(asm))
+                if (System.IO.File.Exists(f) && TryLoadAbiChecked(f, ref fail, out var h)) { dllPath = f; return h; }
             if (fail != null) throw new PlatformNotSupportedException(fail);   // found, but not ours: a clear error instead of garbage pixels
             return IntPtr.Zero;                                       // nothing found: fall back to the default probing
         }
         static readonly string[] FileNames = OperatingSystem.IsWindows() ? new[] { DllName + ".dll" }
-                                           : new[] { "lib" + DllName + ".so", DllName + ".so", "lib" + DllName + ".dylib" };   // the headless test runners
+                                           : new[] { "lib" + DllName + ".so", DllName + ".so", "lib" + DllName + ".dylib", DllName + ".dll" }; // headless runners / ELF fixture named like the Windows asset
+        static System.Collections.Generic.IEnumerable<string> CandidateFiles(System.Reflection.Assembly asm)
+        {
+            var seen = new System.Collections.Generic.HashSet<string>(OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal);
+            foreach (string dir in CandidateDirs(asm))
+                foreach (string name in FileNames)
+                {
+                    string file = System.IO.Path.Combine(dir, name);
+                    if (seen.Add(file)) yield return file;
+                }
+            // DllPath is a FILE, not just a directory hint: linked/custom-named DLLs and explicit source files
+            // must work too. On Linux this also permits a test ELF library named SR2D64.dll in a portable fixture.
+            foreach (var attr in asm.GetCustomAttributes(typeof(System.Reflection.AssemblyMetadataAttribute), false))
+                if (attr is System.Reflection.AssemblyMetadataAttribute md && md.Key == "SR2D.DllPath"
+                    && !string.IsNullOrEmpty(md.Value) && System.IO.Path.IsPathRooted(md.Value) && seen.Add(md.Value))
+                    yield return md.Value;
+        }
         static System.Collections.Generic.IEnumerable<string> CandidateDirs(System.Reflection.Assembly asm)
         {
-            var seen = new System.Collections.Generic.HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            var seen = new System.Collections.Generic.HashSet<string>(OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal);
             string? loc = null; try { loc = asm.Location; } catch { }
             if (!string.IsNullOrEmpty(loc)) { string? d = System.IO.Path.GetDirectoryName(loc); if (d != null && seen.Add(d)) yield return d; }
             string? b = AppContext.BaseDirectory; if (!string.IsNullOrEmpty(b) && seen.Add(b.TrimEnd('\\', '/'))) yield return b;
             foreach (var attr in asm.GetCustomAttributes(typeof(System.Reflection.AssemblyMetadataAttribute), false))
             {
-                if (attr is not System.Reflection.AssemblyMetadataAttribute md || md.Key != "SR2D.DllPath" || string.IsNullOrEmpty(md.Value)) continue;
-                string? d = md.Value.EndsWith(".dll", StringComparison.OrdinalIgnoreCase) ? System.IO.Path.GetDirectoryName(md.Value) : md.Value;
-                if (d != null && seen.Add(d)) yield return d;
+                if (attr is not System.Reflection.AssemblyMetadataAttribute md || string.IsNullOrEmpty(md.Value)) continue;
+                string? d = md.Key switch
+                {
+                    "SR2D.OutputDir" or "SR2D.ProjectDir" => md.Value,
+                    "SR2D.DllPath" => System.IO.Path.GetDirectoryName(md.Value),
+                    _ => null
+                };
+                if (d != null && System.IO.Path.IsPathRooted(d) && seen.Add(d)) yield return d;
             }
-            // walk up from both, but ONLY out of a build-output tree (bin\x64\Debug\net10.0-windows -> the
-            // project folder). Beyond the project the walk probed ANY writable ancestor - a repo root,
-            // Downloads, the Desktop - and the first hit won (CWE-427). The dev convenience it exists for
-            // ends at the project folder, and so does the walk.
+            // Walk ONLY a known bin/obj tree, stopping at its project folder (no arbitrary writable ancestors).
             foreach (string? start in new[] { loc == null ? null : System.IO.Path.GetDirectoryName(loc), b })
             {
                 string? d = start;
@@ -140,7 +152,7 @@ namespace Sr2d64CSport
                 {
                     d = System.IO.Path.GetDirectoryName(d.TrimEnd('\\', '/'));
                     if (d == null) break;
-                    if (seen.Add(d)) yield return d;               // Release -> bin -> the project folder itself
+                    if (seen.Add(d)) yield return d;
                     underBuild = UnderBuildOutput(d);
                 }
             }

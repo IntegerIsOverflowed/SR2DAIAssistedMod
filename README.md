@@ -121,32 +121,46 @@ Designer*, `F7` cycles the two views.
 
 ### How `SR2D64.dll` is found (and the form designer)
 
-`SR2D.cs` registers a `DllImport` resolver for its own assembly, so the DLL
-does not have to sit next to the exe. It is looked up, first hit wins:
+The template is portable: copy **EmptySR2DFormTemplate/** and **cs/** together. `cs/` can be
+beside the project folder or inside it; the template detects both and avoids duplicate Compile
+items. Keep the entire `cs/` directory, including **SR2D.Native.targets** and **.editorconfig**.
+The latter carries the engine's existing audited analyzer policy; `projchk` prevents policy drift.
 
-1. `SR2D.DllPath` if you set it before the first native call;
-2. the `SR2D_DLL` environment variable — a TRUSTED full path only: absolute, no `..` segments, an
-   existing file; anything else is ignored (whatever can set an env var must not redirect the engine);
-3. the folder of the assembly's own file (`Assembly.Location` — the build output);
-4. `AppContext.BaseDirectory` (the running exe);
-5. the `[assembly: AssemblyMetadata("SR2D.DllPath", …)]` hint the template and
-   demo csproj bake in (the absolute path of the DLL the build used);
-6. the parents of 3. and 4., but only while they still sit inside a build-output tree
-   (`bin\x64\Debug\net10.0-windows` → `Release` → `bin` → the **project folder**, then stop). The walk
-   used to go four arbitrary levels up, so a planted `SR2D64.dll` in any writable ancestor — the repo
-   root, Downloads, the Desktop — would have been loaded;
-7. the default probing, pinned to the application directory and System32 by an assembly-level
-   `[DefaultDllImportSearchPaths(ApplicationDirectory | System32)]` — never the current directory or
-   `PATH`. (System32 must stay in the set: system DLLs that are not KnownDLLs, like `winmm`, resolve
-   through this very search.)
+Use a **single native source file**, in whichever layout suits your solution:
 
-Every candidate that LOADS is also checked against the ABI handshake before it is
-accepted: the library must export `SR2D_ABI_VERSION` and report the number the
-managed layer was built for (`SR2D_ABI` in `native/sr2d_api.h`; bump both together
-whenever the op list, an op-word encoding or a mirrored struct layout changes). A
-stale or foreign `SR2D64.dll` is freed and refused with a readable error instead of
-silently drawing garbage, and the mirrored struct sizes are asserted at first use on
-both sides (`static_assert` in the header, a managed check before the first call).
+- **Add Existing Item** -> `SR2D64.dll` (or **Add As Link**). A normal `None` or `Content` item,
+  including one in `Assets/`, is sufficient; it is copied next to the EXE as `SR2D64.dll`.
+- Put `SR2D64.dll` beside the `.csproj`; it remains visible in Solution Explorer.
+- If the DLL is **already in the actual Debug/Release output directory**, that is sufficient too:
+  it does not need a duplicate under `native/bin/x64` or in the project root.
+- For an explicit source, set `<Sr2dDll>path/to/SR2D64.dll</Sr2dDll>`.
+
+`cs/SR2D.Native.targets` resolves the project asset/override, project-root DLL, existing output
+DLL, then the repository's `../native/bin/x64/SR2D64.dll` **as an optional fallback**. It supplies
+real source/output/project paths as assembly metadata before compilation and handles output/publish
+copying. A missing-DLL warning now explains these choices, rather than prescribing repository
+folders. A source under Assets/ or linked from elsewhere has one root output destination.
+
+**Build once, then close and reopen the form designer after adding/moving the DLL.** The designer
+uses `DesignToolsServer.exe` and can load managed code from a shadow-copy/cache directory, so its
+`Assembly.Location` and `AppContext.BaseDirectory` are not reliably your project's output. The
+new source/output metadata points it back to the DLL you already have. This is a native project
+asset, not a managed reference: do not use Add Reference on an unmanaged DLL.
+
+`SR2D.cs` checks, in order: explicit `SR2D.DllPath`, the trusted full-file `SR2D_DLL` override,
+the managed assembly/app directories, trusted `SR2D.OutputDir` / `SR2D.ProjectDir` / `SR2D.DllPath`
+metadata, and a restricted parent walk within bin/obj output trees. Default probing is pinned to
+the application directory and System32, **never arbitrary CWD/PATH**. On Windows, full-file loads
+also allow dependencies beside that DLL (`UseDllDirectoryForDependencies`), not just beside the
+designer host. Other required native dependencies must still be present and architecture-compatible.
+
+Every loaded candidate must pass the `SR2D_ABI_VERSION` handshake. Missing/dependency/bitness/export/
+ABI failures make `SR2D.IsAvailable` false, with `SR2D.NativeLoadError` retaining the reason.
+`SpriteBox` controls **and SpriteForm's TitleBarStrip** paint a safe GDI placeholder instead of
+letting the designer disable the inherited form. A successfully loaded engine paints the real
+controls normally. `SR2D.DllPath` reports which file loaded; runtime native drawing still needs the
+correct x64 engine. Portable project/source/output and simulated designer shadow-copy probes are
+in `tests/cs/nativeload/check.py`; actual Visual Studio painting needs a Windows smoke test.
 
 ### DPI (deliberate)
 
@@ -157,17 +171,6 @@ DWM scales the window as a bitmap, drawn pixels and hit rectangles together, and
 100 % zoom stays 1:1 crisp. Do not switch the template to `PerMonitorV2` with
 `AutoScaleMode.Dpi` / `Font` without rewriting the control metrics — that would
 blur the pixel font and desynchronise the hand-computed control geometry.
-
-Step 5 is what keeps the **Visual Studio form designer** working: the designer
-hosts the controls in its own process (`DesignToolsServer.exe`) and loads the
-assembly from a cache folder, not from `bin\…`, so the plain `DllImport("SR2D64")`
-failed there with *Unable to load DLL 'SR2D64' (0x8007007E)* and every SR2D
-control was disabled on the form. If the DLL still cannot be loaded (moved
-project, wrong bitness, no DLL yet), `SR2D.IsAvailable` is false and `SpriteBox`
-and every control derived from it paint a plain placeholder (background colour,
-frame, type name) instead of throwing; the app itself throws the usual
-`DllNotFoundException` at the first drawing call. `SR2D.DllPath` reports which
-file was loaded.
 
 `ImplicitUsings` may be on or off in your project (the default of a new project
 is on; the template now has it on): the files that use a WinForms `Timer` carry a
@@ -509,6 +512,7 @@ be loadable (on Linux: build it with `make so` in `tests/` and copy
 | `tests/cs/ctlrun` | the managed end-to-end runner: SpriteControls (knobs, sliders, menus, wheel, curve editor) on a fake WinForms layer, SpriteBox view modes, TransformFrame interactions, edit history, view lifetime, pattern fill, quad warp, ABI mirror sizes | DLL; exit code = failures | the native kernels' parity (that is difftest) |
 | `tests/cs/benchrun` | renders demo bench-test bodies headlessly, dumps the canvas as raw RGBA (`topng.py` to view) | DLL | correctness assertions - it is a rendering smoke + visual dump |
 | `tests/cs/vecrun` | vector rendering pipeline: writes `<name>.rgba` + shape counts / warnings / timings into an out dir | DLL; takes the out dir as argv[1] | import robustness (that is vecfuzz) |
+| `tests/cs/nativeload` | ABI-checked native loader without WinForms; `check.py` tests normal / linked None/Content DLL assets, output-only DLLs, designer-style managed shadow copies, missing/bad ABI diagnostics, safe CWD rejection, and actual template relocation with sibling/nested `cs/`.  .NET 10 + native test build; check.py uses Linux ELF probes and compiles copied Windows templates | actual Visual Studio painting (Windows smoke test) |
 | `tests/cs/selchk` | Selection / FloodFill properties: wand == fill, tolerance, global, ops, feather / grow / border, boolean combine, lock-rect interplay | DLL; compiles a cs/ SUBSET (no VoxelGrid) | voxels, controls |
 | `tests/cs/autochk` | prints the `SR2D.Resolve` filter-resolution table (Auto -> Nearest / Linear / Smooth at each scale) | DLL | - informational, no asserts (diff the output to regression-test it) |
 | `tests/cs/codechk` | demo source integrity: every `T(...)` test name parses, descriptions and code-view references stay consistent | DLL | engine behaviour |
@@ -1997,81 +2001,91 @@ costs a few blits plus its genuinely animated shapes per frame: the 103-shape fl
 remains the exact per-frame clone for one-off rendering. The demo's *Animated SVG* test draws through
 the compositor and shows its stats in the note.
 
-### Precomposing animated vectors: bounded bitmap-loop playback (`cs/Vector.Precompose.cs`)
+### Precomposing animated vectors: independent internal resolution (`cs/Vector.Precompose.cs`)
 
-`img.Cached.Precomposed = true` opts into a third mode: bake the entire `Duration` loop into
-premultiplied bitmap frames once, then draw just the selected bitmap. Use **`DrawAt`** to skip
-`SeekToTime` altogether during warm playback:
+`img.Cached.Precomposed = true` bakes the entire `Duration` loop once into premultiplied bitmap
+frames. **Internal resolution and displayed container size are independent**:
 
 ```csharp
-var img = VectorImage.Load("alchemist-flask-scene.svg");
-img.ClipViewport = true;                          // optional: keep the film inside the container
+var img = VectorImage.Load("animation.svg");
+img.ClipViewport = true;
 using var cache = img.Cached;
-cache.Precomposed = true;                         // default is false (the live layer compositor)
-cache.MaxFilmPixels = 64L * 1024 * 1024;           // all frames together: 256 MiB of raw ARGB
-cache.FilmFrameRate = 0;                          // 0 = img.FrameRate (normally 30); e.g. 15 is explicit
-var placement = img.FitMatrix(new RectangleF(0, 0, 600, 400));
-cache.PrepareFilm(placement);                     // optional synchronous warm-up; first DrawAt does it too
-cache.DrawAt(canvas, timeSeconds, placement);     // no track evaluation / flattening / clip masks on a cache hit
+cache.Precomposed = true;
+cache.FilmResolution = new Size(1024, 0);         // view-box width in INTERNAL pixels; height keeps SVG aspect
+cache.FilmFrameRate = 60;                        // temporal samples/sec; independent of spatial resolution
+cache.MaxFilmPixels = 64L * 1024 * 1024;         // total raw frames budget: 256 MiB
+cache.PrepareFilm();                            // optional synchronous warm-up, no display placement needed
+cache.DrawAt(canvas, timeSeconds, img.FitMatrix(new RectangleF(0, 0, 256, 160)));
+cache.DrawAt(canvas, timeSeconds, img.FitMatrix(new RectangleF(0, 0, 512, 320))); // SAME film, no rebake
 ```
 
-The position/scale/angle/pivot overload is the same as `VectorSprite.Draw`, with `time` after the
-canvas: `cache.DrawAt(canvas, t, x, y, scaleX, scaleY, angleDeg, pivotX, pivotY)`. Existing
-`img.SeekToTime(t); cache.Draw(...)` also works, but still spends time evaluating tracks; `DrawAt`
-avoids that cost. Time wraps over `Duration` (including negative times); non-finite time selects
-frame 0. The baked samples are evenly spaced over the loop, `ceil(Duration * requestedFps)` frames,
-without a duplicate endpoint. `FrameAt` / `GetFrame` remain unchanged, exact vector sampling APIs.
+**`FilmResolution`** is the requested pixel grid for the SVG view box, not the destination.
+`Size.Empty` (default) uses intrinsic SVG units: one texel per unit. One zero dimension preserves
+aspect ratio; two positive dimensions request that exact grid (even anisotropic). The source
+frames live in image coordinates; playback maps frame pixels back into the image, then through
+the current draw matrix. **Move, resize, rotate, skew and mirror only resample/transform bitmaps:
+none of them triggers a new loop bake.** Changing `FilmResolution`, fps, content/paint options,
+viewport/window/view-box, duration, or memory budget does invalidate. Old frames are released
+before replacement; off / Invalidate / SetImage / Dispose release the film.
 
-**Memory is a real trade-off.** A 30 s, 30 fps loop at 600x400 uses **864 MB before padding** if
-stored at full resolution. The default `MaxFilmPixels` is **64 M pixels = 256 MiB**, across the
-whole film, not per frame (0 uses `MaxPixels`). If it does not fit, the bake reduces **spatial
-resolution, never silently the frame rate**, and playback enlarges the smaller bitmaps using the
-native bitmap path (bilinear with AA, nearest without). For the flask this means 900 frames at
-30 fps stored as approximately 330x221 bitmaps for a 600x400 draw at the default budget. Raise the
-budget for full-resolution frames, explicitly lower `FilmFrameRate` if that is preferable, or
-leave precompose off for resolution-independent live drawing. `MaxPixels` also caps each frame.
-Fewer than 9 pixels per frame, invalid/empty loops, more than 10000 requested frames, or allocation
-failure fall back to live rendering; the reason appears in `FilmStatus`. Failed preparations are
-remembered until an input changes, rather than retried every tick.
+A **larger internal grid than the displayed container** enables supersampling. Default
+`FilmSampling = SR2D.Filter.BilinearArea` averages the source when shrinking (every contributing
+texel is considered), then samples smoothly; it avoids the detail loss/aliasing of point sampling
+or plain bilinear alone. You can choose another filter, including `BicubicArea`; changing the
+playback filter does **not** rebake. AA=false selects Nearest deliberately. `SubPixel = true`
+filters fractional placement without pixel snapping or rebaking; the demo enables it with Smooth.
 
-**Correctness and lifetime.** The direct renderer bakes on an independent animation clone, so
-morphs, animated masks, opacity/dash tracks, `<use>` content and static clip windows around moving
-content keep their normal semantics. Clipped films use the viewport/visible window for storage;
-unclipped films use the union of bounds at the actual bake sample times (not frame 0's bounds).
-The film is invalidated by content `Version` (`Touch` after direct edits), render options,
-`ClipViewport`, `VisibleArea`, `ViewBox`, duration, fps, budget, or a changed linear draw transform
-(zoom/rotation/skew beyond `Tolerance`). Translation alone is free. Old frames are released
-**before** the replacement is allocated. Turning `Precomposed` off, `Invalidate`, `SetImage` and
-`Dispose` release the film; cancellation of `PrepareFilm(matrix, cancellationToken)` releases
-partial frames. No disk cache or new image-codec dependency is involved.
+**Temporal smoothness is a separate setting.** Live vectors evaluate at every render timestamp.
+A 30 fps film holds each selected sample for approximately **33 ms**, so a 60/120/144 Hz display
+can show repeated frames even if the bitmaps are enormous. Choose 60, 120 or your desired bake
+cadence using `FilmFrameRate` (0 still uses `img.FrameRate`, normally 30); the demo now defaults to
+**60 fps**, supports up to **240**, and leaves discrete animation steps intact—no ghosting/crossfade
+is silently introduced. A regression probe drawing at 120 Hz over half a second sees 15/30/60
+unique motion samples from 30/60/120 fps films at the **same** bitmap resolution.
 
-Like the existing static raster cache, default placement is whole-pixel aligned. `SubPixel = true`
-uses bitmap filtering for fractional placement **without rebaking the whole loop**. Full-size
-frames match direct rendering on the same pixel grid (the synthetic fixture is pixel-exact;
-complex gradient scenes may have tiny rounding differences); budget-limited frames trade detail
-for memory, and fractional bitmap placement is not a new vector rasterization.
+`DrawAt(canvas, time, matrix)` selects the bitmap without evaluating SVG tracks on a cache hit;
+the placement overload is `DrawAt(canvas, time, x, y, scaleX, scaleY, angleDeg, pivotX, pivotY)`.
+Existing `SeekToTime(t); Cached.Draw(...)` remains valid, but still evaluates tracks. The original
+`PrepareFilm(matrix, cancellationToken)` signature remains for compatibility; the display matrix
+no longer determines the bake. Parameterless `PrepareFilm()` is the natural warm-up call.
+Time wraps over Duration (including negative time); non-finite time selects frame 0. Samples are
+evenly spaced (`ceil(Duration * requestedFps)`), with no duplicate endpoint. `FrameAt` / `GetFrame`
+remain unchanged vector sampling APIs. A transformed/filtered bitmap is not a fresh vector
+rasterization: cached stroke hairlines and edges scale with the bitmap.
 
-**Preparation is synchronous** and can take several seconds. Warm at a loading stage when
-possible; changing zoom/rotation or paint settings can trigger another bake. Like the rest of
-SR2D, do not draw/prepare the same wrapper concurrently. Diagnostics: `FilmFrames`, `FilmFps`,
-`FilmScale`, `FilmSize`, `FilmPixels`, `FilmBakes`, `FilmBakeMs`, `FilmBlits`, `FilmActive`,
-`FilmStatus` (also returned by `LayerSummary` in film mode).
+**Budget versus requested resolution.** Default `MaxFilmPixels` is **64 M pixels = 256 MiB across
+ALL frames**, not per frame (0 uses MaxPixels); MaxPixels separately caps a single frame. If the
+request does not fit, spatial resolution is reduced, **never secretly fps**. `FilmSize` and
+`FilmScale` show the actual grid and budget scale, so a 1024-pixel request is not a guarantee of
+1024 stored pixels. Raise the budget or explicitly reduce fps if you need full-resolution/super-
+sampled storage for a long loop. A 30 s, 600x400, 60 fps loop needs **1.728 GB before padding** at
+full resolution. Unusable budgets, invalid/empty loops, over-10000 requested frames or allocation
+failures fall back live with a reason; failed preparation is not retried every tick.
 
-Measured on the Linux test machine, Release, AA on, advancing timestamps; warm film playback
-uses the default 256 MiB budget and therefore budget-limited spatial resolution:
+**Correctness/lifetime.** Frames bake on an independent animation clone through the DIRECT
+renderer: masks, morphs, CSS opacity/dashes, use content and static clip windows around moving
+shapes retain their semantics. Clipped films store the image window; unclipped films union bounds
+at the actual sample times (not just frame 0). Cancellation disposes partial frames. Preparation
+is synchronous and may take seconds—warm at a loading stage. Do not prepare/draw the same wrapper
+concurrently. No disk cache or new codec dependency. Diagnostics: FilmFrames / FilmFps /
+FilmResolution / FilmSize / FilmScale / FilmPixels / FilmBakes / FilmBakeMs / FilmBlits /
+FilmActive / FilmStatus (also LayerSummary).
 
-| Scene | Output width | Direct vector | Live layers | Film playback | One-time bake |
-|---|---:|---:|---:|---:|---:|
-| alchemist-flask-scene | 600 px | 36.5 ms | 12.4 ms | **0.48 ms** | 9.2 s |
-| alchemist-flask-scene | 1000 px | 79.7 ms | 32.6 ms | **0.92 ms** | 9.5 s |
-| cauldron-obsidian | 600 px | 13.0 ms | 2.1 ms | **0.48 ms** | 4.6 s |
-| cauldron-obsidian | 1000 px | 34.1 ms | 4.8 ms | **0.95 ms** | 4.7 s |
-| alchemist-lab-composition | 600 px | 20.6 ms | 3.5 ms | **0.50 ms** | 6.6 s |
-| alchemist-lab-composition | 1000 px | 53.5 ms | 7.7 ms | **0.99 ms** | 6.8 s |
+Measured on the Linux Release test machine, AA, advancing timestamps, **60 fps**, requested
+512-pixel internal width and 256 MiB budget (actual grids are budget-limited). Each scene was baked
+**once** and drawn at both output sizes plus a resized/rotated placement—FilmBakes remained 1:
 
-Demo: *Files -> Animated SVG*, tick **Precompose**. Budget defaults to 256 MiB; fps 0 uses 30 here.
-The demo uses `DrawAt`, reports actual film statistics, and releases the old film on file changes
-and on form close. The checkbox is off by default; static vector caching is unchanged.
+| Scene | Stored grid | 600 px output | 1000 px output | One-time bake |
+|---|---:|---:|---:|---:|
+| alchemist-flask-scene | 234x157, 1800 frames | **0.33 ms** | **0.77 ms** | 9.0 s |
+| cauldron-obsidian | 261x168, 1500 frames | **0.34 ms** | **0.81 ms** | 4.2 s |
+| alchemist-lab-composition | 267x172, 1440 frames | **0.34 ms** | **0.82 ms** | 6.3 s |
+
+Demo: *Files -> Animated SVG*, tick **Precompose**. **Internal film width** defaults to 512 px,
+**Film fps** to 60 (0 uses file rate), **Film budget** to 256 MiB. Container Scale/drag/rotation
+only changes playback placement. The note reports actual resolution, memory, fps, bake time and
+frame cost; replacing the file/closing the demo releases the film. Off by default; static vector
+caching and live compositor behaviour are unchanged.
 
 ### Gradient fills in the shape API (`cs/Sprite.Gradient.cs`)
 
