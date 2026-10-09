@@ -27,7 +27,8 @@ SR2D/
 │  ├─ Sprite.Rect.cs       partial Sprite: Rectangle (x,y,w,h) overloads of the L/R/T/B methods, Bounds, LockRect
 │  ├─ Sprite.Curves.cs     partial Sprite: splines through points, Béziers, arcs, PathBuilder (DrawPath / FillPath)
 │  ├─ Vector.cs / .Render.cs / .Svg.cs / .Anim.cs / .Ps.cs / .Pdf.cs   VectorImage model, rasteriser, SVG (SMIL animation, alpha masks) / PostScript-EPS-AI / PDF importers
-│  ├─ Vector.Cache.cs      VectorSprite: cached raster of a VectorImage (blit per frame until zoom / angle / content changes)
+│  ├─ Vector.Cache.cs      VectorSprite: static raster cache + animated layer compositor
+│  ├─ Vector.Precompose.cs optional bounded bitmap-loop cache: bake once, DrawAt(t) = bitmap playback without vector evaluation
 │  ├─ Vector.Edit.cs       Container edits: Recolor / SwapColors / Palette (fill, stroke or both), by-name SetFill / SetStroke / Hide / Show / Remove, Merge, Shuffle, order
 │  ├─ Sprite.Gradient.cs   partial Sprite: gradient-paint overloads of FillRect / RoundRect / Ellipse / Circle / Polygon / Path / StrokePath + SpriteGradient factory
 │  ├─ Sprite.Edit.cs       partial Sprite: in-place Flip / Rotate90 / Rotate(deg) / Resize / Crop / Expand / Trim / Shift / colour ops / Apply
@@ -1955,7 +1956,9 @@ flattened path's chords, so the motion is smooth on shallow curves.
 
 Demo: *Files → "Animated SVG (SMIL + CSS)"* — open an animated `.svg` (built-in sample otherwise), tick
 **Animate** to play the loop, `Speed` = playback rate (6 = real time); the note shows t within the
-loop, the frame index, the track count and the seek + draw cost.
+loop, the frame index, the track count and the frame cost. **Precompose** switches to a baked
+bitmap loop; **Film budget (MiB)** and **Film fps** choose its memory / quality trade-off (fps 0 =
+the file's FrameRate). The note reports the actual bitmap size, resolution %, memory and bake time.
 
 ### Drawing a vector picture every frame: `VectorSprite` (`cs/Vector.Cache.cs`)
 
@@ -1993,6 +1996,82 @@ costs a few blits plus its genuinely animated shapes per frame: the 103-shape fl
 `LayerSummary` / `LayerInfo` report the plan (layer runs, live runs, rasters, blits); `FrameAt`
 remains the exact per-frame clone for one-off rendering. The demo's *Animated SVG* test draws through
 the compositor and shows its stats in the note.
+
+### Precomposing animated vectors: bounded bitmap-loop playback (`cs/Vector.Precompose.cs`)
+
+`img.Cached.Precomposed = true` opts into a third mode: bake the entire `Duration` loop into
+premultiplied bitmap frames once, then draw just the selected bitmap. Use **`DrawAt`** to skip
+`SeekToTime` altogether during warm playback:
+
+```csharp
+var img = VectorImage.Load("alchemist-flask-scene.svg");
+img.ClipViewport = true;                          // optional: keep the film inside the container
+using var cache = img.Cached;
+cache.Precomposed = true;                         // default is false (the live layer compositor)
+cache.MaxFilmPixels = 64L * 1024 * 1024;           // all frames together: 256 MiB of raw ARGB
+cache.FilmFrameRate = 0;                          // 0 = img.FrameRate (normally 30); e.g. 15 is explicit
+var placement = img.FitMatrix(new RectangleF(0, 0, 600, 400));
+cache.PrepareFilm(placement);                     // optional synchronous warm-up; first DrawAt does it too
+cache.DrawAt(canvas, timeSeconds, placement);     // no track evaluation / flattening / clip masks on a cache hit
+```
+
+The position/scale/angle/pivot overload is the same as `VectorSprite.Draw`, with `time` after the
+canvas: `cache.DrawAt(canvas, t, x, y, scaleX, scaleY, angleDeg, pivotX, pivotY)`. Existing
+`img.SeekToTime(t); cache.Draw(...)` also works, but still spends time evaluating tracks; `DrawAt`
+avoids that cost. Time wraps over `Duration` (including negative times); non-finite time selects
+frame 0. The baked samples are evenly spaced over the loop, `ceil(Duration * requestedFps)` frames,
+without a duplicate endpoint. `FrameAt` / `GetFrame` remain unchanged, exact vector sampling APIs.
+
+**Memory is a real trade-off.** A 30 s, 30 fps loop at 600x400 uses **864 MB before padding** if
+stored at full resolution. The default `MaxFilmPixels` is **64 M pixels = 256 MiB**, across the
+whole film, not per frame (0 uses `MaxPixels`). If it does not fit, the bake reduces **spatial
+resolution, never silently the frame rate**, and playback enlarges the smaller bitmaps using the
+native bitmap path (bilinear with AA, nearest without). For the flask this means 900 frames at
+30 fps stored as approximately 330x221 bitmaps for a 600x400 draw at the default budget. Raise the
+budget for full-resolution frames, explicitly lower `FilmFrameRate` if that is preferable, or
+leave precompose off for resolution-independent live drawing. `MaxPixels` also caps each frame.
+Fewer than 9 pixels per frame, invalid/empty loops, more than 10000 requested frames, or allocation
+failure fall back to live rendering; the reason appears in `FilmStatus`. Failed preparations are
+remembered until an input changes, rather than retried every tick.
+
+**Correctness and lifetime.** The direct renderer bakes on an independent animation clone, so
+morphs, animated masks, opacity/dash tracks, `<use>` content and static clip windows around moving
+content keep their normal semantics. Clipped films use the viewport/visible window for storage;
+unclipped films use the union of bounds at the actual bake sample times (not frame 0's bounds).
+The film is invalidated by content `Version` (`Touch` after direct edits), render options,
+`ClipViewport`, `VisibleArea`, `ViewBox`, duration, fps, budget, or a changed linear draw transform
+(zoom/rotation/skew beyond `Tolerance`). Translation alone is free. Old frames are released
+**before** the replacement is allocated. Turning `Precomposed` off, `Invalidate`, `SetImage` and
+`Dispose` release the film; cancellation of `PrepareFilm(matrix, cancellationToken)` releases
+partial frames. No disk cache or new image-codec dependency is involved.
+
+Like the existing static raster cache, default placement is whole-pixel aligned. `SubPixel = true`
+uses bitmap filtering for fractional placement **without rebaking the whole loop**. Full-size
+frames match direct rendering on the same pixel grid (the synthetic fixture is pixel-exact;
+complex gradient scenes may have tiny rounding differences); budget-limited frames trade detail
+for memory, and fractional bitmap placement is not a new vector rasterization.
+
+**Preparation is synchronous** and can take several seconds. Warm at a loading stage when
+possible; changing zoom/rotation or paint settings can trigger another bake. Like the rest of
+SR2D, do not draw/prepare the same wrapper concurrently. Diagnostics: `FilmFrames`, `FilmFps`,
+`FilmScale`, `FilmSize`, `FilmPixels`, `FilmBakes`, `FilmBakeMs`, `FilmBlits`, `FilmActive`,
+`FilmStatus` (also returned by `LayerSummary` in film mode).
+
+Measured on the Linux test machine, Release, AA on, advancing timestamps; warm film playback
+uses the default 256 MiB budget and therefore budget-limited spatial resolution:
+
+| Scene | Output width | Direct vector | Live layers | Film playback | One-time bake |
+|---|---:|---:|---:|---:|---:|
+| alchemist-flask-scene | 600 px | 36.5 ms | 12.4 ms | **0.48 ms** | 9.2 s |
+| alchemist-flask-scene | 1000 px | 79.7 ms | 32.6 ms | **0.92 ms** | 9.5 s |
+| cauldron-obsidian | 600 px | 13.0 ms | 2.1 ms | **0.48 ms** | 4.6 s |
+| cauldron-obsidian | 1000 px | 34.1 ms | 4.8 ms | **0.95 ms** | 4.7 s |
+| alchemist-lab-composition | 600 px | 20.6 ms | 3.5 ms | **0.50 ms** | 6.6 s |
+| alchemist-lab-composition | 1000 px | 53.5 ms | 7.7 ms | **0.99 ms** | 6.8 s |
+
+Demo: *Files -> Animated SVG*, tick **Precompose**. Budget defaults to 256 MiB; fps 0 uses 30 here.
+The demo uses `DrawAt`, reports actual film statistics, and releases the old film on file changes
+and on form close. The checkbox is off by default; static vector caching is unchanged.
 
 ### Gradient fills in the shape API (`cs/Sprite.Gradient.cs`)
 
@@ -3737,7 +3816,7 @@ too, so a broken/partial build is obvious immediately.
 | Layers | `LayeredSprite`: 12 layers with per-layer effects (prefix cache, compose vs layer-by-layer), `LayeredSprite.Transform` (the editable frame: move / scale / stretch / rotate / perspective, layer transforms, opacity), blend-mode layers (Multiply / Screen / Color … with per-layer opacity folded into the op) |
 | Effects | `DrawBlurred` (op selector), drop shadow and glow by hand vs one `Effects` stage side by side, Wave / Ripple / Noise / Turbulence / DistortMap, colour stage, outline / Dilate / Erode, chains (Enable / Disable at run time, Blur→Noise→Colour rotated PRE/POST), `DrawTransparent`, heat haze (Post), `Blur` in place, frosted-glass backdrop, depth-of-field slice stack |
 | Blend modes | all 27 modes over the photo backdrop (gallery + single mode + modes on transforms and shapes) |
-| Files | PNG codec round trip (`ToPng` → `FromPng`, adaptive encoder), vector import (`SVG` / `EPS` / `PS` / `AI` / `PDF` → `VectorImage.Draw`, with the recolour / `VectorSprite` strip), animated SVG (`SMIL` → `FrameAt` / `SeekToTime`, plays an animated `.svg` opened from a file) |
+| Files | PNG codec round trip (`ToPng` → `FromPng`, adaptive encoder), vector import (`SVG` / `EPS` / `PS` / `AI` / `PDF` → `VectorImage.Draw`, with the recolour / `VectorSprite` strip), animated SVG (`SMIL` / CSS → `FrameAt` / `SeekToTime`, live layers or precomposed bitmap-loop playback with fps / memory controls) |
 | Voxels | `VoxelGrid` terrain (procedural: noise heightmap, 3-D noise caves, lamps of several colours / strengths, tower with beacon, fire pit) up to 512x512x256 with every camera preset / free orbit camera / lighting tier (radio buttons) / points vs cubes / night (sky level slider) / light energy multiplier / parallel draw; a 24³ house model (built with the editing API, lit inside and out for the night) drawn Count times; "Voxel lights" (three rooms, three lamps: hue / strength knobs + on/off switch per lamp, Light reach / Sky / Lamp energy sliders in a strip of SR2D controls above the canvas — the Update time is shown, so you see what a longer reach costs); editing showcase (noise asteroid, carved tunnels, lit cavities, torus / cone / capsule / shell sphere, Shell / Invert / Hollow variants); "Voxels from projections" (built-in sprite sets ball / box / cylinder / square-top-round-bottom / rocket, six per-view check boxes, blend and fit modes, up to six PNGs of your own via Open file..., every source sprite labelled with its side); "BIG voxel grid" (Count x 128 per side up to 1024^3, heightmap world with a lit village, live low-res preview while you move the camera, then 5 full frames with exact timings; RAM guard); "Load a MagicaVoxel .vox or a Wavefront .obj" (Open file... button; built-in sample = house via .vox round trip + an obj with an in-memory .mtl whose Ke material becomes an emitter) |
 | Controls | the SR2D-drawn WinForms controls, in a strip above the canvas: "SpriteKnob / SpriteSlider" (two rows of knobs — every DragMode / Gauge / Pointer combination switchable — and sliders, one bound to a native TrackBar) and "SpriteButton / SpriteToggle / SpriteRadio / SpriteProgress" (buttons run a fake job that drives H / V / ring / segmented / marquee progress bars, the four toggle styles and two radio groups drive the canvas) |
 | Old vs new | `DrawLine` (old) vs `PreciseDots` vs `DrawLine2` (3-way fan), `DrawRotate` vs `DrawRotate2` vs `DrawRotateShear` (3-way, same direction), `DrawRotate` original kernel vs `UseWarp: true` (same call), `RESIZE` ctor vs `DrawScaled`, `AlphaBlend` vs `AlphaOver` on a transparent layer (glow sprites on top, shapes underneath) |

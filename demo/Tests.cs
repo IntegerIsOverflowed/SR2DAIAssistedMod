@@ -1206,7 +1206,7 @@ T(GControls, "SpriteLabel / GroupBox / Tabs / TextBox / Numeric / Combo / ListBo
             L[L.Count - 1].FileFilter = "Vector files|*.svg;*.svgz;*.eps;*.ps;*.ai;*.pdf|SVG (*.svg, *.svgz)|*.svg;*.svgz|PostScript / EPS (*.eps, *.ps, *.ai)|*.eps;*.ps;*.ai|PDF (*.pdf)|*.pdf|All files|*.*";
 
             // ===================================================== Animated SVG (SMIL)
-            T(GFiles, "Animated SVG (SMIL + CSS): FrameAt / SeekToTime (button 'Open file...')", "VectorImage keeps the animation of a file while importing: SMIL tracks (<animate> of the d attribute, <animateTransform>, <animateMotion>, <set>) AND CSS animations (@keyframes of transform / opacity / stroke-dashoffset with animation-* timing, transform-box / transform-origin - the style AI-generated game art uses). SeekToTime(t) applies every track at time t (paths morph per command, transforms interpolate per function - a 0 to 360 deg spin sweeps), FrameAt(t) returns an independent frame copy, Duration / FrameCount / FrameRate / GetFrame(i) iterate the loop (FrameCount = Duration * 30 fps here). Built-in sample = a small loop when no file was chosen. 'Animate' plays the loop (the clock runs while the check box is ticked; off = frame 0); the playback rate is Speed / 6 (6 = real time). Drag to move; drag outside = rotate; Scale = zoom; Smooth = anti-aliased edges; Blend = opacity; Brite < 0 = wireframe. ClipViewport is on here: decoration the file parks beyond its canvas stays out, like in a browser. The draw goes through the layer compositor (img.Cached): content whose chain only moves is rasterised once per zoom and blitted with the chain's current matrix (slow dollies re-rasterise only when the linear part drifts); morphs / opacity / dashes stay live. The note shows the track count, the seek + draw cost and the compositor stats.", c =>
+            T(GFiles, "Animated SVG (SMIL + CSS): FrameAt / SeekToTime (button 'Open file...')", "VectorImage keeps the animation of a file while importing: SMIL tracks (<animate> of the d attribute, <animateTransform>, <animateMotion>, <set>) AND CSS animations (@keyframes of transform / opacity / stroke-dashoffset with animation-* timing, transform-box / transform-origin - the style AI-generated game art uses). SeekToTime(t) applies every track at time t (paths morph per command, transforms interpolate per function - a 0 to 360 deg spin sweeps), FrameAt(t) returns an independent frame copy, Duration / FrameCount / FrameRate / GetFrame(i) iterate the loop (FrameCount = Duration * 30 fps here). Built-in sample = a small loop when no file was chosen. 'Animate' plays the loop (the clock runs while the check box is ticked; off = frame 0); the playback rate is Speed / 6 (6 = real time). Drag to move; drag outside = rotate; Scale = zoom; Smooth = anti-aliased edges; Blend = opacity; Brite < 0 = wireframe. ClipViewport is on here: decoration the file parks beyond its canvas stays out, like in a browser. The draw goes through the layer compositor (img.Cached): content whose chain only moves is rasterised once per zoom and blitted with the chain's current matrix (slow dollies re-rasterise only when the linear part drifts); morphs / opacity / dashes stay live. Tick 'Precompose' to bake the whole loop into bitmaps once. Playback then evaluates no vector tracks: one bitmap draw per tick. First use and changes to zoom / rotation / paint settings require a synchronous bake (can take a few seconds). The film budget is in MiB; if full-size frames do not fit, smaller bitmaps are baked and enlarged, without silently lowering fps. Film fps 0 uses the file's FrameRate (30 here). The note reports actual fps, bitmap size, resolution percentage, memory and bake time. The note shows the track count, the seek + draw cost and the cache stats.", c =>
             {
                 var t = L.Find(x => x.Name.StartsWith("Animated SVG", StringComparison.Ordinal))!;
                 var (img, info) = EnsureAnimVector(t.FilePath);
@@ -1215,16 +1215,21 @@ T(GControls, "SpriteLabel / GroupBox / Tabs / TextBox / Numeric / Combo / ListBo
                 float fit = osz.Width / MathF.Max(1e-3f, img.Width);
                 float pfx = c.PivotXF < 0 ? 0.5f : c.PivotXF / osz.Width, pfy = c.PivotYF < 0 ? 0.5f : c.PivotYF / osz.Height;
                 double tt = img.Duration <= 0 ? 0 : (c.Time * Math.Max(0, c.Speed) / 6.0) % img.Duration;   // Animate off = 0 = frame 0
-                var sw = System.Diagnostics.Stopwatch.StartNew();
-                img.SeekToTime(tt);
-                double seek = sw.Elapsed.TotalMilliseconds; sw.Restart();
-                var vs = img.Cached;                       // the layer compositor: cached rasters + live shapes
+                var vs = img.Cached;
                 vs.AA = o.AA; vs.Strokes = o.Strokes; vs.Fills = o.Fills; vs.Opacity = o.Opacity;
-                vs.Draw(c.Canvas, c.X, c.Y, fit * c.Scale, fit * c.ScaleY, c.Angle * 180f / MathF.PI, pfx, pfy);
+                vs.Precomposed = c.Xor;                    // checkbox = bitmap loop instead of the live layer compositor
+                vs.MaxFilmPixels = (long)c.Count * 1024 * 1024 / 4;  // the demo budget slider is MiB (ARGB = 4 bytes / pixel)
+                vs.FilmFrameRate = c.DotStep;              // 0 = img.FrameRate; an explicit rate is never silently lowered
+                var sw = System.Diagnostics.Stopwatch.StartNew();
+                vs.DrawAt(c.Canvas, tt, c.X, c.Y, fit * c.Scale, fit * c.ScaleY, c.Angle * 180f / MathF.PI, pfx, pfy);
                 double ms = sw.Elapsed.TotalMilliseconds;
                 string warn = img.Warnings.Count == 0 ? "" : " | " + string.Join("; ", img.Warnings.GetRange(0, Math.Min(3, img.Warnings.Count))) + (img.Warnings.Count > 3 ? $" (+{img.Warnings.Count - 3})" : "");
-                c.Note = $"{info} | t = {tt:0.###} / {img.Duration:0.###} s = frame {(int)(tt * img.FrameRate) + 1}/{img.FrameCount} | {img.Tracks.Count} tracks, {img.Shapes.Count} shapes | seek {seek:F2} + draw {ms:F2} ms | {vs.LayerSummary}{warn}";
-            }, needsPoly: true).Ui(Param.Scale, "Zoom (x0.01; the longer side = 1.5 x sprite size at x1.00); drag the top / bottom edge to squish", Param.Time, "Animate: play the loop (off = stand at frame 0)", Param.Speed, "Playback rate = Speed / 6 (6 = real time, 12 = double speed)", Param.Smooth, "Anti-aliased edges", Param.Blend, "Opacity", Param.Brite, "< 0: strokes only (wireframe)", Param.Mouse, "Drag = move; drag outside = rotate; edges / corners = resize (Shift = keep aspect); right click = pivot").With(Param.Smooth, true).With(Param.Speed, 6);
+                int playedFrames = vs.Precomposed && vs.FilmActive ? vs.FilmFrames : img.FrameCount;
+                int playedIndex = vs.Precomposed && vs.FilmActive && img.Duration > 0
+                    ? Math.Clamp((int)Math.Floor(tt * playedFrames / img.Duration + 1e-9), 0, playedFrames - 1) + 1
+                    : (int)(tt * img.FrameRate) + 1;
+                c.Note = $"{info} | t = {tt:0.###} / {img.Duration:0.###} s = frame {playedIndex}/{playedFrames} | {img.Tracks.Count} tracks, {img.Shapes.Count} shapes | frame {ms:F2} ms | {vs.LayerSummary}{warn}";
+            }, needsPoly: true).Ui(Param.Scale, "Zoom (x0.01; the longer side = 1.5 x sprite size at x1.00); drag the top / bottom edge to squish", Param.Time, "Animate: play the loop (off = stand at frame 0)", Param.Speed, "Playback rate = Speed / 6 (6 = real time, 12 = double speed)", Param.Smooth, "Anti-aliased edges", Param.Blend, "Opacity", Param.Brite, "< 0: strokes only (wireframe)", Param.Xor, "Precompose (first draw bakes the loop; off releases the bitmaps)", Param.Count, "Film budget (MiB; smaller bitmaps if necessary, never fewer fps)", Param.DotStep, "Film fps (0 = file FrameRate; change explicitly to trade smoothness for memory)", Param.Mouse, "Drag = move; drag outside = rotate; edges / corners = resize (Shift = keep aspect); right click = pivot").Range(Param.Count, 16, 1024).Range(Param.DotStep, 0, 60).With(Param.Count, 256).With(Param.DotStep, 0).With(Param.Xor, false).With(Param.Smooth, true).With(Param.Speed, 6);
             L[L.Count - 1].MouseRotates = true; L[L.Count - 1].Resizable = true; L[L.Count - 1].AnimSpin = 0f;
             L[L.Count - 1].ObjectSize = c => { var vt = L.Find(x => x.Name.StartsWith("Animated SVG", StringComparison.Ordinal))!; var (vi, _) = EnsureAnimVector(vt.FilePath); return VectorObjectSize(c, vi); };
             L[L.Count - 1].FileFilter = "Animated SVG|*.svg;*.svgz|SVG (*.svg, *.svgz)|*.svg;*.svgz|All files|*.*";
@@ -2391,6 +2396,8 @@ T(GControls, "SpriteLabel / GroupBox / Tabs / TextBox / Numeric / Combo / ListBo
             tvec = img; tvecKey = key; tvecInfo = info; return (img, info);
         }
         static VectorImage? tanim; static string tanimKey = "", tanimInfo = "";
+        /// <summary>Release the animated-vector rasters / film when the demo closes (or before replacing the file).</summary>
+        internal static void ReleaseAnimatedVectorCache() { tanim?.Cached.Dispose(); tanim = null; tanimKey = ""; tanimInfo = ""; }
         // built-in animated sample: only the track kinds the reader supports (d morph, animateTransform, animateMotion, alpha mask)
         const string AnimSampleSvg = "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 240 120'>"
             + "<rect width='240' height='120' fill='#1c2836'/>"
@@ -2415,6 +2422,7 @@ T(GControls, "SpriteLabel / GroupBox / Tabs / TextBox / Numeric / Combo / ListBo
             }
             catch (Exception ex) { img = VectorImage.FromSvg(AnimSampleSvg); info = $"{Path.GetFileName(path)}: {ex.GetType().Name}: {ex.Message} - showing the sample"; }
             img.ClipViewport = true;   // scenes (the AI-made ones especially) park dust / parallax beyond the canvas; the demo shows the container's rectangle only
+            tanim?.Cached.Dispose();
             tanim = img; tanimKey = key; tanimInfo = info; return (img, info);
         }
         static VoxelGrid? tvoxFile; static string tvoxFileKey = ""; static string tvoxFileInfo = ""; static double tvoxFileMs;

@@ -89,6 +89,7 @@
     <Compile Include="..\cs\Vector.FontData.cs" Link="cs\Vector.FontData.cs" />
     <Compile Include="..\cs\Vector.Image.cs" Link="cs\Vector.Image.cs" />
     <Compile Include="..\cs\Vector.Cache.cs" Link="cs\Vector.Cache.cs" />
+    <Compile Include="..\cs\Vector.Precompose.cs" Link="cs\Vector.Precompose.cs" />
     <Compile Include="..\cs\Vector.Edit.cs" Link="cs\Vector.Edit.cs" />
     <Compile Include="..\cs\Sprite.Gradient.cs" Link="cs\Sprite.Gradient.cs" />
   </ItemGroup>

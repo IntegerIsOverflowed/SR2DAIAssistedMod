@@ -1584,6 +1584,7 @@ namespace Sr2d64CSport
             running = false;
             _ = timeEndPeriod(1);
             assets?.Dispose(); canvas?.Dispose(); temp?.Dispose();
+            Tests.ReleaseAnimatedVectorCache();
             foreach (var t in bandTemps.Values) t.Dispose();
             base.OnFormClosed(e);
         }

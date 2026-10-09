@@ -28,7 +28,7 @@ namespace Sr2d64CSport
     // ------------------------------------------------------------------------------------------------------------------------
 
     /// <summary>A <see cref="VectorImage"/> with a cached raster: costs a bitmap blit per frame until the scale / rotation or the content changes.</summary>
-    internal sealed class VectorSprite : IDisposable
+    internal sealed partial class VectorSprite : IDisposable
     {
         public VectorImage Image { get; private set; }
         Sprite? _raster; Matrix3x2 _linear; Vector2 _origin; int _version = -1; bool _valid;
@@ -63,7 +63,9 @@ namespace Sr2d64CSport
         {
             get
             {
-                if (_segs == null || Image.Tracks.Count == 0) return "compositor: n/a (static)";
+                if (Image.Tracks.Count == 0) return "compositor: n/a (static)";
+                if (Precomposed) return FilmStatus;
+                if (_segs == null) return "compositor: n/a";
                 int layers = 0, dyn = 0, live = 0, rasts = 0, hits = 0;
                 foreach (var sg in _segs)
                 {
@@ -82,7 +84,7 @@ namespace Sr2d64CSport
         /// <summary>Replaces the image (the cache is dropped).</summary>
         public void SetImage(VectorImage image) { Image = image; Invalidate(); }
         /// <summary>Forces a re-raster on the next draw.</summary>
-        public void Invalidate() { _valid = false; DropLayers(); }
+        public void Invalidate() { _valid = false; DropLayers(); DropFilm(); }
 
         // ---- render options (each setter invalidates the cache)
         public bool AA { get => _opt.AA; set { if (_opt.AA != value) { _opt.AA = value; Invalidate(); } } }
@@ -103,7 +105,12 @@ namespace Sr2d64CSport
         /// <summary>Draws with an arbitrary image -> destination matrix. Translation is free; a new linear part re-rasterises.</summary>
         public void Draw(Sprite dst, Matrix3x2 m, SR2D.Op op = SR2D.Op.AlphaOver, int blendFactor = 128)
         {
-            if (Image.Tracks.Count > 0) { DrawAnimated(dst, m, op, blendFactor); return; }
+            if (Image.Tracks.Count > 0)
+            {
+                if (Precomposed) DrawFilm(dst, m, Image._seekT, op, blendFactor);
+                else DrawAnimated(dst, m, op, blendFactor);
+                return;
+            }
             var lin = new Matrix3x2(m.M11, m.M12, m.M21, m.M22, 0, 0);
             var box = VectorRender.TransformRect(Image.Bounds(), lin);
             if (box.IsEmpty) return;
@@ -242,10 +249,11 @@ namespace Sr2d64CSport
         /// <summary>Destination rectangle the cached raster occupies for a matrix (whole pixels), or the transformed bounds when nothing is cached.</summary>
         public Rectangle ScreenRect(Matrix3x2 m)
         {
+            if (Precomposed && FilmActive) return FilmScreenRect(m);
             if (_valid && _raster != null) return new Rectangle((int)MathF.Floor(m.M31 + 0.5f) + _rasterLeft, (int)MathF.Floor(m.M32 + 0.5f) + _rasterTop, _raster.Width, _raster.Height);
             var b = VectorRender.TransformRect(Image.Bounds(), m); return Rectangle.Round(b);
         }
-        public void Dispose() { _raster?.Dispose(); _raster = null; _valid = false; DropLayers(); }
+        public void Dispose() { _raster?.Dispose(); _raster = null; _valid = false; DropLayers(); DropFilm(); }
     }
 
     internal sealed partial class VectorImage

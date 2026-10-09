@@ -759,7 +759,7 @@ namespace Sr2d64CSport
         }
 
         /// <summary>A deep copy that shares everything immutable (paints, parsed keyframes) and clones everything the seek writes (shapes, mask geometry).</summary>
-        VectorImage CloneAnimated()
+        internal VectorImage CloneAnimated()
         {
             var f = new VectorImage { ViewBox = ViewBox, Width = Width, Height = Height, Format = Format, Title = Title, Duration = Duration, FrameRate = FrameRate, ClipViewport = ClipViewport };
             f.Warnings.AddRange(Warnings);
