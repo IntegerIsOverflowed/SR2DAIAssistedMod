@@ -16,6 +16,55 @@ Conventions
   DOCS     README / comments only
 
 
+2026-10-09  portable designer DLL assets + independent precompose resolution / smoother demo
+------------------------------------------------------------------------------------------------------------
+FIXED  cs/SR2D.Native.targets (new): DLL resolution uses explicit Sr2dDll, normal None/Content
+       project assets (including linked/subfolder files), project-root DLL, existing build-output
+       DLL, then native/bin/x64 only as an OPTIONAL fallback. Emits source/output/project assembly
+       hints for the shadow-copy designer; selected assets have one root output DLL; handles publish.
+       Missing warning describes usable project/output choices rather than insisting on native/.
+       EmptySR2DFormTemplate.csproj: imports it from copied cs/, detects sibling OR nested cs/ and
+       avoids duplicate Compile items. demo csproj uses the same native dependency wiring.
+FIXED  cs/SR2D.cs: resolver reads exact source/output/project hints; Windows loads dependency DLLs
+       beside the chosen engine as well as app/System32 (never untrusted CWD/PATH). IsAvailable is
+       false for missing/dependency/bitness/export/ABI failures; NativeLoadError keeps the reason.
+       cs/SpriteForm.cs: TitleBarStrip has the no-native paint fallback SpriteBox already had,
+       so a missing DLL does not disable the whole inherited form in the Visual Studio designer.
+ADDED  cs/.editorconfig: the EXISTING audited analyzer policy travels with copied engine sources;
+       projchk enforces equality with the root policy. Standalone template copies stay warning-free.
+ADDED  cs/Vector.Precompose.cs: FilmResolution (Size) requests an INTERNAL view-box pixel grid,
+       independent of the displayed container. Empty = intrinsic units; one zero dimension keeps
+       aspect; two positive dimensions request that grid. FilmSize / FilmScale report the actual
+       budget-limited result. FilmSampling defaults to BilinearArea for real supersampling while
+       shrinking (area average, not point samples); filter changes are playback-only.
+FIXED  Film frames live in IMAGE coordinates. Playback maps bitmap -> image -> CURRENT draw matrix;
+       resize / zoom / aspect / rotate / skew / mirror / translation NEVER rebake. Only internal
+       resolution / fps / content / paint / window / budget changes invalidate. Existing matrix
+       PrepareFilm signature retained but no longer chooses the bake; parameterless warm-up added.
+DEMO   Animated SVG: internal film width (default 512), bake fps (default 60, up to 240, 0=file rate),
+       memory budget (default 256 MiB). Smooth enables fractional bitmap placement. Resizing no
+       longer stalls on an unnecessary recompose. Temporal choppiness was 30 fps sample holding,
+       NOT spatial resolution: live vectors evaluate every render. No frame crossfade/ghosting added.
+TESTS  VECANIM: 145 ok / 0 FAIL (synthetic + all 3 friend scenes + cat), including independent
+       resolution, no resize/rotate/mirror/skew re-bakes, supersampling averaging, and 30/60/120 fps
+       films producing 15/30/60 motion samples over 0.5 s at a 120 Hz drawing cadence.
+       tests/cs/nativeload: 54 checks for assets, links, output-only DLLs, managed shadow-copy loads,
+       missing/bad ABI diagnostics, CWD rejection, real relocated template with sibling/nested cs/.
+       build-and-test.sh: 23/23 gates; Windows twin builds/runs the native loader + animation probes
+       and no longer references the removed template/apps. Actual Visual Studio painting still
+       requires the user's Windows smoke test (Linux validates discovery and assembly hints).
+DOCS   README / template README describe portable DLL setup, independent spatial/temporal settings,
+       memory trade-offs and synchronous preparation. Old stale template/ reference removed.
+PERF   60 fps, requested 512 px internal width, 256 MiB budget (actual grid reduced by budget):
+       flask stores 234x157 x1800, playback 0.33 / 0.77 ms at 600 / 1000 px output, one bake 9.0 s;
+       cauldron 261x168 x1500, 0.34 / 0.81 ms, bake 4.2 s; lab 267x172 x1440, 0.34 / 0.82 ms,
+       bake 6.3 s. ONE bake per scene across both output sizes and a resized/rotated placement.
+compat: original signatures remain; static cache / live compositor / vector FrameAt unchanged.
+        Precompose defaults off. Its internal grid now derives from FilmResolution/intrinsic SVG
+        units, not the first destination transform; output changes resample cached bitmaps. Budget
+        may reduce requested spatial resolution but never silently temporal fps. Runtime still
+        needs the correct native DLL/dependencies; placeholders keep the designer editable.
+
 2026-10-09  animated SVG: optional precomposed bitmap loop (bounded memory, full-rate playback)
 ------------------------------------------------------------------------------------------------------------
 ADDED  cs/Vector.Precompose.cs: third VectorSprite cache mode, opt-in Precomposed (default false).

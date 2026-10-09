@@ -25,17 +25,29 @@ agree on the accessibility, so Form1.Designer.cs says `public partial class Form
 
 Getting started
 ---------------
-  1. The native DLL: ..\native\bin\x64\SR2D64.dll (build it once with ..\build_release.bat),
-     or drop a copy next to this .csproj - that one wins.
-  2. Open EmptySR2DFormTemplate.csproj (Visual Studio 2022 17.12+ / Rider / `dotnet build`).
-  3. F5: an empty 800 x 450 window with the SR2D title bar.
+  1. Copy this folder and the WHOLE cs/ folder together (including SR2D.Native.targets and
+     .editorconfig). cs/ can be a sibling of the project folder OR inside it; both are detected.
+  2. Add the x64 SR2D64.dll with Solution Explorer -> Add Existing Item (None or Content, including
+     Add As Link), or put it next to this .csproj. A DLL already in the actual Debug/Release output
+     directory also works. native/bin/x64 is an OPTIONAL repository fallback, not a required second copy.
+  3. Build once. F5: an empty 800 x 450 window with the SR2D title bar.
 
 The form designer
 -----------------
-Build once, then right-click Form1.cs -> View Designer (F7 cycles the designer and the code).
-SR2D64.dll must be loadable in the designer host process - the csproj bakes its absolute path
-into the assembly for exactly that reason. Drop Sprite* controls from the toolbox onto Form1,
-or add them in code.
+Build once, then close/reopen the designer and View Designer on Form1.cs. The native DLL is a
+project ASSET, not a managed assembly reference: do not use Add Reference for it. Files under
+Assets/ or linked from elsewhere are copied to the output ROOT as SR2D64.dll. The cs/ import
+embeds actual source/output/project paths so DesignToolsServer can locate that file even when
+it loads the managed assembly from a cache/shadow-copy folder. It does not require native/ to
+exist in a relocated solution, and an output-only DLL does not require a project-root duplicate.
+
+Keep DLL dependencies and bitness correct (x64); Windows full-path loading also probes beside
+the DLL for its dependencies. SR2D.IsAvailable / SR2D.NativeLoadError report availability/reason.
+If native loading fails, SpriteBox controls AND the form title bar paint placeholders, leaving
+the designer usable rather than disabling TitleBarStrip. Rebuild/reopen after fixing the file.
+Actual designer painting is a Windows smoke test; the loader/metadata/relocation probes are in
+../tests/cs/nativeload/check.py. The copyable cs/.editorconfig keeps the engine's audited analyzer
+settings with its sources, without changing your own application code's analyzer policy.
 
 The toolbox: every SR2D control type (and SpriteForm) is PUBLIC now, which is the condition
 Visual Studio uses to put a WinForms control in the toolbox - an internal one compiles and runs
@@ -175,6 +187,5 @@ trap: two captures of the same window through different APIs are not comparable.
 
 Where to look next
 ------------------
-  ..\template           the SAME engine with a starter app: a SpriteBox canvas + SR2D controls on it
   ..\README.md          the full API
   ..\CHANGELOG.txt      what changed, newest first

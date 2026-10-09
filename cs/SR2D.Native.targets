@@ -1,0 +1,59 @@
+<Project>
+  <!-- Portable native dependency wiring, imported by the template/demo. This file rides with cs/ when copied.
+       Resolve after project items exist: a DLL added in Solution Explorer (None OR Content, including a link)
+       is a source just like Sr2dDll. An existing output DLL is also valid; native/bin/x64 is only a fallback. -->
+  <Target Name="Sr2dResolveNativeDll" BeforeTargets="GetAssemblyAttributes;AssignTargetPaths">
+    <ItemGroup>
+      <_Sr2dMarkedDll Include="@(None)"
+        Condition="'%(None.Filename)%(None.Extension)' == 'SR2D64.dll' and Exists('%(None.FullPath)') and '%(None.CopyToOutputDirectory)' != '' and '%(None.CopyToOutputDirectory)' != 'Never'" />
+      <_Sr2dMarkedDll Include="@(Content)"
+        Condition="'%(Content.Filename)%(Content.Extension)' == 'SR2D64.dll' and Exists('%(Content.FullPath)') and '%(Content.CopyToOutputDirectory)' != '' and '%(Content.CopyToOutputDirectory)' != 'Never'" />
+      <_Sr2dProjectDll Include="@(None)"
+        Condition="'%(None.Filename)%(None.Extension)' == 'SR2D64.dll' and Exists('%(None.FullPath)')" />
+      <_Sr2dProjectDll Include="@(Content)"
+        Condition="'%(Content.Filename)%(Content.Extension)' == 'SR2D64.dll' and Exists('%(Content.FullPath)')" />
+      <_Sr2dDllChoices Include="@(_Sr2dMarkedDll);@(_Sr2dProjectDll)" />
+    </ItemGroup>
+    <PropertyGroup>
+      <Sr2dOutputDll>$([System.IO.Path]::GetFullPath('$(TargetDir)SR2D64.dll'))</Sr2dOutputDll>
+      <Sr2dResolvedDll Condition="'$(Sr2dDll)' != '' and Exists('$(Sr2dDll)')">$([System.IO.Path]::GetFullPath('$(Sr2dDll)'))</Sr2dResolvedDll>
+      <_Sr2dChoicePaths>@(_Sr2dDllChoices->'%(FullPath)')</_Sr2dChoicePaths>
+      <Sr2dResolvedDll Condition="'$(Sr2dResolvedDll)' == '' and '$(_Sr2dChoicePaths)' != ''">$(_Sr2dChoicePaths.Split(';')[0])</Sr2dResolvedDll>
+      <Sr2dResolvedDll Condition="'$(Sr2dResolvedDll)' == '' and Exists('$(MSBuildProjectDirectory)/SR2D64.dll')">$(MSBuildProjectDirectory)/SR2D64.dll</Sr2dResolvedDll>
+      <Sr2dResolvedDll Condition="'$(Sr2dResolvedDll)' == '' and Exists('$(Sr2dOutputDll)')">$(Sr2dOutputDll)</Sr2dResolvedDll>
+      <Sr2dResolvedDll Condition="'$(Sr2dResolvedDll)' == '' and Exists('$(MSBuildProjectDirectory)/../native/bin/x64/SR2D64.dll')">$([System.IO.Path]::GetFullPath('$(MSBuildProjectDirectory)/../native/bin/x64/SR2D64.dll'))</Sr2dResolvedDll>
+    </PropertyGroup>
+    <ItemGroup>
+      <!-- A selected project asset has one runtime destination even when its source lives in Assets/ or is linked. -->
+      <None Update="@(None)" Condition="'%(FullPath)' == '$(Sr2dResolvedDll)'">
+        <TargetPath>SR2D64.dll</TargetPath>
+        <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+        <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
+      </None>
+      <Content Update="@(Content)" Condition="'%(FullPath)' == '$(Sr2dResolvedDll)'">
+        <TargetPath>SR2D64.dll</TargetPath>
+        <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+        <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
+      </Content>
+      <!-- Source and output hints both survive the designer's managed-assembly shadow copy. Runtime probes its own
+           folder first, so shipping the EXE does not bind it to the developer's absolute build/source locations. -->
+      <AssemblyMetadata Remove="SR2D.DllPath;SR2D.OutputDir;SR2D.ProjectDir" />
+      <AssemblyMetadata Include="SR2D.DllPath" Value="$(Sr2dResolvedDll)" Condition="'$(Sr2dResolvedDll)' != ''" />
+      <AssemblyMetadata Include="SR2D.OutputDir" Value="$(TargetDir)" />
+      <AssemblyMetadata Include="SR2D.ProjectDir" Value="$(MSBuildProjectDirectory)" />
+    </ItemGroup>
+  </Target>
+
+  <Target Name="Sr2dCopyNativeDll" AfterTargets="CopyFilesToOutputDirectory" DependsOnTargets="Sr2dResolveNativeDll"
+          Condition="'$(DesignTimeBuild)' != 'true' and '$(Sr2dResolvedDll)' != '' and '$(Sr2dResolvedDll)' != '$(Sr2dOutputDll)'">
+    <Copy SourceFiles="$(Sr2dResolvedDll)" DestinationFiles="$(Sr2dOutputDll)" SkipUnchangedFiles="true" />
+  </Target>
+  <Target Name="Sr2dPublishNativeDll" AfterTargets="Publish" DependsOnTargets="Sr2dResolveNativeDll"
+          Condition="'$(DesignTimeBuild)' != 'true' and '$(Sr2dResolvedDll)' != '' and '$(PublishDir)' != ''">
+    <Copy SourceFiles="$(Sr2dResolvedDll)" DestinationFiles="$(PublishDir)SR2D64.dll" SkipUnchangedFiles="true" />
+  </Target>
+  <Target Name="Sr2dDllWarning" BeforeTargets="Build" DependsOnTargets="Sr2dResolveNativeDll"
+          Condition="'$(DesignTimeBuild)' != 'true' and '$(Sr2dResolvedDll)' == ''">
+    <Warning Code="SR2D0001" Text="SR2D64.dll not found. Add the x64 DLL as a project item (Add Existing Item; None or Content), put it beside this .csproj, leave it in $(TargetDir), or set Sr2dDll to an explicit file. native/bin/x64 is optional, not a second required copy. Build once and reopen the form designer after adding it." />
+  </Target>
+</Project>

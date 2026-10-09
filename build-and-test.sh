@@ -44,6 +44,10 @@ for proj in tests/cs/ctlrun tests/cs/benchrun tests/cs/vecrun tests/cs/selchk \
   [ -d "$proj" ] || continue
   step "build $proj" dotnet build "$proj" -c Release --no-incremental
 done
+# Native-load wrapper compiles without WinForms; provide the freshly built engine as the explicit native asset.
+step "build tests/cs/nativeload" buildwarn tests/cs/nativeload -c Release --no-incremental \
+     -p:Sr2dDll="$(pwd)/tests/build/libSR2D64.so"
+
 # file-list / template drift guard
 step "projchk" python3 tests/cs/projchk.py
 
@@ -66,10 +70,11 @@ runlog "run selchk" tests/cs/selchk/bin/Release/net10.0/selchk
 cp tests/build/libSR2D64.so /home/user/.cache/vecrun/bin/Release/net10.0/SR2D64.so
 runlog "run vecrun anim (SMIL: morph / masks / motion / frames)" env VECANIM=1 /home/user/.cache/vecrun/bin/Release/net10.0/vecrun /home/user/.cache/ctlrun-out
 
+runlog "native project assets / designer shadow copy / portable template" python3 tests/cs/nativeload/check.py
+
 echo "=================================="
 echo "gates passed: $PASS, failed: $FAIL"
 [ $FAIL -eq 0 ] && echo "ALL GREEN" || echo "RED - see the !!!! lines above"
-exit $FAIL
-
 # the runners drop their preview artifacts next to the repo root - not part of the tree
 rm -f sel_preview.raw layers_preview.raw vox_preview.raw vox_night.raw vox_edit.raw objs.vox
+exit $FAIL
