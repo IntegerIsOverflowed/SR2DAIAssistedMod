@@ -15,6 +15,7 @@
     <Compile Include="../../../cs/Vector.cs" />
     <Compile Include="../../../cs/Vector.Render.cs" />
     <Compile Include="../../../cs/Vector.Cache.cs" />
+    <Compile Include="../../../cs/Vector.Precompose.cs" />
     <Compile Include="../../../cs/Vector.Edit.cs" />
     <Compile Include="../../../cs/Vector.Svg.cs;../../../cs/Vector.Anim.cs;../../../cs/Vector.SvgText.cs" />
     <Compile Include="../../../cs/Vector.Ps.cs" />

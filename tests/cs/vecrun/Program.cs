@@ -1,4 +1,4 @@
-using System.Linq; using System.Collections.Generic;
+using System.Linq; using System.Collections.Generic; using System.Numerics; using System.Threading;
 // vecrun: vecrun.dll <out dir> <files...>  -> <out>/<name>.rgba (+ prints size, shape count, warnings, timings)
 using System; using System.Diagnostics; using System.Drawing; using System.IO; using Sr2d64CSport;
 static class Program {
@@ -45,7 +45,7 @@ static class Program {
     Check(((VectorColor)d2.Shapes[0].Fill!).Argb == unchecked((int)0xFF000000) && VectorColor.Black.Argb == unchecked((int)0xFF000000), "shared default Black untouched by an edit of another image");
     // ColorAt + SVG round trip
     var mid = new PointF(img.ViewBox.X + img.Width / 2, img.ViewBox.Y + img.Height / 2);
-    Console.WriteLine($"ColorAt(centre) = {(img.ColorAt(mid) is int cc ? cc.ToString("X8") : "null")}");
+    Console.WriteLine($"ColorAt(centre) = {(img.ColorAt(mid) is int cc ? cc.ToString("X8", System.Globalization.CultureInfo.InvariantCulture) : "null")}");
     string svg = Path.Combine(outDir, "recolored.svg"); img.SaveSvg(svg);
     var back = VectorImage.Load(svg);
     Check(back.Palette(true).Exists(e => (e.Argb & 0xFFFFFF) == (b & 0xFFFFFF)), "SaveSvg -> Load keeps the new colour");
@@ -110,7 +110,7 @@ static class Program {
     foreach (var f in files) {
       var img = VectorImage.Load(f);
       var objs = img.Objects();
-      int named = 0; foreach (var o in objs) if (!o.Name.StartsWith("[")) named++;
+      int named = 0; foreach (var o in objs) if (!o.Name.StartsWith("[", StringComparison.Ordinal)) named++;
       var kinds = new Dictionary<string, int>(); foreach (var o in objs) kinds[o.Kind] = (kinds.TryGetValue(o.Kind, out int k) ? k : 0) + 1;
       var groups = new HashSet<string>(); foreach (var s in img.Shapes) if (s.Group != null) groups.Add(s.Group);
       Console.WriteLine($"{Path.GetFileName(f)}: {objs.Count} objects, {named} named by the file, kinds {string.Join(" ", kinds.Select(kv => kv.Key + "=" + kv.Value))}; groups: {string.Join(", ", groups.Take(6))}{(groups.Count > 6 ? " ..." : "")}");
@@ -178,7 +178,7 @@ static class Program {
       int width = int.TryParse(Environment.GetEnvironmentVariable("VECW"), out int vw) ? vw : 800; int fails2 = 0;
       for (int i = 1; i < args.Length; i++) {
         string f = args[i]; int pages = 1; try { pages = VectorImage.PdfPageCount(f); } catch { }
-        int from = pg == "all" ? 0 : int.Parse(pg), to = pg == "all" ? pages - 1 : int.Parse(pg);
+        int from = pg == "all" ? 0 : int.Parse(pg, System.Globalization.CultureInfo.InvariantCulture), to = pg == "all" ? pages - 1 : int.Parse(pg, System.Globalization.CultureInfo.InvariantCulture);
         for (int p = from; p <= to && p < pages; p++) {
           try {
             var sw = Stopwatch.StartNew(); var img = VectorImage.Load(File.ReadAllBytes(f), Path.GetExtension(f), p); long tLoad = sw.ElapsedMilliseconds;
@@ -207,7 +207,7 @@ static class Program {
         var b = img.Bounds();
         Console.WriteLine($"{Path.GetFileName(f)}: {img.Format} {img.Width:0.#}x{img.Height:0.#} viewBox={img.ViewBox} shapes={img.Shapes.Count} bounds={b} pages={img.PageCount} load={tLoad} ms");
         foreach (var w in img.Warnings) Console.WriteLine("   warn: " + w);
-        if (Environment.GetEnvironmentVariable("VECDUMP") != null) foreach (var sh in img.Shapes) Console.WriteLine($"   shape fill={(sh.Fill is VectorColor fc ? fc.Argb.ToString("X8") : sh.Fill?.GetType().Name ?? "-")} stroke={(sh.Stroke is VectorColor sc ? sc.Argb.ToString("X8") : sh.Stroke?.GetType().Name ?? "-")} w={sh.StrokeWidth} clip={(sh.Clip != null)} bounds={sh.Path.ControlBounds()}");
+        if (Environment.GetEnvironmentVariable("VECDUMP") != null) foreach (var sh in img.Shapes) Console.WriteLine($"   shape fill={(sh.Fill is VectorColor fc ? fc.Argb.ToString("X8", System.Globalization.CultureInfo.InvariantCulture) : sh.Fill?.GetType().Name ?? "-")} stroke={(sh.Stroke is VectorColor sc ? sc.Argb.ToString("X8", System.Globalization.CultureInfo.InvariantCulture) : sh.Stroke?.GetType().Name ?? "-")} w={sh.StrokeWidth} clip={(sh.Clip != null)} bounds={sh.Path.ControlBounds()}");
         // 1) fit into 600x450 canvas with chequer background (AlphaBlend path), 2) rotated + squished, 3) Rasterize to premultiplied
         var canvas = new Sprite(600, 450);
         for (int y = 0; y < 450; y++) for (int x = 0; x < 600; x++) canvas.Pixels[y*600+x] = ((x>>4)+(y>>4)&1)==0 ? unchecked((int)0xFF3A3F46) : unchecked((int)0xFF2B2F35);
@@ -369,6 +369,27 @@ static class Program {
     Check(Same(g3, Render(img.GetFrame(93))), "GetFrame wraps (93 -> 3)");
     Check(img.Tracks.Any(tr => tr.Anim.Additive) && img.Tracks.Any(tr => tr.Anim.Freeze) && img.Tracks.Any(tr => tr.Anim.CalcMode == 2) && img.Tracks.Any(tr => tr.Anim.Kind == SvgTrackKind.Motion), "additive / freeze / discrete / motion flags parsed");
 
+    // ---- the layer compositor (img.Cached): cached rasters for moving chains, live shapes for paint tracks ----
+    Sprite RenderCached(double t) { var cv = new Sprite(240, 150); cv.ClearBuffer(unchecked((int)0xFF111111)); img.SeekToTime(t); img.Cached.DrawFit(cv, new System.Drawing.RectangleF(0, 0, 240, 150), true); return cv; }
+    var cc1 = RenderCached(0.4); var cc2 = RenderCached(0.4);
+    Check(Same(cc1, cc2), "compositor: same t renders identically (cache is stable)");
+    RenderCached(1.0); var cc3 = RenderCached(0.4);
+    Check(Same(cc1, cc3), "compositor: returning to a time re-renders identically (seek is reversible)");
+    // close to the direct renderer: only whole-pixel raster alignment noise at anti-aliased edges
+    var cd = RenderAt(img, 0.4); int cdDiff = 0;
+    for (int y = 0; y < cd.Height; y++) for (int x = 0; x < cd.Width; x++)
+    {
+        int p1 = cd.GetPixel(x, y), p2 = cc1.GetPixel(x, y);
+        if (Math.Abs((p1 & 255) - (p2 & 255)) + Math.Abs((p1 >> 8 & 255) - (p2 >> 8 & 255)) + Math.Abs((p1 >> 16 & 255) - (p2 >> 16 & 255)) > 48) cdDiff++;
+    }
+    Check(cdDiff < cd.Width * cd.Height / 50, "compositor: cached frames match the direct renderer (edge noise < 2%)");
+    bool hasMover = img.Tracks.Any(tr => VectorImage.TrackIsMover(tr));
+    Check(!hasMover || img.Cached.LayerSummary.Contains("layers"), "compositor: moving tracks become cached layers");
+    Sprite ShiftedCached(bool clip) { img.ClipViewport = clip; var cv = new Sprite(240, 150); cv.ClearBuffer(unchecked((int)0xFF111111)); img.SeekToTime(0); img.Cached.Draw(cv, 40, 0); return cv; }
+    Check(Count(ShiftedCached(true), OffRed, 0, 40, 0, 150) == 0, "compositor: ClipViewport hides off-canvas content");
+    img.ClipViewport = false;
+    FilmTest(Check, syn);
+
     foreach (var f in files)
     {
       if (!File.Exists(f)) { Console.WriteLine($"skip (missing): {f}"); continue; }
@@ -383,6 +404,30 @@ static class Program {
         Check(!Same(a0, amid) && !Same(amid, aend), $"{Path.GetFileName(f)}: frames 0 / mid / end all differ");
         Check(Same(RenderAt(aimg, aimg.Duration / 2), amid), $"{Path.GetFileName(f)}: mid frame is repeatable");
         Check(Same(RenderBase(aimg), b0), $"{Path.GetFileName(f)}: base render untouched by the seeks");
+        // The real scenes exercise paint tracks, use content and the camera dolly together. Full resolution
+        // fits this small probe; compare on the EXACT baked sample times and release every film before the next file.
+        aimg.ClipViewport = true;
+        using (var film = new VectorSprite(aimg) { Precomposed = true })
+        {
+            var matrix = aimg.FitMatrix(new RectangleF(0, 0, CW, CH));
+            // Default bitmap caches snap placement to whole pixels; compare the direct reference on that SAME grid.
+            matrix.M31 = MathF.Floor(matrix.M31 + 0.5f); matrix.M32 = MathF.Floor(matrix.M32 + 0.5f);
+            Check(film.PrepareFilm(matrix) && film.FilmFrames == aimg.FrameCount && film.FilmScale == 1,
+                  $"{Path.GetFileName(f)}: full-rate / full-resolution film prepared");
+            using var film0 = FilmRender(film, 0, matrix, CW, CH);
+            using var filmMid = FilmRender(film, aimg.Duration * (film.FilmFrames / 2) / film.FilmFrames, matrix, CW, CH);
+            using var directMid = new Sprite(CW, CH, SR2D.Op.AlphaOver); directMid.ClearBuffer(back);
+            aimg.FrameAt(aimg.Duration * (film.FilmFrames / 2) / film.FilmFrames).Draw(directMid, matrix);
+            Check(FilmDiff(directMid, filmMid) == 0, $"{Path.GetFileName(f)}: baked midpoint matches direct renderer");
+            Check(!film0.Pixels.SequenceEqual(filmMid.Pixels), $"{Path.GetFileName(f)}: baked frames animate");
+            int bakes = film.FilmBakes;
+            using var again = FilmRender(film, 0, matrix, CW, CH);
+            Check(film0.Pixels.SequenceEqual(again.Pixels) && film.FilmBakes == bakes,
+                  $"{Path.GetFileName(f)}: film playback is stable without rebaking");
+            film.Precomposed = false;
+            Check(!film.FilmActive && film.FilmPixels == 0, $"{Path.GetFileName(f)}: disabling precompose frees bitmaps");
+        }
+        aimg.ClipViewport = false;
         string name = Path.GetFileNameWithoutExtension(f);
         var extra = Environment.GetEnvironmentVariable("VECANIM_T");   // optional "<seconds>:<tag>,<seconds>:<tag>,..." frames on top of t0/tmid/tend
         var times = new List<(double, string)> { (0.0, "t0"), (aimg.Duration / 2, "tmid"), (aimg.Duration * 0.99, "tend") };
@@ -399,4 +444,143 @@ static class Program {
     }
     return bad;
   }
+  static Sprite FilmRender(VectorSprite film, double time, Matrix3x2 matrix, int width = 240, int height = 150) {
+    var dst = new Sprite(width, height, SR2D.Op.AlphaOver); dst.ClearBuffer(unchecked((int)0xFF111111));
+    film.DrawAt(dst, time, matrix); return dst;
+  }
+  static int FilmDiff(Sprite a, Sprite b) {
+    int n = 0;
+    for (int i = 0; i < a.Pixels.Length; i++) {
+      int x = a.Pixels[i], y = b.Pixels[i];
+      if (Math.Abs((x & 255) - (y & 255)) + Math.Abs((x >> 8 & 255) - (y >> 8 & 255)) + Math.Abs((x >> 16 & 255) - (y >> 16 & 255)) > 48) n++;
+    }
+    return n;
+  }
+  static void FilmTest(Action<bool, string> check, string file) {
+    void Check(bool ok, string s) => check(ok, "film: " + s);
+    var img = VectorImage.Load(file); img.ClipViewport = true; img.SeekToTime(0.4);
+    using var vs = new VectorSprite(img);
+    Sprite Live() { var c = new Sprite(240, 150, SR2D.Op.AlphaOver); c.ClearBuffer(unchecked((int)0xFF111111)); img.Draw(c, Matrix3x2.Identity); return c; }
+    using var before = Live();
+    Check(!vs.Precomposed && !vs.FilmActive, "opt-in is off by default");
+    vs.Precomposed = true;
+    Check(vs.PrepareFilm(Matrix3x2.Identity), "loop prepared");
+    Check(vs.FilmFrames == 90 && vs.FilmFps == 30 && vs.FilmScale == 1, "all 90 full-resolution frames at 30 fps");
+    Check(vs.FilmPixels <= vs.MaxFilmPixels, "total raw bitmap storage respects the budget");
+    using var after = Live();
+    Check(before.Pixels.SequenceEqual(after.Pixels), "baking on a clone leaves the caller's live seek untouched");
+    foreach (double time in new[] { 0.0, 0.4, 0.5, 1.0, 1.5, 2.5 }) {
+      using var c = FilmRender(vs, time, Matrix3x2.Identity);
+      using var d = new Sprite(240, 150, SR2D.Op.AlphaOver); d.ClearBuffer(unchecked((int)0xFF111111));
+      img.FrameAt(time).Draw(d, Matrix3x2.Identity);
+      Check(c.Pixels.SequenceEqual(d.Pixels), $"sample {time:0.##} matches direct pixels (clips / masks / morph / opacity)");
+    }
+    int bakes = vs.FilmBakes;
+    using var f04 = FilmRender(vs, 0.4, Matrix3x2.Identity);
+    using var fw = FilmRender(vs, 3.4, Matrix3x2.Identity);
+    using var fn = FilmRender(vs, -2.6, Matrix3x2.Identity);
+    Check(f04.Pixels.SequenceEqual(fw.Pixels) && f04.Pixels.SequenceEqual(fn.Pixels), "positive and negative loop wrapping");
+    using var f0 = FilmRender(vs, 0, Matrix3x2.Identity);
+    using var fNaN = FilmRender(vs, double.NaN, Matrix3x2.Identity);
+    Check(f0.Pixels.SequenceEqual(fNaN.Pixels), "non-finite time selects frame zero safely");
+    Check(vs.FilmBakes == bakes, "playback and time changes never rebake");
+    using var shifted = FilmRender(vs, 0.4, Matrix3x2.CreateTranslation(40, 0));
+    Check(vs.FilmBakes == bakes, "translation does not rebake");
+    Check(vs.FilmBlits > 0 && vs.CacheHits > 0, "bitmap playback counters increase");
+    using (var a = FilmRender(vs, 0.4, Matrix3x2.CreateTranslation(0.1f, 0)))
+    using (var b = FilmRender(vs, 0.4, Matrix3x2.CreateTranslation(0.2f, 0)))
+      Check(a.Pixels.SequenceEqual(b.Pixels), "default placement is whole-pixel aligned like the static cache");
+    vs.SubPixel = true;
+    using (var a = FilmRender(vs, 0.4, Matrix3x2.CreateTranslation(0.1f, 0)))
+    using (var b = FilmRender(vs, 0.4, Matrix3x2.CreateTranslation(0.2f, 0)))
+      Check(!a.Pixels.SequenceEqual(b.Pixels) && vs.FilmBakes == bakes, "SubPixel moves bitmaps fractionally without re-baking the loop");
+    vs.SubPixel = false;
+    using (var dst = new Sprite(240, 150, SR2D.Op.AlphaOver)) {
+      dst.ClearBuffer(unchecked((int)0xFF111111)); var saved = new Rectangle(20, 20, 80, 60); dst.SetLockRect(saved);
+      vs.DrawAt(dst, 0.4, Matrix3x2.Identity);
+      Check(dst.LockRect == saved && dst.GetPixel(0, 0) == unchecked((int)0xFF111111), "destination lock is honoured and preserved");
+    }
+    var view = img.ViewBox; img.ViewBox = new RectangleF(0, 0, view.Width - 1, view.Height);
+    Check(vs.PrepareFilm(Matrix3x2.Identity) && vs.FilmBakes == ++bakes, "ViewBox field changes invalidate without Touch");
+    img.ViewBox = view; vs.PrepareFilm(Matrix3x2.Identity); bakes = vs.FilmBakes;
+    img.Touch(); Check(vs.PrepareFilm(Matrix3x2.Identity) && vs.FilmBakes == ++bakes, "content Version invalidates the film");
+    img.ClipViewport = false;
+    Check(vs.PrepareFilm(Matrix3x2.Identity) && vs.FilmBakes == ++bakes, "ClipViewport field changes invalidate without Touch");
+    using (var unclipped = FilmRender(vs, 1.5, Matrix3x2.Identity))
+    using (var direct = new Sprite(240, 150, SR2D.Op.AlphaOver)) {
+      direct.ClearBuffer(unchecked((int)0xFF111111)); img.FrameAt(1.5).Draw(direct, Matrix3x2.Identity);
+      Check(unclipped.Pixels.SequenceEqual(direct.Pixels), "unclipped travel and late-visible content remain in the film bounds");
+    }
+    vs.Options.Opacity = 0.65f;
+    Check(vs.PrepareFilm(Matrix3x2.Identity) && vs.FilmBakes == ++bakes, "mutating render options also invalidates");
+    vs.Opacity = 1;
+    Check(!vs.FilmActive && vs.FilmPixels == 0, "a render-option setter releases the film immediately");
+    Check(vs.PrepareFilm(Matrix3x2.CreateScale(1.2f)), "a new zoom prepares a replacement");
+    bakes = vs.FilmBakes;
+    Check(vs.PrepareFilm(Matrix3x2.CreateScale(1.2f)) && vs.FilmBakes == bakes, "unchanged zoom reuses the replacement");
+    img.ClipViewport = true; img.VisibleArea = new RectangleF(30, 20, 80, 60);
+    using (var visible = FilmRender(vs, 0.5, Matrix3x2.Identity)) {
+      Check(visible.GetPixel(0, 0) == unchecked((int)0xFF111111) && visible.GetPixel(200, 100) == unchecked((int)0xFF111111), "VisibleArea is baked rather than lost");
+    }
+    img.VisibleArea = null;
+    var rotated = Matrix3x2.CreateRotation(0.2f) * Matrix3x2.CreateTranslation(24, 12);
+    using (var c = FilmRender(vs, 1.0, rotated))
+    using (var d = new Sprite(240, 150, SR2D.Op.AlphaOver)) {
+      d.ClearBuffer(unchecked((int)0xFF111111)); img.FrameAt(1.0).Draw(d, rotated);
+      Check(FilmDiff(c, d) == 0, "rotated viewport clips match direct rendering");
+    }
+    vs.MaxFilmPixels = 100000;
+    Check(!vs.FilmActive && vs.PrepareFilm(Matrix3x2.Identity), "a small budget replaces, not doubles, the allocation");
+    Check(vs.FilmFrames == 90 && vs.FilmFps == 30 && vs.FilmScale < 1 && vs.FilmPixels <= 100000, "budget reduces resolution, NOT frame rate");
+    using (var c = FilmRender(vs, 0, Matrix3x2.CreateTranslation(40, 0))) {
+      bool clean = true; for (int y = 0; y < 150; y++) for (int x = 0; x < 40; x++) if (c.GetPixel(x, y) != unchecked((int)0xFF111111)) clean = false;
+      Check(clean, "upscaled budget-limited playback still clips to the viewport");
+    }
+    vs.MaxFilmPixels = 1;
+    Check(!vs.PrepareFilm(Matrix3x2.Identity) && !vs.FilmActive && vs.FilmPixels == 0, "insufficient budget falls back without allocating a partial film");
+    using var fallback = FilmRender(vs, 0.4, Matrix3x2.Identity);
+    Check(fallback.Pixels.ToArray().Any(p => p != unchecked((int)0xFF111111)), "live fallback still draws the animation");
+    vs.MaxFilmPixels = 64L * 1024 * 1024; vs.FilmFrameRate = 12;
+    Check(vs.PrepareFilm(Matrix3x2.Identity) && vs.FilmFrames == 36 && vs.FilmFps == 12, "explicit bake fps is respected");
+    vs.FilmFrameRate = 0; img.FrameRate = 24;
+    Check(vs.PrepareFilm(Matrix3x2.Identity) && vs.FilmFrames == 72, "file FrameRate changes invalidate the automatic rate");
+    img.FrameRate = 30; img.Duration = 4;
+    Check(vs.PrepareFilm(Matrix3x2.Identity) && vs.FilmFrames == 120, "Duration changes invalidate the loop");
+    img.Duration = 3;
+    vs.Invalidate(); Check(!vs.FilmActive && vs.FilmFrames == 0 && vs.FilmSize == Size.Empty, "explicit invalidation disposes all frames");
+    using (var cancelled = new CancellationTokenSource()) {
+      cancelled.Cancel(); bool thrown = false;
+      try { vs.PrepareFilm(Matrix3x2.Identity, cancelled.Token); } catch (OperationCanceledException) { thrown = true; }
+      Check(thrown && !vs.FilmActive && vs.FilmPixels == 0, "cancellation leaves no allocated / published film");
+    }
+    vs.PrepareFilm(Matrix3x2.Identity); vs.Precomposed = false;
+    Check(!vs.FilmActive && vs.FilmPixels == 0, "switching off precompose frees its memory");
+    vs.Precomposed = true; vs.PrepareFilm(Matrix3x2.Identity); vs.Dispose(); vs.Dispose();
+    Check(!vs.FilmActive && vs.FilmFrames == 0 && vs.FilmPixels == 0, "Dispose is complete and repeatable");
+
+    // A shape leaves a static clip window and travels past the original view box; the film must NOT drag the clip
+    // along, and it must retain an unclipped shape that is far outside its t=0 bounding box at a later sample.
+    var travel = VectorImage.FromSvg("<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 32'><defs><clipPath id='c'><rect x='4' y='4' width='20' height='12'/></clipPath></defs><g clip-path='url(#c)'><rect x='4' y='4' width='20' height='12' fill='#ffaa00'><animateTransform attributeName='transform' type='translate' values='0 0;100 0' dur='2s' repeatCount='indefinite'/></rect></g><rect x='4' y='22' width='8' height='8' fill='#00ff88'><animateTransform attributeName='transform' type='translate' values='0 0;180 0' dur='2s' repeatCount='indefinite'/></rect></svg>");
+    using var tf = new VectorSprite(travel) { Precomposed = true };
+    using (var c = FilmRender(tf, 1.5, Matrix3x2.Identity, 240, 64)) {
+      int amber = 0, green = 0;
+      for (int y = 0; y < 64; y++) for (int x = 0; x < 240; x++) {
+        int p = c.GetPixel(x, y);
+        if ((p >> 16 & 255) > 200 && (p >> 8 & 255) > 130 && (p & 255) < 100) amber++;
+        if (x > 100 && (p >> 8 & 255) > 200 && (p >> 16 & 255) < 80) green++;
+      }
+      Check(amber == 0, "moving content never carries its static clip window with it");
+      Check(green > 30, "unclipped late frames are not cropped to frame-zero bounds");
+    }
+    travel.ClipViewport = true;
+    using (var c = FilmRender(tf, 1.5, Matrix3x2.Identity, 240, 64)) {
+      bool clean = true; for (int y = 0; y < 64; y++) for (int x = 64; x < 240; x++) if (c.GetPixel(x, y) != unchecked((int)0xFF111111)) clean = false;
+      Check(clean && tf.FilmSize.Width <= 66, "viewport clipping also bounds film storage (no off-canvas allocation)");
+    }
+    var shortLoop = VectorImage.FromSvg("<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><rect width='8' height='8' fill='red'><animateTransform attributeName='transform' type='translate' values='0 0;2 0' dur='0.01s' repeatCount='indefinite'/></rect></svg>");
+    using var sf = new VectorSprite(shortLoop) { Precomposed = true };
+    Check(sf.PrepareFilm(Matrix3x2.Identity) && sf.FilmFrames == 1, "very short loops may legitimately have a single frame");
+  }
+
+
 }

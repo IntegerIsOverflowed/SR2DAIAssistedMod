@@ -16,6 +16,77 @@ Conventions
   DOCS     README / comments only
 
 
+2026-10-09  animated SVG: optional precomposed bitmap loop (bounded memory, full-rate playback)
+------------------------------------------------------------------------------------------------------------
+ADDED  cs/Vector.Precompose.cs: third VectorSprite cache mode, opt-in Precomposed (default false).
+       PrepareFilm(matrix, cancellationToken) bakes a Duration loop on an independent animated clone
+       through the DIRECT renderer (not the approximate layer compositor), preserving clip owners,
+       masks, morphs, opacity / dash tracks and use content. Clipped films store the container window;
+       unclipped films union bounds at actual bake sample times (late-visible / travelling shapes).
+       DrawAt(canvas, time, matrix), plus the position / scale / angle / pivot overload, selects a
+       bitmap without evaluating vector tracks. Existing SeekToTime + Cached.Draw also works.
+       Translation is free; changes to zoom / angle / skew, content Version, paint options, viewport
+       flags / window / view box, duration / fps or budget invalidate the film. Precompose off,
+       Invalidate, SetImage and Dispose release it; partial / cancelled bakes are disposed as well.
+       MaxFilmPixels defaults to 64 M pixels = 256 MiB across ALL frames; 0 uses MaxPixels. If the
+       loop does not fit, spatial resolution is reduced and the native bitmap path enlarges it;
+       fps is NEVER silently reduced. FilmFrameRate = 0 uses Image.FrameRate, otherwise explicit.
+       Invalid / empty / over-10000-frame loops and unusable budgets fall back live with a reason;
+       the failed key is remembered (no expensive retry each tick). Old film freed before rebake.
+       Diagnostics: FilmFrames / FilmFps / FilmScale / FilmSize / FilmPixels / FilmBakes /
+       FilmBakeMs / FilmBlits / FilmActive / FilmStatus. SubPixel filters fractional placement
+       without rebaking. Preparation is synchronous; first use / changed settings can take seconds.
+CHANGED cs/Vector.Cache.cs: partial VectorSprite routes opted-in animated draws through the film;
+       invalidate / dispose drop it; ScreenRect and LayerSummary understand the film. Default
+       live-compositor and static-cache paths retain their behaviour and original signatures.
+       cs/Vector.Anim.cs: CloneAnimated is internal (needed by the film's independent bake clone).
+DEMO   demo/Tests.cs: Animated SVG has Precompose checkbox, film budget (MiB, default 256) and
+       explicit bake fps (0 = file rate). Uses DrawAt for no-seek playback; note reports actual
+       frame count, bitmap resolution, memory, bake time and frame draw cost. Old film released
+       on file change; demo/MainForm.cs releases the animated cache on form close.
+TESTS  tests/cs/vecrun: VECANIM gains film correctness, ownership, budget, key invalidation,
+       wrapping, SubPixel, rotated window, late-bounds and fallback probes; optional real files
+       also prepare a full-rate film, compare midpoint to direct, animate / reuse / release it.
+       Verified: 128 ok / 0 FAIL with the synthetic file, all three friend scenes and cat.svg;
+       build-and-test gates 21/21, demo (Implicit on / off) and empty template warning-free.
+       Culture-explicit parsing / formatting removes the edited runner's existing analyzer warnings.
+BUILD  demo and every explicit vector-source test project list cs/Vector.Precompose.cs; the
+       empty template and wildcard-based runners pick it up automatically.
+DOCS   README: API, lifetime, memory / spatial-quality trade-off, synchronous preparation and timings.
+PERF   Release, AA on, advancing timestamps, 256 MiB budget (SPATIAL resolution is budget-limited):
+       flask @600x400 direct 36.5 / layers 12.4 / film 0.48 ms, bake 9.2 s;
+       @1000x667 direct 79.7 / layers 32.6 / film 0.92 ms, bake 9.5 s.
+       cauldron film 0.48 / 0.95 ms, lab film 0.50 / 0.99 ms at 600 / 1000 output width.
+       All three keep 30 fps (flask 900, cauldron 750, lab 720 frames); raw bitmap memory ~250 MiB.
+compat: opt-in only; static vectors and default animated compositor unchanged. FrameAt / GetFrame
+        remain exact vector sampling. Baked playback quantizes time to the chosen rate and wraps
+        Duration. Full-resolution bitmaps use the existing pixel-alignment trade-off; under budget
+        pressure smaller bitmaps trade fine detail for RAM (raise budget or turn precompose off).
+
+2026-10-09  animated SVG: layer compositor (cached rasters + live shapes) - 3-7x faster playback
+------------------------------------------------------------------------------------------------------------
+ADDED  cs/Vector.Cache.cs: VectorSprite now composites animated pictures (Tracks.Count > 0) in layers.
+       The z order is split into runs of shapes whose animation chain only moves them (transform /
+       motion tracks - camera dollies, parallax, static content); each run is baked once per zoom into
+       a sub-raster (static chain + static clip form) and blitted per frame with the chain delta
+       inv(base) - chain(t), re-rasterising only when the delta's linear part drifts beyond Tolerance
+       (slow dollies re-raster ~2x/s). Shapes with morph / opacity / dash tracks, mask re-derivations
+       or use sites are drawn live in their z slot. ClipViewport is honoured via the lock rect.
+       New diagnostics: LayerSummary / LayerInfo; Rasterizations / CacheHits now cover the layers too.
+ADDED  cs/Vector.Anim.cs: SeekToTime records the seek time; ChainDeltaOf(shape) = the animated delta
+       over the static import chain (inv(BaseTransform) - Chain); TrackIsMover classification helper.
+DEMO   demo/Tests.cs: the Animated SVG test draws through img.Cached (seek + compositor) instead of
+       FrameAt per tick; the note shows compositor stats (layers / live runs / rasters / blits).
+TESTS  tests/cs/vecrun: VECANIM gains 5 checks per file - cache stable at same t, reversible seek,
+       cached frames match the direct renderer within 2% edge noise, mover tracks become layers,
+       compositor honours ClipViewport.
+DOCS   README.md: VectorSprite section documents the layer compositor and the measured speedups.
+PERF   measured @600x400 / 1000x667 (seek + full draw, AA on): flask 30 -> 9.8 / 59.6 -> 19.6 ms,
+       cauldron 10.4 -> 1.7 / 26.1 -> 3.6 ms, lab 15.9 -> 2.6 / 41.1 -> 5.9 ms.
+compat: unchanged API; FrameAt stays exact. Animated pictures drawn through VectorSprite now render
+        via layers (pixel-aligned rasters: anti-aliased edges may differ by <=1 px from direct draws,
+        same trade-off the static cache always had). Static pictures unaffected.
+
 2026-10-09  animated SVG: browser-fidelity fixes + ClipViewport
 ------------------------------------------------------------------------------------------------------------
   FIXED    transform chains compose in the right order now (child first, then parent - the

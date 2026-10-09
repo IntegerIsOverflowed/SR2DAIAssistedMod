@@ -672,6 +672,7 @@ namespace Sr2d64CSport
         /// Repeatable - the base paths / transforms of shapes are only changed relative to the previous seek, and every value is a pure function of t.</summary>
         public void SeekToTime(double t)
         {
+            _seekT = t;
             if (Tracks.Count == 0 && MaskItems.Count == 0) return;
             tracksByEl = new Dictionary<XElement, List<SvgTrack>>();
             foreach (var tr in Tracks) { if (!tracksByEl.TryGetValue(tr.Target, out var l)) tracksByEl[tr.Target] = l = new List<SvgTrack>(); l.Add(tr); }
@@ -758,7 +759,7 @@ namespace Sr2d64CSport
         }
 
         /// <summary>A deep copy that shares everything immutable (paints, parsed keyframes) and clones everything the seek writes (shapes, mask geometry).</summary>
-        VectorImage CloneAnimated()
+        internal VectorImage CloneAnimated()
         {
             var f = new VectorImage { ViewBox = ViewBox, Width = Width, Height = Height, Format = Format, Title = Title, Duration = Duration, FrameRate = FrameRate, ClipViewport = ClipViewport };
             f.Warnings.AddRange(Warnings);
@@ -882,6 +883,37 @@ namespace Sr2d64CSport
             }
             return m;
         }
+
+        // ------------------------------------------------------------------ layer compositor support -------------------------
+        internal double _seekT;
+
+        /// <summary>Every track that drives a shape, in track-creation order (outer animated ancestors before inner ones).</summary>
+        internal Dictionary<VectorShape, List<SvgTrack>> ShapeTracks()
+        {
+            var map = new Dictionary<VectorShape, List<SvgTrack>>();
+            foreach (var tr in Tracks)
+                foreach (var s in tr.Shapes)
+                { if (!map.TryGetValue(s, out var l)) map[s] = l = new List<SvgTrack>(); l.Add(tr); }
+            return map;
+        }
+
+        /// <summary>The animated part of the shape's chain at the last seek, as a delta over its static import chain
+        /// (inv(BaseTransform) · Chain): the matrix the layer compositor blits its baked raster with.</summary>
+        internal Matrix3x2 ChainDeltaOf(VectorShape s)
+        {
+            if (tracksByEl == null)
+            {
+                tracksByEl = new Dictionary<XElement, List<SvgTrack>>();
+                foreach (var tr in Tracks) { if (!tracksByEl.TryGetValue(tr.Target, out var l)) tracksByEl[tr.Target] = l = new List<SvgTrack>(); l.Add(tr); }
+            }
+            if (s.Tag is XElement el && Matrix3x2.Invert(s.BaseTransform, out var ib)) return ib * Chain(el, null, _seekT);
+            return Matrix3x2.Identity;
+        }
+
+        /// <summary>True when the track moves the element (transform / motion). Such content can live in a cached raster that is
+        /// blitted per frame and only re-rasterised when the chain's linear part drifts (slow dollies / parallax). Tracks that
+        /// change geometry or paint per frame (morph, opacity, dash) must stay live.</summary>
+        internal static bool TrackIsMover(SvgTrack tr) => tr.Anim.Kind == SvgTrackKind.Transform || tr.Anim.Kind == SvgTrackKind.Motion;
 
         Matrix3x2 OwnOf(XElement el)
         {
