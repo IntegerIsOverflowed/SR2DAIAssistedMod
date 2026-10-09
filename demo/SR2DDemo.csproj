@@ -71,6 +71,7 @@
     <Compile Include="..\cs\Vector.cs" Link="cs\Vector.cs" />
     <Compile Include="..\cs\Vector.Render.cs" Link="cs\Vector.Render.cs" />
     <Compile Include="..\cs\Vector.Svg.cs" Link="cs\Vector.Svg.cs" />
+    <Compile Include="..\cs\Vector.Anim.cs" Link="cs\Vector.Anim.cs" />
     <Compile Include="..\cs\Vector.SvgText.cs" Link="cs\Vector.SvgText.cs" />
     <Compile Include="..\cs\Vector.Ps.cs" Link="cs\Vector.Ps.cs" />
     <Compile Include="..\cs\Vector.Ai.cs" Link="cs\Vector.Ai.cs" />

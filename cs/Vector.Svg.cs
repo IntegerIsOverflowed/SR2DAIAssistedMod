@@ -12,8 +12,10 @@ namespace Sr2d64CSport
     /// <summary>
     /// SVG 1.1 / 2 importer: paths and basic shapes, groups, transforms, use / symbol, presentation attributes, inline
     /// style and simple stylesheets (type / .class / #id selectors), linear and radial gradients (with href chains,
-    /// gradientUnits / gradientTransform / spreadMethod), clipPath (paths, intersection by nesting), opacity,
-    /// fill / stroke opacity, dashes, caps, joins, display / visibility. Text, images, filters, masks and patterns are
+    /// gradientUnits / gradientTransform / spreadMethod), clipPath (paths, intersection by nesting), alpha masks (as clips,
+    /// re-derivable per animation frame), SMIL animation tracks (&lt;animate&gt; / &lt;animateTransform&gt; / &lt;animateMotion&gt; / &lt;set&gt;),
+    /// CSS animations (@keyframes of transform / opacity with animation-* timing, the design-tool / AI-generated style),
+    /// opacity, fill / stroke opacity, dashes, caps, joins, display / visibility. Text, images, filters and patterns are
     /// reported in <see cref="VectorImage.Warnings"/> (text is skipped, embedded PNG / JPEG images are imported, patterns fall back to their average
     /// colour when they contain solid fills, else mid grey).
     /// </summary>
@@ -41,18 +43,26 @@ namespace Sr2d64CSport
             public Style Clone() { var s = (Style)MemberwiseClone(); s.Opacity = 1; s.Hidden = false; return s; }   // opacity / visibility of groups are applied at group level
         }
 
-        sealed class Ctx
+        internal sealed class Ctx
         {
             public VectorImage Img = null!;
             public Dictionary<string, XElement> ById = new Dictionary<string, XElement>();
             public Dictionary<string, VectorGradient?> Gradients = new Dictionary<string, VectorGradient?>();
             public Dictionary<string, VectorClip?> Clips = new Dictionary<string, VectorClip?>();
+            public Dictionary<string, (VectorClip?, List<SvgMaskItem>?)> Masks = new Dictionary<string, (VectorClip?, List<SvgMaskItem>?)>();
             public List<(string sel, Dictionary<string, string> decl)> Css = new List<(string, Dictionary<string, string>)>();
             public HashSet<string> Warned = new HashSet<string>();
             public int UseDepth;
             public int HideDepth;                      // > 0 while inside a display:none group that has an id (its shapes are imported Hidden)
             public string? GroupId; public int GroupChild;   // nearest enclosing group id: children without an id are named "group/n"
             public float Dpi = 96;
+            public readonly List<SvgTrack> Pending = new List<SvgTrack>();                              // <animate*> elements waiting for resolution
+            public readonly List<SvgMaskItem> MaskItems = new List<SvgMaskItem>();                      // all mask content geometry (flat)
+            public readonly Dictionary<XElement, SvgMaskItem> MaskItemByEl = new Dictionary<XElement, SvgMaskItem>();   // mask content geometry by element
+            public readonly List<SvgMaskBind> MaskBinds = new List<SvgMaskBind>();
+            public readonly HashSet<XElement> UseRoots = new HashSet<XElement>();                       // targets followed through <use> (their file ancestors do not apply)
+            public readonly Dictionary<VectorShape, XElement> UseSite = new Dictionary<VectorShape, XElement>();   // shape -> the <use> element that placed it
+            public readonly Dictionary<string, List<CssKeyframe>> Keyframes = new Dictionary<string, List<CssKeyframe>>();   // CSS @keyframes by name
             public void Warn(string w) { if (Warned.Add(w)) Img.Warnings.Add(w); }
         }
 
@@ -71,11 +81,14 @@ namespace Sr2d64CSport
             if (root.Name.LocalName != "svg") root = root.Descendants().FirstOrDefaultLocal("svg") ?? throw new FormatException("no <svg> element");
             var img = new VectorImage(); var c = new Ctx { Img = img };
             foreach (var e in root.DescendantsAndSelf()) { var id = (string?)e.Attribute("id"); if (id != null && !c.ById.ContainsKey(id)) c.ById[id] = e; }
-            foreach (var st in root.Descendants().WhereLocal("style")) ParseCss(st.Value, c.Css);
+            foreach (var st in root.Descendants().WhereLocal("style")) ParseCss(st.Value, c.Css, c.Keyframes);
             var title = root.Elements().FirstOrDefaultLocal("title"); if (title != null) img.Title = title.Value.Trim();
 
-            // size + view box
+            // size + view box: a percentage root size is relative to the viewport - it carries no intrinsic
+            // size, so the view box defines the picture (that is what viewers show for width="100%" too)
             float? w = Len(root, "width", c), h = Len(root, "height", c);
+            if (Pct(root, "width")) w = null;
+            if (Pct(root, "height")) h = null;
             var vb = ParseViewBox((string?)root.Attribute("viewBox"));
             if (vb.HasValue) img.ViewBox = vb.Value;
             else img.ViewBox = new RectangleF(0, 0, w ?? 300, h ?? 150);
@@ -84,9 +97,11 @@ namespace Sr2d64CSport
             if (w.HasValue && h.HasValue && vb.HasValue && (Math.Abs(w.Value - vb.Value.Width) > 1e-3 || Math.Abs(h.Value - vb.Value.Height) > 1e-3))
             {   // intrinsic size differs from the view box: the view box is what the shapes live in; scale it to the intrinsic size
                 var m = ViewportMatrix(vb.Value, new RectangleF(0, 0, w.Value, h.Value), (string?)root.Attribute("preserveAspectRatio"));
-                var st = new Style(); Children(root, c, st, m); img.ViewBox = new RectangleF(0, 0, w.Value, h.Value);
+                var st = ApplyStyle(root, new Style(), c); Children(root, c, st, m); img.ViewBox = new RectangleF(0, 0, w.Value, h.Value);
             }
-            else Children(root, c, new Style(), Matrix3x2.Identity);
+            else Children(root, c, ApplyStyle(root, new Style(), c), Matrix3x2.Identity);
+            if (c.Keyframes.Count > 0) CollectCssAnimations(root, c);   // CSS animations become the same pending tracks SMIL produces
+            if (c.Pending.Count > 0) Finish(img, c);   // resolve the SMIL / CSS animation tracks (also computes Duration)
             return img;
         }
 
@@ -111,6 +126,8 @@ namespace Sr2d64CSport
             {
                 case "defs": case "linearGradient": case "radialGradient": case "clipPath": case "symbol": case "marker": case "pattern": case "mask": case "filter": case "style": case "title": case "desc": case "metadata": case "script":
                     return;
+                case "animate": case "animateTransform": case "animateMotion": case "set":
+                    AnimElement(e, c); return;
             }
             var st = ApplyStyle(e, inherited, c);
             string? myId = (string?)e.Attribute("id");
@@ -124,6 +141,7 @@ namespace Sr2d64CSport
         {
             var m = ParseTransform((string?)e.Attribute("transform")) * parentM;
             var clip = ClipOf(e, c, st);
+            var (maskClip, maskItems) = MaskOf(e, c, st);
             float groupOpacity = st.Opacity;
             switch (n)
             {
@@ -133,8 +151,8 @@ namespace Sr2d64CSport
                         if (!string.IsNullOrEmpty(myId)) { c.GroupId = outerId == null ? myId : outerId + "/" + myId; c.GroupChild = 0; }
                         try
                         {
-                            if (n == "switch") { var first = e.Elements().FirstOrDefault(); if (first != null) WithGroup(c, groupOpacity, clip, m, () => Element(first, c, st, m)); return; }
-                            WithGroup(c, groupOpacity, clip, m, () => Children(e, c, st, m));
+                            if (n == "switch") { var first = e.Elements().FirstOrDefault(); if (first != null) WithGroup(c, groupOpacity, clip, maskClip, maskItems, e, m, () => Element(first, c, st, m)); return; }
+                            WithGroup(c, groupOpacity, clip, maskClip, maskItems, e, m, () => Children(e, c, st, m));
                         }
                         finally { c.GroupId = outerId; c.GroupChild = outerChild; }
                         return;
@@ -146,7 +164,7 @@ namespace Sr2d64CSport
                         var mm = m;
                         if (vb.HasValue) mm = ViewportMatrix(vb.Value, new RectangleF(x, y, w ?? vb.Value.Width, h ?? vb.Value.Height), (string?)e.Attribute("preserveAspectRatio")) * m;
                         else mm = Matrix3x2.CreateTranslation(x, y) * m;
-                        WithGroup(c, groupOpacity, clip, m, () => Children(e, c, st, mm)); return;
+                        WithGroup(c, groupOpacity, clip, maskClip, maskItems, e, m, () => Children(e, c, st, mm)); return;
                     }
                 case "use":
                     {
@@ -154,7 +172,8 @@ namespace Sr2d64CSport
                         if (c.UseDepth > 16) { c.Warn("use: reference chain too deep"); return; }
                         float x = Len(e, "x", c) ?? 0, y = Len(e, "y", c) ?? 0;
                         var mm = Matrix3x2.CreateTranslation(x, y) * m;
-                        c.UseDepth++;
+                        c.UseDepth++; c.UseRoots.Add(target);
+                        int s0 = c.Img.Shapes.Count;
                         try
                         {
                             if (target.Name.LocalName == "symbol" || target.Name.LocalName == "svg")
@@ -163,11 +182,15 @@ namespace Sr2d64CSport
                                 var vb = ParseViewBox((string?)target.Attribute("viewBox"));
                                 var inner = vb.HasValue ? ViewportMatrix(vb.Value, new RectangleF(0, 0, w ?? vb.Value.Width, h ?? vb.Value.Height), (string?)target.Attribute("preserveAspectRatio")) * mm : mm;
                                 var ts = ApplyStyle(target, st, c);
-                                WithGroup(c, groupOpacity, clip, m, () => Children(target, c, ts, inner));
+                                WithGroup(c, groupOpacity, clip, maskClip, maskItems, e, m, () => Children(target, c, ts, inner));
                             }
-                            else WithGroup(c, groupOpacity, clip, m, () => Element(target, c, st, mm));
+                            else WithGroup(c, groupOpacity, clip, maskClip, maskItems, e, m, () => Element(target, c, st, mm));
                         }
-                        finally { c.UseDepth--; }
+                        finally
+                        {
+                            c.UseDepth--;
+                            for (int i = s0; i < c.Img.Shapes.Count; i++) if (!c.UseSite.ContainsKey(c.Img.Shapes[i])) c.UseSite[c.Img.Shapes[i]] = e;   // the innermost use site wins (nested uses)
+                        }
                         return;
                     }
                 case "text": TextElement(e, c, st, m, clip, myId); return;
@@ -182,34 +205,65 @@ namespace Sr2d64CSport
                         var corner = box; paint.Matrix = corner;
                         if (string.Equals((string?)e.Attribute("image-rendering") ?? st.ImageRendering, "pixelated", StringComparison.OrdinalIgnoreCase) || string.Equals(st.ImageRendering, "optimizeSpeed", StringComparison.OrdinalIgnoreCase)) paint.Smooth = false;
                         var ip = new VectorPath().Rect(x, y, w, h);
-                        var ish = new VectorShape { Path = ip, Transform = m, Fill = paint, Opacity = st.Opacity * st.FillOpacity, IsImage = true, Clip = clip, Id = myId, Group = c.GroupId, Hidden = c.HideDepth > 0 };
+                        var iclip = maskClip != null ? (clip == null ? maskClip : Merge(clip, maskClip)) : clip;
+                        var ish = new VectorShape { Path = ip, Transform = m, Fill = paint, Opacity = st.Opacity * st.FillOpacity, IsImage = true, Clip = iclip, Id = myId, Group = c.GroupId, Hidden = c.HideDepth > 0 };
+                        ish.Tag = e;
+                        if (maskItems != null) c.MaskBinds.Add(new SvgMaskBind { Shape = ish, RefEl = e, Static = clip, Items = maskItems });
                         c.Img.Shapes.Add(ish); return;
                     }
                 case "foreignObject": c.Warn("foreignObject is skipped"); return;
             }
             var path = ShapePath(e, c, n);
             if (path == null) return;
+            foreach (var ch in e.Elements())   // the shape's own animation (children of leaves are not walked otherwise)
+            {
+                var cn = ch.Name.LocalName;
+                if (cn == "animate" || cn == "animateTransform" || cn == "animateMotion" || cn == "set") AnimElement(ch, c);
+            }
             var shape = MakeShape(path, st, c, m, clip);
             if (shape == null) return;
+            if (maskClip != null && maskItems != null)
+            {   // the mask (as an alpha clip) joins the element's clip-path; the bind re-derives it when the animation seeks
+                shape.Clip = shape.Clip == null ? maskClip : Merge(shape.Clip, maskClip);
+                if (!shape.IsText) c.MaskBinds.Add(new SvgMaskBind { Shape = shape, RefEl = e, Static = clip, Items = maskItems });
+            }
+            shape.Tag = e;
             shape.Id = myId ?? (c.GroupId != null ? c.GroupId.Substring(c.GroupId.LastIndexOf('/') + 1) + "/" + (c.GroupChild++) : null);
             shape.Group = c.GroupId;
             shape.Hidden = c.HideDepth > 0;
             c.Img.Shapes.Add(shape);
         }
-        /// <summary>Runs a group's children, then applies group opacity and clip to the shapes it produced.</summary>
-        static void WithGroup(Ctx c, float opacity, VectorClip? clip, Matrix3x2 m, Action body)
+        /// <summary>Runs a group's children, then applies group opacity, clip-path and mask to the shapes it produced.</summary>
+        static void WithGroup(Ctx c, float opacity, VectorClip? clip, VectorClip? mask, List<SvgMaskItem>? maskItems, XElement refEl, Matrix3x2 m, Action body)
         {
             int start = c.Img.Shapes.Count;
             body();
-            if (opacity >= 1 && clip == null) return;
+            if (opacity >= 1 && clip == null && mask == null) return;
             var clipDev = clip?.Transformed(m);   // clip paths are in the group's user space; shapes are stored with their own transform, so express the clip in image space
+            var maskDev = mask?.Transformed(m);
+            var chainCache = new Dictionary<XElement, Matrix3x2>();
             for (int i = start; i < c.Img.Shapes.Count; i++)
             {
                 var s = c.Img.Shapes[i];
                 if (opacity < 1) s.Opacity *= opacity;      // (approximation: per-shape instead of group compositing; overlapping children double up)
                 if (clipDev != null)
-                {   // the shape's clip is in the shape's local space: bring the group clip there
+                {   // the shape's clip is in the shape's local space: bring the group clip there; a clip-path on top of a mask makes the mask static (the bind below would be overwritten)
                     if (Matrix3x2.Invert(s.Transform, out var inv)) { var local = clipDev.Transformed(inv); s.Clip = s.Clip == null ? local : Merge(s.Clip, local); }
+                    (s.ClipRoots ??= new List<(VectorClip, object)>()).Add((clipDev, refEl));   // kept in image space too: a seek must not move the clip with the shape's own animation
+                    if (maskDev != null) c.MaskBinds.RemoveAll(b2 => b2.Shape == s);
+                }
+                if (maskDev != null && maskItems != null)
+                {
+                    if (clipDev == null && s.Clip == null && s.Tag is XElement se && !s.IsText && Matrix3x2.Invert(StaticChain(se, refEl, chainCache), out var inv3))
+                    {   // the mask is this shape's only clip: keep it re-derivable (SeekToTime rebuilds it from the live mask geometry)
+                        s.Clip = mask!.Transformed(inv3);
+                        c.MaskBinds.Add(new SvgMaskBind { Shape = s, RefEl = refEl, Static = null, Items = maskItems });
+                    }
+                    else if (Matrix3x2.Invert(s.Transform, out var inv2))
+                    {   // combined with a clip-path, a nested mask or a shape without a re-derivable chain: merge the mask statically
+                        var mlocal = maskDev.Transformed(inv2);
+                        s.Clip = s.Clip == null ? mlocal : Merge(s.Clip, mlocal);
+                    }
                 }
             }
         }
@@ -383,23 +437,43 @@ namespace Sr2d64CSport
             var st = (string?)e.Attribute("style"); if (st == null) return null;
             foreach (var kv in ParseDecl(st)) if (kv.Key == name) return kv.Value; return null;
         }
-        static List<KeyValuePair<string, string>> ParseDecl(string s)
+        internal static List<KeyValuePair<string, string>> ParseDecl(string s)
         {
             var l = new List<KeyValuePair<string, string>>();
             foreach (var part in s.Split(';')) { int i = part.IndexOf(':'); if (i > 0) l.Add(new KeyValuePair<string, string>(part.Substring(0, i).Trim().ToLowerInvariant(), part.Substring(i + 1).Trim())); }
             return l;
         }
-        static void ParseCss(string css, List<(string, Dictionary<string, string>)> into)
+        static void ParseCss(string css, List<(string, Dictionary<string, string>)> into) => ParseCss(css, into, null);
+        static void ParseCss(string css, List<(string, Dictionary<string, string>)> into, Dictionary<string, List<CssKeyframe>>? keyframes)
         {
             css = Regex.Replace(css, @"/\*.*?\*/", "", RegexOptions.Singleline);
             css = Regex.Replace(css, @"<!\[CDATA\[|\]\]>", "");
+            if (keyframes != null)
+                css = Regex.Replace(css, @"@keyframes\s+([\w-]+)\s*\{((?:[^{}]|\{[^{}]*\})*)\}", m =>
+                {
+                    var steps = new List<CssKeyframe>();
+                    foreach (Match km in Regex.Matches(m.Groups[2].Value, @"([^{}]+)\{([^}]*)\}"))
+                    {
+                        var decl = new Dictionary<string, string>(); foreach (var kv in ParseDecl(km.Groups[2].Value)) decl[kv.Key] = kv.Value;
+                        string? ease = decl.TryGetValue("animation-timing-function", out var ef) ? ef : null;
+                        foreach (var off in km.Groups[1].Value.Split(','))
+                        {
+                            var o = off.Trim();
+                            float f = o switch { "from" => 0f, "to" => 1f, _ => o.EndsWith('%') && ParseFloat(o.TrimEnd('%')) is float p ? Math.Clamp(p / 100, 0, 1) : -1 };
+                            if (f < 0) continue;   // not an offset (a stray fragment, selector or comment leftover)
+                            steps.Add(new CssKeyframe { Offset = f, Ease = ease, Decls = decl });
+                        }
+                    }
+                    if (steps.Count > 0) { steps.Sort((x, y) => x.Offset.CompareTo(y.Offset)); keyframes[m.Groups[1].Value] = steps; }
+                    return " ";
+                }, RegexOptions.Singleline);
             foreach (Match m in Regex.Matches(css, @"([^{}]+)\{([^}]*)\}"))
             {
                 var decl = new Dictionary<string, string>(); foreach (var kv in ParseDecl(m.Groups[2].Value)) decl[kv.Key] = kv.Value;
                 foreach (var sel in m.Groups[1].Value.Split(',')) { string s = sel.Trim(); if (s.Length > 0 && !s.StartsWith('@')) into.Add((s, decl)); }
             }
         }
-        static float Num01(string v) { var f = ParseFloat(v.TrimEnd('%')); if (!f.HasValue) return 1; return Math.Clamp(v.EndsWith('%') ? f.Value / 100 : f.Value, 0, 1); }
+        internal static float Num01(string v) { var f = ParseFloat(v.TrimEnd('%')); if (!f.HasValue) return 1; return Math.Clamp(v.EndsWith('%') ? f.Value / 100 : f.Value, 0, 1); }
 
         // ------------------------------------------------------------------ paint servers
         static VectorGradient? Gradient(string id, Ctx c)
@@ -561,14 +635,16 @@ namespace Sr2d64CSport
             }
             return m;
         }
-        static List<float> ParseNumbers(string s)
+        internal static List<float> ParseNumbers(string s)
         {
             var l = new List<float>();
             foreach (Match m in Regex.Matches(s, @"[-+]?(?:\d+\.?\d*|\.\d+)(?:[eE][-+]?\d+)?")) l.Add(float.Parse(m.Value, NumberStyles.Float, ci));
             return l;
         }
-        static float? ParseFloat(string s) => float.TryParse(s.Trim(), NumberStyles.Float, ci, out var f) ? f : null;
+        internal static float? ParseFloat(string s) => float.TryParse(s.Trim(), NumberStyles.Float, ci, out var f) ? f : null;
         static float? Len(XElement e, string attr, Ctx c) { var v = (string?)e.Attribute(attr); return v == null ? null : ParseLen(v, c); }
+        /// <summary>True when the attribute is a percentage length (relative to the viewport - no intrinsic size).</summary>
+        static bool Pct(XElement e, string attr) { var v = (string?)e.Attribute(attr); return v != null && v.Trim().EndsWith('%'); }
         static float? ParseLen(string v, Ctx c)
         {
             v = v.Trim(); if (v.Length == 0) return null;

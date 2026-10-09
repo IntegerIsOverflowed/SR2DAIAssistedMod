@@ -1,0 +1,94 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 240 150" fill="none">
+  <!-- synthetic SMIL exercise for the headless animation gate: a d morph, a static alpha mask, an animated
+       alpha mask (window + layer slide together, the construction the Cat playing animation.svg uses), an
+       animateMotion with keyPoints + keySplines, an additive scale with repeatCount=2 + fill=freeze and a
+       discrete translate. Duration = 3 s (the motion track). The lanes do not overlap, so pixel probes are exact.
+       The root carries fill="none" and the LAST path is an OPEN curve without its own fill - it must render as a
+       stroke only (never as a default-black fill; the regression that painted the cat's muzzle / paw tips). -->
+  <rect x="0" y="0" width="240" height="150" fill="#204060"/>
+
+  <!-- row 1: static alpha mask - the red bar is only visible inside the 0..110 window -->
+  <mask id="fixed" maskUnits="userSpaceOnUse" maskContentUnits="userSpaceOnUse" mask-type="alpha" x="-10000" y="-10000" width="20000" height="20000">
+    <rect x="0" y="0" width="110" height="150" fill="#ffffff"/>
+  </mask>
+  <g mask="url(#fixed)">
+    <rect x="30" y="0" width="180" height="30" fill="#ff3030"/>
+  </g>
+
+  <!-- row 2: animated alpha mask - the white window and the red band slide together -->
+  <mask id="win" maskUnits="userSpaceOnUse" maskContentUnits="userSpaceOnUse" mask-type="alpha" x="-10000" y="-10000" width="20000" height="20000">
+    <rect x="0" y="0" width="110" height="150" fill="#ffffff">
+      <animateTransform attributeName="transform" type="translate" values="0 0; 110 0" keyTimes="0;1" dur="2s" repeatCount="indefinite"/>
+    </rect>
+  </mask>
+  <g mask="url(#win)">
+    <rect x="0" y="38" width="40" height="28" fill="#ff3030">
+      <animateTransform attributeName="transform" type="translate" values="0 0; 110 0" keyTimes="0;1" dur="2s" repeatCount="indefinite"/>
+    </rect>
+  </g>
+
+  <!-- bottom lane: animateMotion along a cubic with keyPoints + spline easing -->
+  <circle r="8" fill="#30ff60">
+    <animateMotion path="M15,90 C70,60 170,60 225,90" dur="3s" repeatCount="indefinite" keyPoints="0;1" keyTimes="0;1" calcMode="spline" keySplines="0.333 0 0.667 1"/>
+  </circle>
+
+  <!-- d morph: the triangle slides right and back (below the motion lane) -->
+  <path d="M15,104 L45,104 L45,146 Z" fill="#ffcc00">
+    <animate attributeName="d" values="M15,104 L45,104 L45,146 Z; M55,104 L85,104 L55,146 Z; M15,104 L45,104 L45,146 Z" keyTimes="0;0.5;1" dur="2s" repeatCount="indefinite"/>
+  </path>
+
+  <!-- additive scale about the group origin, twice, then frozen -->
+  <g transform="translate(212,124)">
+    <rect x="-10" y="-10" width="20" height="20" fill="#ff8800"/>
+    <animateTransform attributeName="transform" type="scale" from="1 1" to="2 2" dur="1s" repeatCount="2" fill="freeze" additive="sum"/>
+  </g>
+
+  <!-- discrete translate: jumps at keyTime 0.5 -->
+  <rect x="120" y="118" width="14" height="14" fill="#ff00ff">
+    <animateTransform attributeName="transform" type="translate" values="0 0; 60 0" keyTimes="0;0.5" calcMode="discrete" dur="2s" repeatCount="indefinite"/>
+  </rect>
+
+  <!-- open stroked curve, no fill of its own (inherits the root fill="none"): stroke only, never filled -->
+  <path d="M150,26 Q170,6 190,26" stroke="#7fb0ff" stroke-width="2" stroke-linecap="round"/>
+
+  <!-- CSS animation lane: a spinner (transform keyframes, fill-box origin) and a delayed opacity blink -->
+  <style>
+    .cssspin { transform-box:fill-box; transform-origin:center; animation:cssspin 2s linear infinite; }
+    @keyframes cssspin { from{transform:rotate(0deg)} to{transform:rotate(360deg)} }
+    .cssblink { animation:cssblink 1.6s linear infinite; animation-delay:0.8s; }
+    @keyframes cssblink { 0%{opacity:.1} 50%{opacity:1} 100%{opacity:.1} }
+    .cssdrop { animation:cssdrop 2s linear infinite; }
+    @keyframes cssdrop { from{transform:translateY(0)} to{transform:translateY(30px)} }
+    .csshide { opacity:0; animation:csshide 2s linear infinite; }
+    @keyframes csshide { 0%{opacity:0} 50%{opacity:1} 100%{opacity:0} }
+    .csshalf { transform-box:fill-box; transform-origin:center; animation:csshalf 2s linear infinite; }
+    @keyframes csshalf { to{transform:rotate(90deg)} }
+    .cssnest { transform-box:view-box; transform-origin:150px 24px; animation:cssnest 2s linear infinite; }
+    @keyframes cssnest { from{transform:rotate(0deg)} to{transform:rotate(180deg)} }
+  </style>
+  <!-- animated group around a statically-offset child: the child's static offset applies BEFORE the group's
+       rotation (the pestle-in-mortar topology). At t = 1.0 (90 deg) the square is below the pivot, not beside it. -->
+  <g class="cssnest">
+    <g transform="translate(20 0)">
+      <rect x="140" y="20" width="8" height="8" fill="#7dff7d"/>
+    </g>
+  </g>
+  <clipPath id="clipWin"><rect x="20" y="60" width="30" height="20"/></clipPath>
+  <!-- the clip window is on a STATIC group: the animated slide inside must stay clipped (the hourglass-sand case) -->
+  <g clip-path="url(#clipWin)">
+    <rect class="cssdrop" x="20" y="60" width="30" height="10" fill="#ffaa00"/>
+  </g>
+  <!-- opacity animation on an element the style hides (opacity:0): visible only while the track runs -->
+  <rect class="csshide" x="60" y="60" width="20" height="14" fill="#00ffd0"/>
+  <!-- a keyframe list with only `to`: the implicit from is the matching identity list (the sweep must not hold still) -->
+  <g class="csshalf">
+    <rect x="96" y="60" width="16" height="4" fill="#c070ff"/>
+  </g>
+  <!-- parked outside the view box: ClipViewport must be able to keep it out -->
+  <rect x="-26" y="66" width="20" height="8" fill="#ff4040"/>
+  <g class="cssspin">
+    <rect x="156" y="15" width="28" height="6" fill="#1c4a66"/>
+    <circle cx="187" cy="18" r="3" fill="#40c8ff"/>
+  </g>
+  <rect class="cssblink" x="200" y="8" width="26" height="16" fill="#ff70b0" opacity="0.1"/>
+</svg>
