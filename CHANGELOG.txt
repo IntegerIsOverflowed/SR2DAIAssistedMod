@@ -16,6 +16,30 @@ Conventions
   DOCS     README / comments only
 
 
+2026-10-09  animated SVG: layer compositor (cached rasters + live shapes) - 3-7x faster playback
+------------------------------------------------------------------------------------------------------------
+ADDED  cs/Vector.Cache.cs: VectorSprite now composites animated pictures (Tracks.Count > 0) in layers.
+       The z order is split into runs of shapes whose animation chain only moves them (transform /
+       motion tracks - camera dollies, parallax, static content); each run is baked once per zoom into
+       a sub-raster (static chain + static clip form) and blitted per frame with the chain delta
+       inv(base) - chain(t), re-rasterising only when the delta's linear part drifts beyond Tolerance
+       (slow dollies re-raster ~2x/s). Shapes with morph / opacity / dash tracks, mask re-derivations
+       or use sites are drawn live in their z slot. ClipViewport is honoured via the lock rect.
+       New diagnostics: LayerSummary / LayerInfo; Rasterizations / CacheHits now cover the layers too.
+ADDED  cs/Vector.Anim.cs: SeekToTime records the seek time; ChainDeltaOf(shape) = the animated delta
+       over the static import chain (inv(BaseTransform) - Chain); TrackIsMover classification helper.
+DEMO   demo/Tests.cs: the Animated SVG test draws through img.Cached (seek + compositor) instead of
+       FrameAt per tick; the note shows compositor stats (layers / live runs / rasters / blits).
+TESTS  tests/cs/vecrun: VECANIM gains 5 checks per file - cache stable at same t, reversible seek,
+       cached frames match the direct renderer within 2% edge noise, mover tracks become layers,
+       compositor honours ClipViewport.
+DOCS   README.md: VectorSprite section documents the layer compositor and the measured speedups.
+PERF   measured @600x400 / 1000x667 (seek + full draw, AA on): flask 30 -> 9.8 / 59.6 -> 19.6 ms,
+       cauldron 10.4 -> 1.7 / 26.1 -> 3.6 ms, lab 15.9 -> 2.6 / 41.1 -> 5.9 ms.
+compat: unchanged API; FrameAt stays exact. Animated pictures drawn through VectorSprite now render
+        via layers (pixel-aligned rasters: anti-aliased edges may differ by <=1 px from direct draws,
+        same trade-off the static cache always had). Static pictures unaffected.
+
 2026-10-09  animated SVG: browser-fidelity fixes + ClipViewport
 ------------------------------------------------------------------------------------------------------------
   FIXED    transform chains compose in the right order now (child first, then parent - the

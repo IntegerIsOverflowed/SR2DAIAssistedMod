@@ -369,6 +369,26 @@ static class Program {
     Check(Same(g3, Render(img.GetFrame(93))), "GetFrame wraps (93 -> 3)");
     Check(img.Tracks.Any(tr => tr.Anim.Additive) && img.Tracks.Any(tr => tr.Anim.Freeze) && img.Tracks.Any(tr => tr.Anim.CalcMode == 2) && img.Tracks.Any(tr => tr.Anim.Kind == SvgTrackKind.Motion), "additive / freeze / discrete / motion flags parsed");
 
+    // ---- the layer compositor (img.Cached): cached rasters for moving chains, live shapes for paint tracks ----
+    Sprite RenderCached(double t) { var cv = new Sprite(240, 150); cv.ClearBuffer(unchecked((int)0xFF111111)); img.SeekToTime(t); img.Cached.DrawFit(cv, new System.Drawing.RectangleF(0, 0, 240, 150), true); return cv; }
+    var cc1 = RenderCached(0.4); var cc2 = RenderCached(0.4);
+    Check(Same(cc1, cc2), "compositor: same t renders identically (cache is stable)");
+    RenderCached(1.0); var cc3 = RenderCached(0.4);
+    Check(Same(cc1, cc3), "compositor: returning to a time re-renders identically (seek is reversible)");
+    // close to the direct renderer: only whole-pixel raster alignment noise at anti-aliased edges
+    var cd = RenderAt(img, 0.4); int cdDiff = 0;
+    for (int y = 0; y < cd.Height; y++) for (int x = 0; x < cd.Width; x++)
+    {
+        int p1 = cd.GetPixel(x, y), p2 = cc1.GetPixel(x, y);
+        if (Math.Abs((p1 & 255) - (p2 & 255)) + Math.Abs((p1 >> 8 & 255) - (p2 >> 8 & 255)) + Math.Abs((p1 >> 16 & 255) - (p2 >> 16 & 255)) > 48) cdDiff++;
+    }
+    Check(cdDiff < cd.Width * cd.Height / 50, "compositor: cached frames match the direct renderer (edge noise < 2%)");
+    bool hasMover = img.Tracks.Any(tr => VectorImage.TrackIsMover(tr));
+    Check(!hasMover || img.Cached.LayerSummary.Contains("layers"), "compositor: moving tracks become cached layers");
+    Sprite ShiftedCached(bool clip) { img.ClipViewport = clip; var cv = new Sprite(240, 150); cv.ClearBuffer(unchecked((int)0xFF111111)); img.SeekToTime(0); img.Cached.Draw(cv, 40, 0); return cv; }
+    Check(Count(ShiftedCached(true), OffRed, 0, 40, 0, 150) == 0, "compositor: ClipViewport hides off-canvas content");
+    img.ClipViewport = false;
+
     foreach (var f in files)
     {
       if (!File.Exists(f)) { Console.WriteLine($"skip (missing): {f}"); continue; }

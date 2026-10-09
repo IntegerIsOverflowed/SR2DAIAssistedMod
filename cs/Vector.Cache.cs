@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Drawing;
 using System.Numerics;
 
@@ -40,6 +41,38 @@ namespace Sr2d64CSport
         public long MaxPixels = 16L * 1024 * 1024;
         /// <summary>Statistics: rasterisations so far and blits served from the cache.</summary>
         public int Rasterizations, CacheHits;
+        /// <summary>Diagnostics for animated pictures: one line per z segment (LAYER = cached raster + blit stats, DYN = live).</summary>
+        public string LayerInfo
+        {
+            get
+            {
+                if (_segs == null) return "(no plan)";
+                var sb = new System.Text.StringBuilder();
+                for (int i = 0; i < _segs.Count; i++)
+                {
+                    var sg = _segs[i];
+                    sb.Append(i).Append(':').Append(sg.Dyn ? "DYN" : "LAYER").Append(" n=").Append(sg.Sub!.Shapes.Count);
+                    if (sg.Vs != null) sb.Append(" rast=").Append(sg.Vs.Rasterizations).Append(" hit=").Append(sg.Vs.CacheHits).Append(" px=").Append(sg.Vs.Raster == null ? "-" : (sg.Vs.Raster.Width + "x" + sg.Vs.Raster.Height));
+                    sb.Append(" | ");
+                }
+                return sb.ToString();
+            }
+        }
+        /// <summary>One-line compositor statistics for the note line / diagnostics.</summary>
+        public string LayerSummary
+        {
+            get
+            {
+                if (_segs == null || Image.Tracks.Count == 0) return "compositor: n/a (static)";
+                int layers = 0, dyn = 0, live = 0, rasts = 0, hits = 0;
+                foreach (var sg in _segs)
+                {
+                    if (sg.Dyn) { dyn++; live += sg.Sub!.Shapes.Count; }
+                    else { layers++; if (sg.Vs != null) { rasts += sg.Vs.Rasterizations; hits += sg.Vs.CacheHits; } }
+                }
+                return $"compositor: {layers} layers, {dyn} live runs ({live} shapes), {rasts} rasters, {hits} blits";
+            }
+        }
         /// <summary>Raster currently cached (null before the first draw / after a content change).</summary>
         public Sprite? Raster => _valid ? _raster : null;
         /// <summary>Filter for the blit when the cached raster is drawn scaled (Nearest = exact copy at the cached transform).</summary>
@@ -49,7 +82,7 @@ namespace Sr2d64CSport
         /// <summary>Replaces the image (the cache is dropped).</summary>
         public void SetImage(VectorImage image) { Image = image; Invalidate(); }
         /// <summary>Forces a re-raster on the next draw.</summary>
-        public void Invalidate() { _valid = false; }
+        public void Invalidate() { _valid = false; DropLayers(); }
 
         // ---- render options (each setter invalidates the cache)
         public bool AA { get => _opt.AA; set { if (_opt.AA != value) { _opt.AA = value; Invalidate(); } } }
@@ -70,6 +103,7 @@ namespace Sr2d64CSport
         /// <summary>Draws with an arbitrary image -> destination matrix. Translation is free; a new linear part re-rasterises.</summary>
         public void Draw(Sprite dst, Matrix3x2 m, SR2D.Op op = SR2D.Op.AlphaOver, int blendFactor = 128)
         {
+            if (Image.Tracks.Count > 0) { DrawAnimated(dst, m, op, blendFactor); return; }
             var lin = new Matrix3x2(m.M11, m.M12, m.M21, m.M22, 0, 0);
             var box = VectorRender.TransformRect(Image.Bounds(), lin);
             if (box.IsEmpty) return;
@@ -101,13 +135,117 @@ namespace Sr2d64CSport
         }
         int _rasterLeft, _rasterTop;
         bool Same(Matrix3x2 a, Matrix3x2 b) => MathF.Abs(a.M11 - b.M11) <= Tolerance && MathF.Abs(a.M12 - b.M12) <= Tolerance && MathF.Abs(a.M21 - b.M21) <= Tolerance && MathF.Abs(a.M22 - b.M22) <= Tolerance;
+
+        // ---- animated pictures: the layer compositor ------------------------------------------------------------------
+        // An animated picture is split, in z order, into segments. Shapes whose whole animation chain only translates
+        // (camera dollies, parallax planes, plain static content) become rasters rendered once per zoom level and
+        // blitted with the chain's current translation; everything else (rotation, scale, morphs, opacity, dashes,
+        // mask re-derivation, use sites) is drawn live. A scene that is mostly dolly + parallax therefore costs a few
+        // blits plus its genuinely animated shapes per frame instead of re-rasterising every shape every frame.
+        sealed class Seg { public VectorImage? Sub; public VectorSprite? Vs; public VectorShape? Rep; public bool Dyn; }
+        List<Seg>? _segs; int _planVersion = -1;
+        readonly System.Collections.Generic.List<(VectorShape, Matrix3x2, VectorClip?)> _swap = new System.Collections.Generic.List<(VectorShape, Matrix3x2, VectorClip?)>();
+
+        void DropLayers()
+        {
+            if (_segs == null) return;
+            foreach (var sg in _segs) sg.Vs?.Dispose();
+            _segs = null; _planVersion = -1;
+        }
+
+        void EnsurePlan()
+        {
+            if (_segs != null && _planVersion == Image.Version) return;
+            DropLayers();
+            _planVersion = Image.Version;
+            _segs = new List<Seg>();
+            var byShape = Image.ShapeTracks();
+            var bound = new HashSet<VectorShape>();
+            foreach (var b in Image.MaskBinds) bound.Add(b.Shape);
+            var shapes = Image.Shapes;
+            // layer key of a shape: the moving tracks driving it (creation order); null = draw live. The animated delta
+            // over the static chain must further match across the run (checked below) or the run falls back to live.
+            string? KeyOf(VectorShape s)
+            {
+                if (bound.Contains(s) || Image.UseSites.ContainsKey(s)) return null;
+                if (!byShape.TryGetValue(s, out var trs)) return "";
+                var key = "";
+                for (int k = 0; k < trs.Count; k++)
+                {
+                    if (!VectorImage.TrackIsMover(trs[k])) return null;   // morph / opacity / dash: per-frame paint
+                    key += Image.Tracks.IndexOf(trs[k]).ToString(System.Globalization.CultureInfo.InvariantCulture) + ".";
+                }
+                return key;
+            }
+            bool SameDelta(VectorShape a, VectorShape b)
+            {
+                var da = Image.ChainDeltaOf(a); var db = Image.ChainDeltaOf(b);
+                return MathF.Abs(da.M11 - db.M11) < 1e-3f && MathF.Abs(da.M12 - db.M12) < 1e-3f && MathF.Abs(da.M21 - db.M21) < 1e-3f && MathF.Abs(da.M22 - db.M22) < 1e-3f && MathF.Abs(da.M31 - db.M31) < 1e-2f && MathF.Abs(da.M32 - db.M32) < 1e-2f;
+            }
+            int i = 0;
+            while (i < shapes.Count)
+            {
+                var k = KeyOf(shapes[i]);
+                int j = i + 1;
+                if (k == null) { while (j < shapes.Count && KeyOf(shapes[j]) == null) j++; }
+                else { while (j < shapes.Count && KeyOf(shapes[j]) == k && SameDelta(shapes[i], shapes[j])) j++; }
+                var sub = new VectorImage { ViewBox = Image.ViewBox, Width = Image.Width, Height = Image.Height, Format = Image.Format };
+                for (int x = i; x < j; x++) sub.Shapes.Add(shapes[x]);
+                _segs.Add(new Seg { Sub = sub, Dyn = k == null, Rep = k == null ? null : shapes[i], Vs = k == null ? null : new VectorSprite(sub) { Options = _opt, MaxPixels = MaxPixels, Tolerance = Tolerance, SubPixel = SubPixel } });
+                i = j;
+            }
+        }
+
+        void DrawAnimated(Sprite dst, Matrix3x2 m, SR2D.Op op, int blendFactor)
+        {
+            EnsurePlan();
+            var savedLock = dst.LockRect;
+            bool clipped = false;
+            if (Image.ClipViewport)
+            {   // keep everything inside the container, like the window path of the direct renderer
+                var dr = VectorRender.TransformRect(Image.ViewBox, m);
+                var lr = Rectangle.Intersect(savedLock, Rectangle.FromLTRB((int)MathF.Floor(dr.Left), (int)MathF.Floor(dr.Top), (int)MathF.Ceiling(dr.Right), (int)MathF.Ceiling(dr.Bottom)));
+                if (lr.Width <= 0 || lr.Height <= 0) return;
+                dst.SetLockRect(lr);
+                clipped = true;
+            }
+            try
+            {
+                foreach (var sg in _segs!)
+                {
+                    if (sg.Dyn || sg.Vs == null || sg.Sub == null) { sg.Sub!.Draw(dst, m, _opt); continue; }
+                    // the raster bakes the STATIC placement (and the static form of the clips); the animated delta
+                    // arrives with the blit, so content and clip windows move and breathe together; the sub-sprite
+                    // re-rasterises by itself when the delta's linear part drifts more than Tolerance (slow dollies
+                    // re-raster a couple of times a second, fast local motions every frame)
+                    var d = sg.Rep == null ? Matrix3x2.Identity : Image.ChainDeltaOf(sg.Rep);
+                    _swap.Clear();
+                    foreach (var s in sg.Sub.Shapes)
+                    {
+                        _swap.Add((s, s.Transform, s.ClipRoots != null ? s.Clip : null));
+                        s.Transform = s.BaseTransform;
+                        if (s.ClipRoots != null)
+                        {
+                            var c = new VectorClip();
+                            foreach (var (root, owner) in s.ClipRoots)
+                                if (Matrix3x2.Invert(s.BaseTransform, out var ib))
+                                    foreach (var pr in root.Transformed(ib).Paths) c.Paths.Add(pr);
+                            s.Clip = c;
+                        }
+                    }
+                    try { sg.Vs.Draw(dst, d * m, op, blendFactor); }
+                    finally { foreach (var (s, tm, cl) in _swap) { s.Transform = tm; if (cl != null) s.Clip = cl; } }
+                }
+            }
+            finally { if (clipped) dst.SetLockRect(savedLock); }
+        }
         /// <summary>Destination rectangle the cached raster occupies for a matrix (whole pixels), or the transformed bounds when nothing is cached.</summary>
         public Rectangle ScreenRect(Matrix3x2 m)
         {
             if (_valid && _raster != null) return new Rectangle((int)MathF.Floor(m.M31 + 0.5f) + _rasterLeft, (int)MathF.Floor(m.M32 + 0.5f) + _rasterTop, _raster.Width, _raster.Height);
             var b = VectorRender.TransformRect(Image.Bounds(), m); return Rectangle.Round(b);
         }
-        public void Dispose() { _raster?.Dispose(); _raster = null; _valid = false; }
+        public void Dispose() { _raster?.Dispose(); _raster = null; _valid = false; DropLayers(); }
     }
 
     internal sealed partial class VectorImage

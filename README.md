@@ -1980,6 +1980,20 @@ of snapping). `Rasterizations` / `CacheHits` count what happened; the demo's *Ve
 has a "raster cache" box (NotMask) that switches between direct drawing and `VectorSprite` and shows
 both counters. `DrawFit(dst, rect)` and `Draw(dst, Matrix3x2)` are cached the same way.
 
+**Animated pictures: the layer compositor.** For an image with animation tracks (`SeekToTime`),
+the same `VectorSprite` (`img.Cached`) splits the picture, in z order, into segments. Shapes whose
+whole animation chain only *moves* them (camera dollies, parallax planes, plain static content) are
+baked once per zoom into a raster — together with the static form of their clip windows — and blitted
+per frame with the chain's current delta (`inv(base) · chain(t)`); the sub-raster re-rasterises by
+itself only when that delta's linear part drifts more than `Tolerance`, so a slow dolly re-rasterises
+a couple of times a second while a fast local scale stays live. Shapes with paint-per-frame tracks
+(morph, opacity, dash), mask re-derivations or use sites are drawn live. A dolly-heavy scene thus
+costs a few blits plus its genuinely animated shapes per frame: the 103-shape flask scene drops from
+~30 ms to ~10 ms per frame at 600 px (and ~60 → ~20 ms at 1000 px), the cauldron / lab scenes 6–7x.
+`LayerSummary` / `LayerInfo` report the plan (layer runs, live runs, rasters, blits); `FrameAt`
+remains the exact per-frame clone for one-off rendering. The demo's *Animated SVG* test draws through
+the compositor and shows its stats in the note.
+
 ### Gradient fills in the shape API (`cs/Sprite.Gradient.cs`)
 
 The vector renderer's gradient paints are available to ordinary shape drawing. A gradient is a
