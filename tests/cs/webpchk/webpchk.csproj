@@ -16,7 +16,7 @@
     <Compile Include="../../../cs/Vector.Render.cs" />
     <Compile Include="../../../cs/Vector.Cache.cs" />
     <Compile Include="../../../cs/Vector.Edit.cs" />
-    <Compile Include="../../../cs/Vector.Svg.cs;../../../cs/Vector.SvgText.cs" />
+    <Compile Include="../../../cs/Vector.Svg.cs;../../../cs/Vector.Anim.cs;../../../cs/Vector.SvgText.cs" />
     <Compile Include="../../../cs/Vector.Ps.cs" />
     <Compile Include="../../../cs/Vector.PsImage.cs" />
     <Compile Include="../../../cs/Vector.Ai.cs" />

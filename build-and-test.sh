@@ -63,6 +63,8 @@ for r in ctlrun benchrun; do
 done
 cp tests/build/libSR2D64.so tests/cs/selchk/bin/Release/net10.0/SR2D64.so
 runlog "run selchk" tests/cs/selchk/bin/Release/net10.0/selchk
+cp tests/build/libSR2D64.so /home/user/.cache/vecrun/bin/Release/net10.0/SR2D64.so
+runlog "run vecrun anim (SMIL: morph / masks / motion / frames)" env VECANIM=1 /home/user/.cache/vecrun/bin/Release/net10.0/vecrun /home/user/.cache/ctlrun-out
 
 echo "=================================="
 echo "gates passed: $PASS, failed: $FAIL"

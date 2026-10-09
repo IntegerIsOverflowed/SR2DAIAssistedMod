@@ -26,7 +26,7 @@ SR2D/
 │  ├─ Sprite.Shapes.cs     partial Sprite: polylines/polygons with width, rect, ellipse, arrow, bracket (AA, blend ops)
 │  ├─ Sprite.Rect.cs       partial Sprite: Rectangle (x,y,w,h) overloads of the L/R/T/B methods, Bounds, LockRect
 │  ├─ Sprite.Curves.cs     partial Sprite: splines through points, Béziers, arcs, PathBuilder (DrawPath / FillPath)
-│  ├─ Vector.cs / .Render.cs / .Svg.cs / .Ps.cs / .Pdf.cs   VectorImage model, rasteriser, SVG / PostScript-EPS-AI / PDF importers
+│  ├─ Vector.cs / .Render.cs / .Svg.cs / .Anim.cs / .Ps.cs / .Pdf.cs   VectorImage model, rasteriser, SVG (SMIL animation, alpha masks) / PostScript-EPS-AI / PDF importers
 │  ├─ Vector.Cache.cs      VectorSprite: cached raster of a VectorImage (blit per frame until zoom / angle / content changes)
 │  ├─ Vector.Edit.cs       Container edits: Recolor / SwapColors / Palette (fill, stroke or both), by-name SetFill / SetStroke / Hide / Show / Remove, Merge, Shuffle, order
 │  ├─ Sprite.Gradient.cs   partial Sprite: gradient-paint overloads of FillRect / RoundRect / Ellipse / Circle / Polygon / Path / StrokePath + SpriteGradient factory
@@ -1893,6 +1893,70 @@ the timings; the note lists the parser warnings. The picture has a real frame: c
 resize it (Shift keeps the aspect), dragging outside the frame turns it (rotate cursor), a right click
 inside sets the pivot in picture units (the frame, the handles and the resize cursors turn with it).
 
+### Animated SVG: SMIL tracks, alpha masks, frames (`cs/Vector.Anim.cs`)
+
+The SVG importer keeps what it needs to **play the file's own animation** while it walks the tree:
+
+**SMIL** (design tools and AI agents animate through `<animate>` / `<animateTransform>` /
+`<animateMotion>` / `<set>` children of the shape they move — the cat-idle style loops):
+
+* `<animate attributeName="d">` — the values (from/to or a `values` list) are parsed once and morphed
+  **per path command**, so keyframe paths may differ in coordinates but must share their command
+  structure (when they don't, the track falls back to stepping).
+* `<animateTransform type="translate | scale | rotate | skewX | skewY">` — values may be single
+  transforms or whole transform lists; `additive="sum"` appends to the element's transform attribute.
+* `<animateMotion>` — the `path` attribute is flattened and sampled by arc length; `keyPoints` and
+  `rotate="auto"` are honoured.
+* Timing: `begin` / `dur` clocks (`s`, `ms`, `min`, `h`, `mm:ss`), `repeatCount` (incl.
+  `indefinite`), `calcMode` `linear` / `spline` (`keySplines` eased by solving the Bézier) /
+  `discrete`, `keyTimes`, `fill="freeze"`. `Duration` is the longest track window.
+* **Alpha masks** (`<mask>` with `mask-type: alpha`, and luminance masks whose filter is the
+  white-forcing `feColorMatrix` design tools write) become clips — and unlike `clipPath` they stay
+  *re-derivable*: the mask geometry is kept per element, so a mask whose content is animated moves
+  the clip with it. Everything else (masks with real filters, non-alpha) is approximated as alpha or
+  reported in `Warnings`.
+
+**CSS animations** (the other style AI-generated game art uses — `@keyframes` in a `<style>` block
+plus `animation:` / `animation-*` declarations on classes or inline): `transform` and `opacity`
+(and `stroke-dashoffset` marching dashes) keyframes become the same tracks SMIL produces. The
+shorthand and the longhands resolve into `begin` / `dur` / `repeatCount` / direction / fill-mode,
+keyword (`ease`, `ease-in-out`, …) and `cubic-bezier` easings become `keySplines`, `animation-delay`
+staggers. Transforms interpolate **per function** — a `rotate(0) → rotate(360deg)` loop sweeps a
+full turn (element-wise matrix lerp would hold still) — and `transform-box: fill-box` +
+`transform-origin: center` (what these files write) turns rotate / scale around the element's own
+bounds. Animated groups wrapping `<use>` (the "camera dolly" pattern) move the use content with
+them. Other animated properties are reported once in `Warnings`.
+
+Fidelity details that matter for these files: transform chains compose child-before-parent (a
+statically-offset pestle inside a grinding group turns around the group's pivot), `clip-path`
+clips stay in their owner's space (sand translates *inside* a static window while the whole
+hourglass flips), `opacity:0`-until-animated elements show while their track runs, and `to`-only
+keyframe lists sweep. `VectorImage.ClipViewport` (off by default) clips drawing to the view box -
+browsers always do; scenes routinely park decoration beyond the canvas.
+
+```csharp
+var img = VectorImage.Load("cat.svg");
+if (img.Duration > 0)                            // 0 = a static picture
+{
+    double t = (DateTime.Now.Ticks / 10_000 % (img.Duration * 1000)) / 1000.0;
+    img.SeekToTime(t);                           // apply every track in place (repeatable)
+    img.Draw(canvas, x, y);
+    var f30 = img.GetFrame(30);                  // independent frame copies (FrameRate = 30 fps)
+    int frames = img.FrameCount;                 // Duration * FrameRate, rounded up
+}
+```
+
+`SeekToTime` only touches shapes / mask clips a track drives — the base paths and transforms are
+restored relative to the previous seek, so seeking twice to the same t gives the same picture, and
+`FrameAt(t)` / `GetFrame(i)` hand out clones so several frames can be kept or drawn at once. The
+root element's presentation attributes (`fill="none"` and friends) apply to the whole picture, so
+stroked paths without their own fill stay stroke-only; `animateMotion` interpolates inside the
+flattened path's chords, so the motion is smooth on shallow curves.
+
+Demo: *Files → "Animated SVG (SMIL + CSS)"* — open an animated `.svg` (built-in sample otherwise), tick
+**Animate** to play the loop, `Speed` = playback rate (6 = real time); the note shows t within the
+loop, the frame index, the track count and the seek + draw cost.
+
 ### Drawing a vector picture every frame: `VectorSprite` (`cs/Vector.Cache.cs`)
 
 Rasterising is the expensive part (flatten + fill every shape: the 240-shape tiger head at 400 px
@@ -3659,7 +3723,7 @@ too, so a broken/partial build is obvious immediately.
 | Layers | `LayeredSprite`: 12 layers with per-layer effects (prefix cache, compose vs layer-by-layer), `LayeredSprite.Transform` (the editable frame: move / scale / stretch / rotate / perspective, layer transforms, opacity), blend-mode layers (Multiply / Screen / Color … with per-layer opacity folded into the op) |
 | Effects | `DrawBlurred` (op selector), drop shadow and glow by hand vs one `Effects` stage side by side, Wave / Ripple / Noise / Turbulence / DistortMap, colour stage, outline / Dilate / Erode, chains (Enable / Disable at run time, Blur→Noise→Colour rotated PRE/POST), `DrawTransparent`, heat haze (Post), `Blur` in place, frosted-glass backdrop, depth-of-field slice stack |
 | Blend modes | all 27 modes over the photo backdrop (gallery + single mode + modes on transforms and shapes) |
-| Files | PNG codec round trip (`ToPng` → `FromPng`, adaptive encoder), vector import (`SVG` / `EPS` / `PS` / `AI` / `PDF` → `VectorImage.Draw`, with the recolour / `VectorSprite` strip) |
+| Files | PNG codec round trip (`ToPng` → `FromPng`, adaptive encoder), vector import (`SVG` / `EPS` / `PS` / `AI` / `PDF` → `VectorImage.Draw`, with the recolour / `VectorSprite` strip), animated SVG (`SMIL` → `FrameAt` / `SeekToTime`, plays an animated `.svg` opened from a file) |
 | Voxels | `VoxelGrid` terrain (procedural: noise heightmap, 3-D noise caves, lamps of several colours / strengths, tower with beacon, fire pit) up to 512x512x256 with every camera preset / free orbit camera / lighting tier (radio buttons) / points vs cubes / night (sky level slider) / light energy multiplier / parallel draw; a 24³ house model (built with the editing API, lit inside and out for the night) drawn Count times; "Voxel lights" (three rooms, three lamps: hue / strength knobs + on/off switch per lamp, Light reach / Sky / Lamp energy sliders in a strip of SR2D controls above the canvas — the Update time is shown, so you see what a longer reach costs); editing showcase (noise asteroid, carved tunnels, lit cavities, torus / cone / capsule / shell sphere, Shell / Invert / Hollow variants); "Voxels from projections" (built-in sprite sets ball / box / cylinder / square-top-round-bottom / rocket, six per-view check boxes, blend and fit modes, up to six PNGs of your own via Open file..., every source sprite labelled with its side); "BIG voxel grid" (Count x 128 per side up to 1024^3, heightmap world with a lit village, live low-res preview while you move the camera, then 5 full frames with exact timings; RAM guard); "Load a MagicaVoxel .vox or a Wavefront .obj" (Open file... button; built-in sample = house via .vox round trip + an obj with an in-memory .mtl whose Ke material becomes an emitter) |
 | Controls | the SR2D-drawn WinForms controls, in a strip above the canvas: "SpriteKnob / SpriteSlider" (two rows of knobs — every DragMode / Gauge / Pointer combination switchable — and sliders, one bound to a native TrackBar) and "SpriteButton / SpriteToggle / SpriteRadio / SpriteProgress" (buttons run a fake job that drives H / V / ring / segmented / marquee progress bars, the four toggle styles and two radio groups drive the canvas) |
 | Old vs new | `DrawLine` (old) vs `PreciseDots` vs `DrawLine2` (3-way fan), `DrawRotate` vs `DrawRotate2` vs `DrawRotateShear` (3-way, same direction), `DrawRotate` original kernel vs `UseWarp: true` (same call), `RESIZE` ctor vs `DrawScaled`, `AlphaBlend` vs `AlphaOver` on a transparent layer (glow sprites on top, shapes underneath) |

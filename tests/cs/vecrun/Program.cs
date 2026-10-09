@@ -171,6 +171,7 @@ static class Program {
   static int Main(string[] args) {
     string outDir = args[0]; Directory.CreateDirectory(outDir);
     if (Environment.GetEnvironmentVariable("VECCACHE") != null) { CacheTest(outDir, args.Length > 1 ? args[1] : null); return 0; }
+    if (Environment.GetEnvironmentVariable("VECANIM") != null) return AnimTest(outDir, args.Skip(1).ToArray());
     if (Environment.GetEnvironmentVariable("VECRECOLOR") != null) return RecolorTest(outDir, args[1]);
     if (Environment.GetEnvironmentVariable("VECOBJECTS") != null) return ObjectsTest(outDir, args.Skip(1).ToArray());
     if (Environment.GetEnvironmentVariable("VECPAGE") is string pg) {   // VECPAGE=<page|all> VECW=<width>: render PDF pages one to one (white background) -> <name>_p<N>.rgba
@@ -259,5 +260,143 @@ static class Program {
     c.FillRect(480, 530, 190, 50, gp); c.FillRect(690, 530, 190, 50, gp);
     var px = c.Pixels; var buf = new byte[px.Length * 4]; for (int i = 0; i < px.Length; i++) { int v = px[i]; buf[i * 4] = (byte)(v >> 16); buf[i * 4 + 1] = (byte)(v >> 8); buf[i * 4 + 2] = (byte)v; buf[i * 4 + 3] = 255; }
     File.WriteAllBytes(Path.Combine(outDir, "cache.rgba"), buf); Console.WriteLine("wrote cache.rgba 900x600");
+  }
+
+  // VECANIM=1 vecrun.dll <outDir> [animated svg...]: SMIL tracks, masks, frames. The bundled tests/vec/anim_smil.svg is
+  // checked against exact expectations (morph, static + animated alpha mask, motion, additive freeze scale, discrete);
+  // every further file is loaded, its frames are dumped (optional_cat_t*.rgba) and must differ + seek repeatably.
+  static int AnimTest(string outDir, string[] files) {
+    int bad = 0; void Check(bool ok, string what) { Console.WriteLine((ok ? "ok   " : "FAIL ") + what); if (!ok) bad++; }
+    string syn = "";
+    foreach (var cand in new[] { "tests/vec/anim_smil.svg", Path.Combine("..", "..", "..", "..", "..", "SR2D", "tests", "vec", "anim_smil.svg"), "anim_smil.svg" }) if (File.Exists(cand)) { syn = cand; break; }
+    if (syn.Length == 0) { Console.WriteLine("FAIL tests/vec/anim_smil.svg not found"); return 1; }
+    var back = unchecked((int)0xFF111111);
+    const int CW = 240, CH = 150;                        // the synthetic viewBox is 240x150 - the probe windows are 1:1
+    Sprite Render(VectorImage frame) { var c2 = new Sprite(CW, CH); c2.ClearBuffer(back); frame.DrawFit(c2, new System.Drawing.RectangleF(0, 0, CW, CH)); return c2; }
+    Sprite RenderBase(VectorImage img) => Render(img);
+    Sprite RenderAt(VectorImage img, double t) => Render(img.FrameAt(t));
+    bool Same(Sprite a, Sprite b) { var pa = a.Pixels; var pb = b.Pixels; if (pa.Length != pb.Length) return false; for (int i = 0; i < pa.Length; i++) if (pa[i] != pb[i]) return false; return true; }
+    int Count(Sprite s, Func<int, bool> pred, int x0, int x1, int y0, int y1) { int n = 0; var px = s.Pixels; for (int y = y0; y < y1; y++) for (int x = x0; x < x1; x++) if (pred(px[y * CW + x])) n++; return n; }
+    bool Is(int p, int r, int g, int b) => Math.Abs((p >> 16 & 255) - r) < 48 && Math.Abs((p >> 8 & 255) - g) < 48 && Math.Abs((p & 255) - b) < 48 && (p >> 24 & 255) > 100;
+    Func<int, bool> Red = p => Is(p, 255, 48, 48), Green = p => Is(p, 48, 255, 96), Yellow = p => Is(p, 255, 204, 0), Orange = p => Is(p, 255, 136, 0), Magenta = p => Is(p, 255, 0, 255);
+
+    var img = VectorImage.Load(syn);
+    Console.WriteLine($"{Path.GetFileName(syn)}: duration {img.Duration:0.###} s, {img.Tracks.Count} tracks, {img.Shapes.Count} shapes, masks {img.MaskItems.Count}, warns {img.Warnings.Count}");
+    foreach (var w in img.Warnings) Console.WriteLine("   warn: " + w);
+    Check(img.Warnings.Count == 0, "no import warnings");
+    Check(Math.Abs(img.Duration - 3.0) < 0.002, $"duration = {img.Duration:0.###} s (expected 3: the motion track)");
+    Check(img.FrameCount == 90, $"frame count = {img.FrameCount} (expected 90 at 30 fps)");
+    Check(img.Tracks.Count == 12, $"tracks = {img.Tracks.Count} (expected 6 SMIL + 6 CSS)");
+    var base0 = RenderBase(img);
+    var f0 = RenderAt(img, 0);
+    var f10 = RenderAt(img, 1.0);
+    var f15 = RenderAt(img, 1.5);
+    var f25 = RenderAt(img, 2.5);
+    Check(!Same(f0, f10), "frame(0) != frame(1.0) - the animation moves pixels");
+    Check(Same(RenderAt(img, 0), f0), "frame(0) is repeatable (two seeks give the same pixels)");
+    Check(Same(RenderBase(img), base0), "the base image is untouched by FrameAt");
+    // d morph: triangle (15..45) -> (55..85) at t = 1.0 and back
+    Check(Count(f0, Yellow, 15, 45, 104, 136) > 100 && Count(f10, Yellow, 15, 45, 104, 136) < 30, "morph moved away from the left");
+    Check(Count(f10, Yellow, 55, 85, 104, 136) > 100, "morph arrived on the right at t = 1.0");
+    // static alpha mask: red bar visible only inside x 0..110, at every time
+    Check(Count(f0, Red, 35, 65, 5, 25) > 300 && Count(f15, Red, 35, 65, 5, 25) > 300, "static mask shows the red bar (x 30..110)");
+    Check(Count(f0, Red, 115, 165, 5, 25) == 0 && Count(f15, Red, 115, 165, 5, 25) == 0, "static mask hides the red bar beyond x = 110");
+    // animated alpha mask: window + band slide together (t = 1.0 -> translate 55, band 55..95 in y 38..66)
+    Check(Count(f0, Red, 5, 35, 42, 62) > 300 && Count(f10, Red, 5, 35, 42, 62) < 30, "animated mask: the band left the left side");
+    Check(Count(f10, Red, 55, 85, 42, 62) > 300, "animated mask: the band arrived in the middle at t = 1.0");
+    // animateMotion: green circle at (15,90) at t = 0, at the spline midpoint (120,75) at t = 1.5
+    Check(Count(f0, Green, 7, 23, 82, 98) > 60 && Count(f15, Green, 7, 23, 82, 98) < 20, "motion started at the path start");
+    Check(Count(f15, Green, 100, 140, 55, 95) > 60 && Count(f0, Green, 100, 140, 55, 95) < 20, "motion reached the middle at t = 1.5");
+    // motion position must be ON the path (u = 0.5 -> Ease(0.333,0,0.667,1,0.5) = 0.5 -> half the arc length
+    // = (120.00, 67.63), precomputed by flattening the cubic exactly like the engine does); snapping to flatten
+    // chords (13 chords on this path) misses by several px - this is the smoothness regression the ball stutter came from
+    {
+        int minx = int.MaxValue, maxx = -1, miny = int.MaxValue, maxy = -1;
+        var px = f15.Pixels;
+        for (int y = 54; y < 82; y++) for (int x = 106; x < 134; x++) if (Green(px[y * CW + x])) { if (x < minx) minx = x; if (x > maxx) maxx = x; if (y < miny) miny = y; if (y > maxy) maxy = y; }
+        Check(maxx >= 0 && MathF.Abs((minx + maxx) * 0.5f - 120.0f) <= 1.5f && MathF.Abs((miny + maxy) * 0.5f - 67.63f) <= 1.5f,
+              $"motion position exact at t = 1.5 (center ({(minx + maxx) * 0.5f:0.##}, {(miny + maxy) * 0.5f:0.##}, expected (120.0, 67.63))");
+    }
+    // additive scale with repeatCount = 2 + fill = freeze: square 202..222 at t = 0, 192..232 from t = 2 on (frozen at t = 2.5)
+    Check(Count(f0, Orange, 193, 201, 118, 130) == 0 && Count(f25, Orange, 193, 201, 118, 130) > 20, "additive scale grew and stayed frozen");
+    // discrete translate: at x 120..134 at t = 0, at 180..194 at t = 1.5
+    Check(Count(f0, Magenta, 120, 134, 118, 132) > 60 && Count(f15, Magenta, 120, 134, 118, 132) < 10, "discrete: magenta square at the left first");
+    Check(Count(f15, Magenta, 180, 194, 118, 132) > 60 && Count(f0, Magenta, 180, 194, 118, 132) < 10, "discrete: jumped right after keyTime 0.5");
+    // root fill="none" must inherit: the open Q curve (no fill of its own) renders as a 2 px stroke and is NEVER
+    // filled with the default black (the regression that painted the cat's paw tips black and swamped its muzzle)
+    Func<int, bool> NearBlack = p => (p >> 16 & 255) < 60 && (p >> 8 & 255) < 60 && (p & 255) < 60;
+    Func<int, bool> BlueStroke = p => Math.Abs((p >> 16 & 255) - 127) < 50 && Math.Abs((p >> 8 & 255) - 176) < 50 && (p & 255) > 200;
+    Check(Count(f0, NearBlack, 146, 194, 2, 30) < 30, "root fill=none: the open stroked curve is not filled black");
+    Check(Count(f0, BlueStroke, 146, 194, 2, 30) > 30, "root fill=none: the open curve's stroke is drawn");
+    // CSS @keyframes: the spinner's dot turns around the fill-box centre (t = 0 -> right end, t = 1.0 -> left end);
+    // the blink square has a 0.8 s delay (base opacity 0.1 = dim) and peaks at phase 0.5 (t = 1.6 -> fully opaque)
+    Func<int, bool> CyanDot = p => (p & 255) > 200 && (p >> 8 & 255) > 150 && (p >> 16 & 255) < 120;
+    Check(Count(f0, CyanDot, 175, 195, 8, 28) > 15 && Count(f0, CyanDot, 151, 171, 8, 28) < 5, $"css: spinner dot on the right at t = 0 (right {Count(f0, CyanDot, 175, 195, 8, 28)}, left {Count(f0, CyanDot, 151, 171, 8, 28)})");
+    Check(Count(f10, CyanDot, 151, 171, 8, 28) > 15 && Count(f10, CyanDot, 175, 195, 8, 28) < 5, $"css: spinner dot on the left at t = 1.0 (left {Count(f10, CyanDot, 151, 171, 8, 28)}, right {Count(f10, CyanDot, 175, 195, 8, 28)})");
+    Func<int, bool> Pink = p => (p >> 16 & 255) > 200 && (p >> 8 & 255) < 140 && (p & 255) > 110 && (p & 255) < 210;
+    var f04 = RenderAt(img, 0.4);
+    Check(Count(f04, Pink, 202, 234, 10, 22) < 10, "css: delayed blink dim before the delay (base opacity)");
+    Check(Count(RenderAt(img, 1.6), Pink, 202, 234, 10, 22) > 120, "css: blink fully opaque at phase 0.5 (t = 0.8 s delay + 0.8 s)");
+    Check(img.Tracks.Any(tr => tr.OriginBox == 'f') && img.Tracks.Any(tr => tr.Anim.Direction == 2 || tr.Anim.Direction == 0), "css: fill-box origin + direction parsed");
+    // a clip-path on a STATIC group keeps clipping an animated slide inside it (the hourglass-sand case):
+    // the amber bar drops 30 px in 2 s; at t = 0.5 it shows inside the 20..50 x 60..80 window, never below it;
+    // at t = 1.5 it has slid fully past the window's bottom edge and must not paint at all
+    Func<int, bool> Amber = p => (p >> 16 & 255) > 200 && (p >> 8 & 255) > 130 && (p & 255) < 90;
+    Check(Count(RenderAt(img, 0.5), Amber, 20, 50, 60, 80) > 60 && Count(RenderAt(img, 0.5), Amber, 18, 52, 80, 96) == 0, "css: animated slide stays inside the static clip window");
+    Check(Count(f15, Amber, 18, 52, 58, 96) == 0, "css: slide past the window paints nothing (the clip does not ride along)");
+    // opacity:0 base + keyframes (the hide-until-animated idiom): invisible at phase 0, solid at phase 0.5
+    Func<int, bool> Teal = p => (p >> 8 & 255) > 200 && (p & 255) > 160 && (p >> 16 & 255) < 120;
+    Check(Count(f0, Teal, 60, 80, 60, 74) == 0 && Count(f10, Teal, 60, 80, 60, 74) > 100, "css: opacity:0 element shows only while its keyframes run");
+    // a `to`-only keyframe list sweeps: the implicit from is the matching identity list, not a matrix hold
+    Func<int, bool> Violet = p => (p >> 16 & 255) > 150 && (p & 255) > 200 && (p >> 8 & 255) < 150;
+    Check(Count(f0, Violet, 94, 114, 58, 66) > 40 && Count(f0, Violet, 94, 114, 50, 58) == 0, "css: to-only bar flat at t = 0");
+    Check(Count(f10, Violet, 94, 114, 50, 70) > 20, "css: to-only keyframes sweep (bar turned at t = 1.0)");
+    // animated group around a statically-offset child: the static offset must apply before the group's rotation
+    // (90 deg at t = 1.0 puts the square BELOW the 150/24 pivot; the reversed order would put it beside it)
+    Func<int, bool> GreenSq = p => (p >> 8 & 255) > 200 && (p >> 16 & 255) < 160 && (p & 255) < 160;
+    Check(Count(f0, GreenSq, 158, 170, 18, 30) > 40, "css: nested static offset at rest");
+    Check(Count(f10, GreenSq, 144, 156, 32, 44) > 30 && Count(f10, GreenSq, 166, 178, 32, 44) == 0, "css: child offset applies before the animated group's rotation");
+    // ClipViewport: content parked beyond the view box paints when the flag is off and not when it is on
+    Func<int, bool> OffRed = p => (p >> 16 & 255) > 200 && (p >> 8 & 255) < 100 && (p & 255) < 100;
+    Sprite Shifted(bool clip) { img.ClipViewport = clip; var cv = new Sprite(240, 150); cv.ClearBuffer(unchecked((int)0xFF111111)); img.FrameAt(0).Draw(cv, 40, 0); return cv; }
+    var shOff = Shifted(false); var shOn = Shifted(true); img.ClipViewport = false;
+    Check(Count(shOff, OffRed, 10, 40, 64, 76) > 60, "off-canvas content paints with ClipViewport off");
+    Check(Count(shOn, OffRed, 0, 40, 0, 150) == 0, "ClipViewport hides content parked beyond the view box");
+    // GetFrame wraps and repeats
+    var g3 = Render(img.GetFrame(3));
+    var g3b = Render(img.GetFrame(3));
+    Check(Same(g3, g3b) && Same(g3, RenderAt(img, 0.1)), "GetFrame(3) = frame at 0.1 s, repeatable");
+    Check(Same(g3, Render(img.GetFrame(93))), "GetFrame wraps (93 -> 3)");
+    Check(img.Tracks.Any(tr => tr.Anim.Additive) && img.Tracks.Any(tr => tr.Anim.Freeze) && img.Tracks.Any(tr => tr.Anim.CalcMode == 2) && img.Tracks.Any(tr => tr.Anim.Kind == SvgTrackKind.Motion), "additive / freeze / discrete / motion flags parsed");
+
+    foreach (var f in files)
+    {
+      if (!File.Exists(f)) { Console.WriteLine($"skip (missing): {f}"); continue; }
+      try
+      {
+        var aimg = VectorImage.Load(f);
+        Console.WriteLine($"{Path.GetFileName(f)}: duration {aimg.Duration:0.###} s, {aimg.Tracks.Count} tracks, {aimg.Shapes.Count} shapes, warns {aimg.Warnings.Count}");
+        foreach (var w in aimg.Warnings) Console.WriteLine("   warn: " + w);
+        Check(aimg.Duration > 0.5, $"{Path.GetFileName(f)}: duration {aimg.Duration:0.###} s parsed");
+        Check(!aimg.Warnings.Any(w => w.Contains("animate")), $"{Path.GetFileName(f)}: no 'animate is not supported' warnings");
+        var b0 = RenderBase(aimg); var a0 = RenderAt(aimg, 0); var amid = RenderAt(aimg, aimg.Duration / 2); var aend = RenderAt(aimg, aimg.Duration * 0.99);
+        Check(!Same(a0, amid) && !Same(amid, aend), $"{Path.GetFileName(f)}: frames 0 / mid / end all differ");
+        Check(Same(RenderAt(aimg, aimg.Duration / 2), amid), $"{Path.GetFileName(f)}: mid frame is repeatable");
+        Check(Same(RenderBase(aimg), b0), $"{Path.GetFileName(f)}: base render untouched by the seeks");
+        string name = Path.GetFileNameWithoutExtension(f);
+        var extra = Environment.GetEnvironmentVariable("VECANIM_T");   // optional "<seconds>:<tag>,<seconds>:<tag>,..." frames on top of t0/tmid/tend
+        var times = new List<(double, string)> { (0.0, "t0"), (aimg.Duration / 2, "tmid"), (aimg.Duration * 0.99, "tend") };
+        if (extra != null) foreach (var part in extra.Split(',')) { var kv = part.Split(':'); if (kv.Length == 2 && double.TryParse(kv[0], System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var et)) times.Add((et, kv[1])); }
+        foreach (var (t, tag) in times)
+        {
+          var c2 = RenderAt(aimg, t); var px = c2.Pixels; var buf = new byte[px.Length * 4];
+          for (int i = 0; i < px.Length; i++) { int v = px[i]; buf[i * 4] = (byte)(v >> 16); buf[i * 4 + 1] = (byte)(v >> 8); buf[i * 4 + 2] = (byte)v; buf[i * 4 + 3] = (byte)(v >> 24); }
+          File.WriteAllBytes(Path.Combine(outDir, $"{name}_{tag}.rgba"), buf);
+        }
+        Console.WriteLine($"   dumped {name}_t0 / _tmid / _tend.rgba {CW}x{CH}");
+      }
+      catch (Exception ex) { bad++; Console.WriteLine($"{f}: FAIL {ex.GetType().Name}: {ex.Message}\n{ex.StackTrace}"); }
+    }
+    return bad;
   }
 }

@@ -1205,6 +1205,28 @@ T(GControls, "SpriteLabel / GroupBox / Tabs / TextBox / Numeric / Combo / ListBo
             };
             L[L.Count - 1].FileFilter = "Vector files|*.svg;*.svgz;*.eps;*.ps;*.ai;*.pdf|SVG (*.svg, *.svgz)|*.svg;*.svgz|PostScript / EPS (*.eps, *.ps, *.ai)|*.eps;*.ps;*.ai|PDF (*.pdf)|*.pdf|All files|*.*";
 
+            // ===================================================== Animated SVG (SMIL)
+            T(GFiles, "Animated SVG (SMIL + CSS): FrameAt / SeekToTime (button 'Open file...')", "VectorImage keeps the animation of a file while importing: SMIL tracks (<animate> of the d attribute, <animateTransform>, <animateMotion>, <set>) AND CSS animations (@keyframes of transform / opacity / stroke-dashoffset with animation-* timing, transform-box / transform-origin - the style AI-generated game art uses). SeekToTime(t) applies every track at time t (paths morph per command, transforms interpolate per function - a 0 to 360 deg spin sweeps), FrameAt(t) returns an independent frame copy, Duration / FrameCount / FrameRate / GetFrame(i) iterate the loop (FrameCount = Duration * 30 fps here). Built-in sample = a small loop when no file was chosen. 'Animate' plays the loop (the clock runs while the check box is ticked; off = frame 0); the playback rate is Speed / 6 (6 = real time). Drag to move; drag outside = rotate; Scale = zoom; Smooth = anti-aliased edges; Blend = opacity; Brite < 0 = wireframe. ClipViewport is on here: decoration the file parks beyond its canvas stays out, like in a browser. The note shows the track count and the seek + draw cost.", c =>
+            {
+                var t = L.Find(x => x.Name.StartsWith("Animated SVG", StringComparison.Ordinal))!;
+                var (img, info) = EnsureAnimVector(t.FilePath);
+                var o = new VectorRenderOptions { AA = c.Smooth, Opacity = c.Blend / 255f, Strokes = true, Fills = c.Brite >= 0 };
+                var osz = VectorObjectSize(c, img);                        // picture size on the canvas at Scale 1 (longer side = 1.5 x sprite)
+                float fit = osz.Width / MathF.Max(1e-3f, img.Width);
+                float pfx = c.PivotXF < 0 ? 0.5f : c.PivotXF / osz.Width, pfy = c.PivotYF < 0 ? 0.5f : c.PivotYF / osz.Height;
+                double tt = img.Duration <= 0 ? 0 : (c.Time * Math.Max(0, c.Speed) / 6.0) % img.Duration;   // Animate off = 0 = frame 0
+                var sw = System.Diagnostics.Stopwatch.StartNew();
+                var frame = img.FrameAt(tt);
+                double seek = sw.Elapsed.TotalMilliseconds; sw.Restart();
+                frame.Draw(c.Canvas, c.X, c.Y, fit * c.Scale, fit * c.ScaleY, c.Angle * 180f / MathF.PI, o, pfx, pfy);
+                double ms = sw.Elapsed.TotalMilliseconds;
+                string warn = img.Warnings.Count == 0 ? "" : " | " + string.Join("; ", img.Warnings.GetRange(0, Math.Min(3, img.Warnings.Count))) + (img.Warnings.Count > 3 ? $" (+{img.Warnings.Count - 3})" : "");
+                c.Note = $"{info} | t = {tt:0.###} / {img.Duration:0.###} s = frame {(int)(tt * img.FrameRate) + 1}/{img.FrameCount} | {img.Tracks.Count} tracks, {img.Shapes.Count} shapes | seek {seek:F2} + draw {ms:F2} ms{warn}";
+            }, needsPoly: true).Ui(Param.Scale, "Zoom (x0.01; the longer side = 1.5 x sprite size at x1.00); drag the top / bottom edge to squish", Param.Time, "Animate: play the loop (off = stand at frame 0)", Param.Speed, "Playback rate = Speed / 6 (6 = real time, 12 = double speed)", Param.Smooth, "Anti-aliased edges", Param.Blend, "Opacity", Param.Brite, "< 0: strokes only (wireframe)", Param.Mouse, "Drag = move; drag outside = rotate; edges / corners = resize (Shift = keep aspect); right click = pivot").With(Param.Smooth, true).With(Param.Speed, 6);
+            L[L.Count - 1].MouseRotates = true; L[L.Count - 1].Resizable = true; L[L.Count - 1].AnimSpin = 0f;
+            L[L.Count - 1].ObjectSize = c => { var vt = L.Find(x => x.Name.StartsWith("Animated SVG", StringComparison.Ordinal))!; var (vi, _) = EnsureAnimVector(vt.FilePath); return VectorObjectSize(c, vi); };
+            L[L.Count - 1].FileFilter = "Animated SVG|*.svg;*.svgz|SVG (*.svg, *.svgz)|*.svg;*.svgz|All files|*.*";
+
             // ===================================================== Effects (blur)
             // radius = Scale slider * 8 (x1.00 -> 8 px, x4 -> 32 px), strength = Blend slider
             static int BlurR(Ctx c) => (int)MathF.Round(c.Scale * 8f);
@@ -2365,6 +2387,33 @@ T(GControls, "SpriteLabel / GroupBox / Tabs / TextBox / Numeric / Combo / ListBo
             }
             catch (Exception ex) { img = VectorImage.FromSvg(SampleSvg); info = $"{Path.GetFileName(path)}: {ex.GetType().Name}: {ex.Message} - showing the sample"; }
             tvec = img; tvecKey = key; tvecInfo = info; return (img, info);
+        }
+        static VectorImage? tanim; static string tanimKey = "", tanimInfo = "";
+        // built-in animated sample: only the track kinds the reader supports (d morph, animateTransform, animateMotion, alpha mask)
+        const string AnimSampleSvg = "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 240 120'>"
+            + "<rect width='240' height='120' fill='#1c2836'/>"
+            + "<mask id='w' maskUnits='userSpaceOnUse' maskContentUnits='userSpaceOnUse' mask-type='alpha'><rect x='8' y='8' width='150' height='104' fill='#ffffff'>"
+            + "<animateTransform attributeName='transform' type='translate' values='0 0; 74 0; 0 0' keyTimes='0;0.5;1' dur='3s' repeatCount='indefinite'/></rect></mask>"
+            + "<g mask='url(#w)'><rect x='8' y='8' width='224' height='104' fill='#22405e'/>"
+            + "<circle cx='45' cy='60' r='20' fill='#ffcc33'><animateTransform attributeName='transform' type='translate' values='-25 0; 145 0; -25 0' keyTimes='0;0.5;1' dur='3s' repeatCount='indefinite'/></circle></g>"
+            + "<path fill='#e05555' d='M190,30 L215,45 L190,60 Z'><animate attributeName='d' values='M190,30 L215,45 L190,60 Z; M185,25 L220,60 L190,68 Z; M190,30 L215,45 L190,60 Z' keyTimes='0;0.5;1' dur='1.5s' repeatCount='indefinite'/></path>"
+            + "<circle r='6' fill='#40c080'><animateMotion path='M15,100 C60,70 120,120 160,95' dur='3s' repeatCount='indefinite'/></circle>"
+            + "<rect x='205' y='80' width='12' height='12' fill='#ff00ff'><animateTransform attributeName='transform' type='translate' values='0 0; 0 -30' keyTimes='0;0.5' calcMode='discrete' dur='2s' repeatCount='indefinite'/></rect></svg>";
+        /// <summary>The animated SVG of the 'Animated SVG' test (cached; falls back to the built-in sample on error).</summary>
+        static (VectorImage img, string info) EnsureAnimVector(string? path)
+        {
+            string key = path ?? "";
+            if (tanim != null && tanimKey == key) return (tanim, tanimInfo);
+            var sw = System.Diagnostics.Stopwatch.StartNew();
+            VectorImage img; string info;
+            try
+            {
+                if (path != null && File.Exists(path)) { img = VectorImage.Load(path); info = $"{Path.GetFileName(path)} ({img.Format}, load {sw.Elapsed.TotalMilliseconds:F1} ms)"; }
+                else { img = VectorImage.FromSvg(AnimSampleSvg); info = $"built-in sample ({img.Tracks.Count} tracks, {img.Duration:0.###} s loop) - open an animated .svg with 'Open file...'"; }
+            }
+            catch (Exception ex) { img = VectorImage.FromSvg(AnimSampleSvg); info = $"{Path.GetFileName(path)}: {ex.GetType().Name}: {ex.Message} - showing the sample"; }
+            img.ClipViewport = true;   // scenes (the AI-made ones especially) park dust / parallax beyond the canvas; the demo shows the container's rectangle only
+            tanim = img; tanimKey = key; tanimInfo = info; return (img, info);
         }
         static VoxelGrid? tvoxFile; static string tvoxFileKey = ""; static string tvoxFileInfo = ""; static double tvoxFileMs;
         static (VoxelGrid g, string info, double loadMs) EnsureVoxelFile(string? path, int objRes, int fill)

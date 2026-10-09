@@ -332,7 +332,13 @@ namespace Sr2d64CSport
         public float Opacity = 1f;
         /// <summary>Local -> image coordinates.</summary>
         public Matrix3x2 Transform = Matrix3x2.Identity;
+        /// <summary>The static import-time chain (SeekToTime rebuilds <see cref="Transform"/> as the animated chain carried over this).</summary>
+        public Matrix3x2 BaseTransform = Matrix3x2.Identity;
         public VectorClip? Clip;
+        /// <summary>clip-path clips in image space plus the element that owned each: a clip lives in its owner's user space, so an
+        /// animation on the shape itself (or between shape and owner) must not move it. SeekToTime re-derives <see cref="Clip"/>
+        /// from these whenever the owner's chain animates (the sand stays in the glass while the content translates).</summary>
+        public List<(VectorClip, object)>? ClipRoots;
         /// <summary>Name of the shape: the SVG id (a group's id reaches children without one as "group/child#"), or whatever you assign. Used by the name-based edits in Vector.Edit.cs.</summary>
         public string? Id;
         /// <summary>Ids of the named groups the shape came from, outermost first, "/"-separated (SVG &lt;g id&gt; nesting); null when none. Name lookups match any segment.</summary>
@@ -393,6 +399,9 @@ namespace Sr2d64CSport
         /// shapes are untouched (a render-level clip, not a geometry edit). Null = everything. Set with <see cref="SetVisibleArea(RectangleF,bool)"/>,
         /// bake it into the view box with <see cref="CropToVisibleArea"/>.</summary>
         public RectangleF? VisibleArea { get => _visible; set { _visible = value; Touch(); } }
+        /// <summary>When true, Draw never paints outside the view box (the container's own rectangle) even if the file places
+        /// content beyond it - off-canvas dust, parallax overshoot, the stray glow of AI-made scenes. Off by default.</summary>
+        public bool ClipViewport;
         RectangleF? _visible;
 
         public VectorImage() { }

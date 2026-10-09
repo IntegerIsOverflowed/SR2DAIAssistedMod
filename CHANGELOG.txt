@@ -16,6 +16,90 @@ Conventions
   DOCS     README / comments only
 
 
+2026-10-09  animated SVG: browser-fidelity fixes + ClipViewport
+------------------------------------------------------------------------------------------------------------
+  FIXED    transform chains compose in the right order now (child first, then parent - the
+           row-vector form of the browser's column-vector chain). Before, an animated group
+           around a statically-offset child rotated around the wrong point (the pestle that
+           floated above the mortar), and an animated child inside an animated group (the
+           hourglass sand inside the flipping group) turned around a different pivot than its
+           glass. <use> sites get the site chain after the content chain; the import-time
+           static chain is kept per shape (VectorShape.BaseTransform) so seeks rebuild the
+           exact product.
+  FIXED    clip-path clips live in their OWNER's user space: an animation on the clipped
+           element (or between it and the owner) no longer drags the clip window along (the
+           sand that spilled over the hourglass / slid down over the glass). SeekToTime
+           re-derives such clips from the new VectorShape.ClipRoots (device-space clip + owner
+           element) with only the owner's animated chain.
+  FIXED    CSS opacity on an element the style hides (opacity:0 until animated - the bubbling
+           idiom) shows now: the track value replaces the element's own opacity, the factor
+           inherited from ancestors stays. `to`-only @keyframes sweep (implicit identity from)
+           instead of holding still - the rotating pentagram runes.
+  ADDED    VectorImage.ClipViewport (default off): drawing never paints outside the view box,
+           for scenes that park dust / parallax / glow beyond the canvas. The demo's animated
+           SVG test turns it on; browsers always clip to the viewport, so this matches them.
+  CHANGED  vecrun's anim gate: 53 checks now (was 44) - static-clip-vs-animated-content, the
+           opacity:0 idiom, to-only sweeps, nested static-offset-inside-animated-group order,
+           ClipViewport on/off.
+
+2026-10-08  CSS animations in SVG: @keyframes of transform / opacity (+ stroke-dashoffset)
+------------------------------------------------------------------------------------------------------------
+  ADDED    the SVG importer reads CSS animations now (the style AI-generated game art uses:
+           @keyframes in <style> plus animation / animation-* on classes or inline styles).
+           They become the same tracks SMIL produces: transform (per-function interpolation -
+           rotate 0 -> 360deg sweeps a full turn; SMIL animateTransform rotates interpolate
+           per parameter too), opacity (the track value replaces the element's own static
+           opacity, inherited group factors stay) and stroke-dashoffset (marching dashes).
+           Timing: shorthand + longhands, animation-delay, iteration counts, keyword and
+           cubic-bezier easings, normal / reverse / alternate (-reverse) directions, fill
+           modes; transform-box: fill-box + transform-origin: center (the design-tool default)
+           turns rotate / scale around the element's bounds. Animated groups wrapping <use>
+           (the camera-dolly pattern) move the use content with them. Other animated
+           properties are reported once in Warnings (e.g. stroke-dashoffset is supported,
+           anything else is not).
+  CHANGED  the demo test is "Animated SVG (SMIL + CSS)" now (same button, same params); the
+           vecrun gate checks a CSS spinner (fill-box origin, half turn at t = 1.0) and a
+           delayed opacity blink in the synthetic file (44 checks, was 29).
+
+2026-10-08  animated SVG fixes: root fill="none" inheritance + smooth animateMotion
+------------------------------------------------------------------------------------------------------------
+  FIXED    the SVG root's presentation attributes are applied now (the walk started from a
+           default Style). Compat: files with <svg fill="none"> and stroked paths without
+           their own fill (the cat idle's paw tips and muzzle) imported a default-BLACK fill
+           before - they rendered as filled blobs; they are stroke-only now, like in a browser.
+  FIXED    animateMotion interpolates INSIDE the flattened path's chords (the position was
+           snapping to the chord starts - on shallow curves that is several px per frame,
+           which stuttered the cat's ball). The vecrun gate now checks the ball position
+           against the analytically flattened arc position (<= 1.5 px).
+
+2026-10-08  animated SVG: SMIL tracks + alpha masks in VectorImage (FrameAt / SeekToTime / GetFrame) + demo test
+------------------------------------------------------------------------------------------------------------
+  ADDED    cs/Vector.Anim.cs - the SVG importer collects the SMIL animation of a file
+           (<animate attributeName="d"> per-command morphs, <animateTransform> (whole
+           transform lists, additive="sum"; translate / scale / rotate / skew),
+           <animateMotion> (path sampled by arc length, keyPoints, rotate="auto") and
+           <set>; begin / dur clocks, repeatCount, calcMode linear / spline / discrete
+           with keyTimes / keySplines / fill="freeze") and builds alpha masks (<mask
+           mask-type="alpha" plus the white-forcing feColorMatrix luminance filters that
+           design tools write; the mask content itself can be animated). VectorImage:
+           Duration / FrameRate / FrameCount / GetFrame(i) iterate the loop, FrameAt(t)
+           returns an independent frame copy, SeekToTime(t) applies every track in place
+           (repeatable - base geometry is only changed relative to the previous seek).
+  CHANGED  cs/Vector.Svg.cs: <mask> is no longer skipped (it becomes a clip that the
+           animation can re-derive, so a masked + animated file plays correctly),
+           <animate*> elements no longer produce "not supported" warnings, and a
+           percentage root width / height now falls back to the viewBox instead of
+           reading width="100%" as 100 px - compat: such SVGs keep their true aspect
+           now (they were squashed into 100x100 before).
+  ADDED    demo test "Animated SVG (SMIL)" (Files): plays an animated .svg chosen with
+           the 'Open file...' button (built-in sample loop otherwise); 'Animate' runs
+           the loop, Speed = playback rate (6 = real time); the note shows t within the
+           loop, the frame index, the track count and the seek + draw cost.
+  ADDED    gate: vecrun VECANIM=1 checks the synthetic tests/vec/anim_smil.svg against
+           exact pixel expectations (d morph, static + animated alpha mask, animateMotion
+           with keyPoints + keySplines, additive freeze scale, discrete translate, frame
+           API) and further files for differing + repeatable frames (21 gates now, was 20).
+
 2026-10-08  FeatureDemo / apps / template removed - EmptySR2DFormTemplate is the template
 ------------------------------------------------------------------------------------------------------------
   CHANGED  FeatureDemo/, apps/SpriteBox/ and template/SR2DApp are REMOVED (user order - the empty

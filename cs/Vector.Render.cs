@@ -328,7 +328,8 @@ namespace Sr2d64CSport
             var clipRect = dst.LockRect; if (clipRect.Width <= 0 || clipRect.Height <= 0) return;
             bool premul = o.Premultiplied ?? dst.Premultiplied;
             float tol = o.Tolerance ?? Sprite.CurveTolerance;
-            if (img.VisibleArea is RectangleF va)
+            var window = img.VisibleArea ?? (img.ClipViewport ? img.ViewBox : (RectangleF?)null);
+            if (window is RectangleF va)
             {   // render-level window: axis-aligned draw = narrower lock rect (free), otherwise a rectangle clip is added to every shape (mask path)
                 if (IsAxisAligned(m))
                 {
