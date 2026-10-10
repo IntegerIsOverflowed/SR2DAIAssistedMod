@@ -35,6 +35,8 @@ TESTS  tests/cs/ctlrun: Looks() checks the button accent (Classic 0 / Hairline 3
        the hairline bar, and the drum (Classic 43 tones, Segmented 6). Classic output is byte-identical to the
        committed build on the galleries (anim, buttons, cursors, fonts, furniture, knobs, scroll, textviews,
        wheels). The control sources are identical to the PR #9 head, so the check covers this branch.
+DEMO   EmptySR2DFormTemplate: Form1.Designer.cs Dispose(bool) has an empty `if (disposing)` block for the form's own
+       Sprite / Bitmap fields. base.Dispose and the components disposal are unchanged. compat: none.
 DOCS   README: "Flat looks: ControlLook" section and the file-tree entry for SpriteControls.Looks.cs.
 CLEANUP  14 unreferenced *_preview.png files removed from tests/ (commit 397de35, separate from the feature).
          Scratch PNGs in the workspace root were removed (outside the repo).
