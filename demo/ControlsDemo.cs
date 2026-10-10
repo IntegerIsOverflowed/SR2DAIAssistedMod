@@ -340,6 +340,33 @@ namespace Sr2d64CSport
     /// settings form - a tab control with a group box, labels, text / numeric boxes, a combo, a list box, LEDs. The statics
     /// drive the canvas (caption, copies, tint, layout).
     /// </summary>
+    /// <summary>The flat looks on a strip: the same controls in Classic, Hairline and Segmented (<see cref="ControlLook"/>).</summary>
+    internal static class LooksDemo
+    {
+        public const int StripHeight = 350;
+
+        public static Control Build()
+        {
+            var strip = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 3, RowCount = 1, BackColor = Color.FromArgb(0x20, 0x24, 0x28), Padding = new Padding(8, 6, 8, 6) };
+            for (int i = 0; i < 3; i++) strip.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 33.3f));
+            var looks = new[] { ControlLook.Classic, ControlLook.Hairline, ControlLook.Segmented };
+            for (int i = 0; i < looks.Length; i++)
+            {
+                var look = looks[i];
+                var col = new FlowLayoutPanel { FlowDirection = FlowDirection.TopDown, WrapContents = false, Dock = DockStyle.Fill, BackColor = Color.Transparent, Margin = new Padding(0) };
+                col.Controls.Add(new Label { Text = look.ToString(), ForeColor = Color.Gainsboro, Font = new Font(SystemFonts.DefaultFont, FontStyle.Bold), AutoSize = true, Margin = new Padding(0, 2, 0, 6) });
+                col.Controls.Add(new SpriteButton { Text = "Button", Look = look, Size = new Size(160, 34), Margin = new Padding(0, 0, 0, 6) });
+                col.Controls.Add(new SpriteButton { Text = "GO", Look = look, Shape = ButtonShape.Round, Accented = true, Size = new Size(56, 56), Margin = new Padding(0, 0, 0, 6) });
+                col.Controls.Add(new SpriteSlider { Text = "Level", Look = look, Value = 60, Ticks = 4, Size = new Size(260, 40), Margin = new Padding(0, 0, 0, 4) });
+                col.Controls.Add(new SpriteProgress { Look = look, Value = 60, ShowPercent = false, Size = new Size(260, 20), Margin = new Padding(0, 0, 0, 6) });
+                col.Controls.Add(new SpriteProgress { Look = look, Value = 60, Style = ProgressStyle.Ring, Segments = 12, ShowPercent = false, Size = new Size(72, 72), Margin = new Padding(0, 0, 0, 6) });
+                col.Controls.Add(new SpriteWheel { Look = look, Orientation = Orientation.Horizontal, Minimum = 0, Maximum = 100, Value = 42, Size = new Size(260, 52) });
+                strip.Controls.Add(col, i, 0);
+            }
+            return strip;
+        }
+    }
+
     internal static class FormDemo
     {
         public static string Caption = "SR2D";

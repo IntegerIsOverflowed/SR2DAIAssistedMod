@@ -695,6 +695,106 @@ static class P {
     Console.WriteLine("furniture: all checks passed");
   }
   static Sprite BoxRender(SpriteBox b) => b.RenderOnce();
+  // the flat looks (ControlLook.Hairline / Segmented): defaults, one gallery, and pixel checks against the values
+  // (accent pixels = the lit part of a value; a segmented drum has few flat tones, the classic drum a gradient)
+  static (int y, int count, int runs) BestRow(Sprite s, int col, int x0, int x1, int y0, int y1) {
+    int bestY = -1, bestC = -1, bestRuns = 0;
+    for (int y = y0; y < y1; y++) {
+      int cnt = 0, runs = 0; bool inRun = false;
+      for (int x = x0; x < x1; x++) { bool hit = (s.Pixels[y * s.Width + x] & 0xFFFFFF) == (col & 0xFFFFFF); if (hit) { cnt++; if (!inRun) runs++; } inRun = hit; }
+      if (cnt > bestC) { bestC = cnt; bestY = y; bestRuns = runs; }
+    }
+    return (bestY, bestC, bestRuns);
+  }
+  static int CountCol(Sprite s, int col, int x0, int y0, int x1, int y1) {
+    int n = 0; for (int y = y0; y < y1; y++) for (int x = x0; x < x1; x++) if ((s.Pixels[y * s.Width + x] & 0xFFFFFF) == (col & 0xFFFFFF)) n++;
+    return n;
+  }
+  static Sprite Framed(int w, int h) { var s = new Sprite(w, h); s.ClearBuffer(unchecked((int)0xFF202428)); return s; }
+  static void Looks() {
+    var looks = new[] { ControlLook.Classic, ControlLook.Hairline, ControlLook.Segmented };
+    Chk(new SpriteButton().Look == ControlLook.Classic && new SpriteSlider().Look == ControlLook.Classic && new SpriteProgress().Look == ControlLook.Classic && new SpriteWheel().Look == ControlLook.Classic, "Look defaults to Classic on button, slider, progress and wheel");
+    Chk(Enum.GetValues<ControlLook>().Length == 3, "ControlLook has exactly Classic, Hairline, Segmented");
+
+    // gallery: one column block per look
+    var c = new Sprite(1040, 640); c.ClearBuffer(unchecked((int)0xFF202428));
+    for (int k = 0; k < 3; k++) {
+      int x0 = 10 + k * 340; var L = looks[k];
+      var b1 = new SpriteButton { Text = L.ToString(), Look = L, Size = new Size(120, 36) }; c.Draw(b1.RenderOnce(), x0, 10, SR2D.Op.Paint);
+      var b2 = new SpriteButton { Text = "hot", Look = L, Size = new Size(120, 36) }; b2.Enter(); c.Draw(b2.RenderOnce(), x0, 54, SR2D.Op.Paint);
+      var b3 = new SpriteButton { Text = "pressed", Look = L, Size = new Size(120, 36) }; b3.Down(10, 10); c.Draw(b3.RenderOnce(), x0, 98, SR2D.Op.Paint); b3.Up(10, 10);
+      var b4 = new SpriteButton { Text = "Accent", Look = L, Accented = true, Size = new Size(120, 36) }; c.Draw(b4.RenderOnce(), x0 + 130, 10, SR2D.Op.Paint);
+      var b5 = new SpriteButton { Text = "GO", Look = L, Shape = ButtonShape.Round, Size = new Size(64, 64) }; c.Draw(b5.RenderOnce(), x0 + 130, 54, SR2D.Op.Paint);
+      var b6 = new SpriteButton { Text = "Pill", Look = L, Shape = ButtonShape.Pill, Size = new Size(120, 36) }; c.Draw(b6.RenderOnce(), x0, 142, SR2D.Op.Paint);
+      var b7 = new SpriteButton { Text = "Square", Look = L, Shape = ButtonShape.Square, Size = new Size(120, 36) }; c.Draw(b7.RenderOnce(), x0 + 130, 142, SR2D.Op.Paint);
+      var s1 = new SpriteSlider { Text = "Level", Look = L, Value = 35, Ticks = 4, Size = new Size(300, 40) }; c.Draw(s1.RenderOnce(), x0, 200, SR2D.Op.Paint);
+      var s2 = new SpriteSlider { Text = "Pan", Look = L, Minimum = -50, Maximum = 50, Value = 20, Bipolar = true, Size = new Size(300, 40) }; c.Draw(s2.RenderOnce(), x0, 244, SR2D.Op.Paint);
+      var p1 = new SpriteProgress { Look = L, Value = 50, Size = new Size(300, 22) }; c.Draw(p1.RenderOnce(), x0, 300, SR2D.Op.Paint);
+      var p2 = new SpriteProgress { Look = L, Value = 50, Segments = 10, ShowPercent = false, Size = new Size(300, 22) }; c.Draw(p2.RenderOnce(), x0, 336, SR2D.Op.Paint);
+      var p3 = new SpriteProgress { Look = L, Value = 62, Style = ProgressStyle.Vertical, ShowPercent = false, Size = new Size(18, 90) }; c.Draw(p3.RenderOnce(), x0 + 310, 300, SR2D.Op.Paint);
+      var p4 = new SpriteProgress { Look = L, Value = 62, Style = ProgressStyle.Ring, Size = new Size(80, 80) }; c.Draw(p4.RenderOnce(), x0, 380, SR2D.Op.Paint);
+      var p5 = new SpriteProgress { Look = L, Value = 62, Style = ProgressStyle.Ring, Segments = 12, ShowPercent = false, Size = new Size(80, 80) }; c.Draw(p5.RenderOnce(), x0 + 90, 380, SR2D.Op.Paint);
+      var p6 = new SpriteProgress { Look = L, Value = 40, Style = ProgressStyle.Ring, Marquee = true, Text = "", Size = new Size(48, 48) }; p6.Phase = 0.9f; c.Draw(p6.RenderOnce(), x0 + 180, 380, SR2D.Op.Paint);
+      var w1 = new SpriteWheel { Text = "Level", Look = L, Minimum = 0, Maximum = 20, Value = 7, Size = new Size(64, 150) }; c.Draw(w1.RenderOnce(), x0, 470, SR2D.Op.Paint);
+      var w2 = new SpriteWheel { Text = "Angle", Look = L, Minimum = 0, Maximum = 360, Value = 355, Step = 5, WrapAround = true, Unit = "\u00b0", Size = new Size(72, 150) }; c.Draw(w2.RenderOnce(), x0 + 80, 470, SR2D.Op.Paint);
+      var w3 = new SpriteWheel { Look = L, Orientation = Orientation.Horizontal, Minimum = 0, Maximum = 100, Value = 42, Size = new Size(180, 56) }; c.Draw(w3.RenderOnce(), x0 + 160, 470, SR2D.Op.Paint);
+      var w4 = new SpriteWheel { Look = L, Orientation = Orientation.Horizontal, Minimum = 0, Maximum = 24, Value = 23, WrapAround = true, Editable = true, Size = new Size(180, 56) }; c.Draw(w4.RenderOnce(), x0 + 160, 540, SR2D.Op.Paint);
+    }
+    Save(c, "/home/user/.cache/ctlrun/looks.rgba");
+
+    int acc = new SpriteButton().AccentColor.ToArgb();
+    // buttons: only the flat looks paint accent pixels on an idle face; Segmented lights its LED strip while hot
+    foreach (var L in looks) {
+      var idle = new SpriteButton { Text = "", Look = L, Size = new Size(120, 36) }; var si = Framed(130, 46); si.Draw(idle.RenderOnce(), 5, 5, SR2D.Op.Paint);
+      var hot = new SpriteButton { Text = "", Look = L, Size = new Size(120, 36) }; hot.Enter(); var sh = Framed(130, 46); sh.Draw(hot.RenderOnce(), 5, 5, SR2D.Op.Paint);
+      int ia = CountCol(si, acc, 0, 0, 130, 46), ha = CountCol(sh, acc, 0, 0, 130, 46);
+      Console.WriteLine($"button {L}: accent px idle {ia}, hot {ha}");
+      bool ok = L switch { ControlLook.Classic => ia == 0 && ha == 0, ControlLook.Hairline => ia >= 20 && ha >= 20, _ => ia == 0 && ha >= 50 };
+      Chk(ok, $"button {L}: accent usage as designed");
+    }
+    // slider: the value (50 %) reads the same in the continuous looks - the best row holds about half of the track
+    foreach (var L in new[] { ControlLook.Classic, ControlLook.Hairline }) {
+      var sl = new SpriteSlider { Look = L, Value = 50, ShowValue = false, Size = new Size(300, 40) }; var ss = Framed(310, 50); ss.Draw(sl.RenderOnce(), 5, 5, SR2D.Op.Paint);
+      var (y, cnt, runs) = BestRow(ss, acc, 0, 310, 0, 50);
+      int trackLen = 300 - 2 * 14 - 5;                       // track between the thumb centres at this height (no caption)
+      Console.WriteLine($"slider {L} 50 %: best row {y}, accent px {cnt} of track {trackLen}, runs {runs}");
+      Chk(Math.Abs(cnt - trackLen / 2.0) < 0.15 * trackLen, $"slider {L}: half the track lit at 50 %");
+    }
+    // segmented slider: the lit cells end where the hairline fill ends (same geometry, one cell of tolerance)
+    {
+      var hair = new SpriteSlider { Look = ControlLook.Hairline, Value = 50, ShowValue = false, Size = new Size(300, 40) }; var sh = Framed(310, 50); sh.Draw(hair.RenderOnce(), 5, 5, SR2D.Op.Paint);
+      var seg = new SpriteSlider { Look = ControlLook.Segmented, Value = 50, ShowValue = false, Size = new Size(300, 40) }; var sg = Framed(310, 50); sg.Draw(seg.RenderOnce(), 5, 5, SR2D.Op.Paint);
+      var (hy, _, _) = BestRow(sh, acc, 0, 310, 0, 50);
+      var (gy, _, gruns) = BestRow(sg, acc, 0, 310, 0, 50);
+      int hx0 = -1, hx1 = -1, gx0 = -1, gx1 = -1;
+      for (int x = 0; x < 310; x++) { if ((sh.Pixels[hy * sh.Width + x] & 0xFFFFFF) == (acc & 0xFFFFFF)) { if (hx0 < 0) hx0 = x; hx1 = x; } if ((sg.Pixels[gy * sg.Width + x] & 0xFFFFFF) == (acc & 0xFFFFFF)) { if (gx0 < 0) gx0 = x; gx1 = x; } }
+      Console.WriteLine($"slider 50 %: hairline fill x {hx0}-{hx1}, segmented cells x {gx0}-{gx1} in {gruns} cells");
+      Chk(Math.Abs(gx0 - hx0) <= 2 && Math.Abs(gx1 - hx1) <= 8 && gruns >= 10, "segmented slider: lit cells end where the value is (matches the hairline fill)");
+    }
+    // segmented progress bar: Segments = 10 at 50 % lights exactly five cells
+    { var p = new SpriteProgress { Look = ControlLook.Segmented, Value = 50, Segments = 10, ShowPercent = false, Size = new Size(300, 22) }; var sp = Framed(310, 30); sp.Draw(p.RenderOnce(), 5, 4, SR2D.Op.Paint);
+      var (y, cnt, runs) = BestRow(sp, acc, 0, 310, 0, 30);
+      Console.WriteLine($"segmented progress 10 segments at 50 %: runs {runs} (expect 5), accent px {cnt}");
+      Chk(runs == 5, "segmented progress lights 5 of 10 cells at 50 %"); }
+    // hairline progress bar: the accent fill covers the inside width at 50 %
+    { var p = new SpriteProgress { Look = ControlLook.Hairline, Value = 50, ShowPercent = false, Size = new Size(300, 22) }; var sp = Framed(310, 30); sp.Draw(p.RenderOnce(), 5, 4, SR2D.Op.Paint);
+      var (y, cnt, runs) = BestRow(sp, acc, 0, 310, 0, 30);
+      Console.WriteLine($"hairline progress at 50 %: accent px {cnt} (expect ~146 = half of the 292 px inside)");
+      Chk(Math.Abs(cnt - 146) <= 4 && runs == 1, "hairline progress fills half the inside at 50 %"); }
+    // wheels: a segmented drum is faceted (a few flat tones down one column), the classic drum is a gradient
+    int Tones(ControlLook L) {
+      var wh = new SpriteWheel { Look = L, Minimum = 0, Maximum = 20, Value = 7, WrapAround = true, ShowValue = false, Size = new Size(64, 150) };
+      var sw = Framed(70, 160); sw.Draw(wh.RenderOnce(), 3, 5, SR2D.Op.Paint);
+      var set = new System.Collections.Generic.HashSet<int>();
+      for (int y = 8; y < 150; y++) set.Add(sw.Pixels[y * sw.Width + 6] & 0xFFFFFF);
+      Console.WriteLine($"wheel {L}: {set.Count} distinct tones down one column of the drum");
+      return set.Count;
+    }
+    int tc = Tones(ControlLook.Classic), tsg = Tones(ControlLook.Segmented);
+    Chk(tc > 30 && tsg <= 12, "segmented wheel: flat facets (few tones); classic: gradient (many)");
+    Console.WriteLine("looks: wrote looks.rgba 1040x640 (Classic | Hairline | Segmented columns)");
+  }
+
   static void Save(Sprite s, string name){ var px = s.Pixels; var buf = new byte[px.Length*4]; for (int i=0;i<px.Length;i++){int c=px[i]; buf[i*4]=(byte)(c>>16); buf[i*4+1]=(byte)(c>>8); buf[i*4+2]=(byte)c; buf[i*4+3]=255;} File.WriteAllBytes(name, buf); Console.WriteLine($"wrote {name} {s.Width}x{s.Height}"); }
   static void TextViews() {
     var c = new Sprite(1000, 560); c.ClearBuffer(unchecked((int)0xFF202428));
@@ -1939,6 +2039,7 @@ static class P {
     Fonts();
     TextViews();
     Wheels();
+    Looks();
     Views();
     SizeModeBox();
     VoxelViews();

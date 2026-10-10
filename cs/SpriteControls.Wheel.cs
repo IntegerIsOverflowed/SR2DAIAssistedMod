@@ -27,7 +27,7 @@ namespace Sr2d64CSport
         Orientation _orient = Orientation.Vertical;
         bool _wrapMouse = true, _wrapAround, _labels = true, _reversed;
         int _pitch, _pixelsPerStep, _editWidth;
-        WheelEdit _edit; WheelStyle _style = WheelStyle.Detailed;
+        WheelEdit _edit; WheelStyle _style = WheelStyle.Detailed; ControlLook _look = ControlLook.Classic;
 #pragma warning disable CA2213 // _field is added to Controls: WinForms disposes child controls with the parent
         SpriteNumeric? _field;
 #pragma warning restore CA2213
@@ -59,6 +59,9 @@ namespace Sr2d64CSport
 
         [Category("Appearance"), DefaultValue(WheelStyle.Detailed), Description("Detailed = knurled rubber band, metal hubs, lens highlight, read-out window with hairline (a volume wheel). Flat = the plain shaded drum.")]
         public WheelStyle Style { get => _style; set { _style = value; Redraw(); } }
+
+        [Category("Appearance"), DefaultValue(ControlLook.Classic), Description("Classic keeps Style (the cylinder drum). Hairline: flat drum with a keyline and ridges. Segmented: flat facets, one tone per step. Hairline and Segmented replace the drum painting; Style then does not apply.")]
+        public ControlLook Look { get => _look; set { _look = value; Redraw(); } }
 
         [Category("Behavior"), DefaultValue(WheelEdit.None), Description("How a value is typed: None; Beside = a number field next to the drum; DoubleClick / Click = a field pops up over the drum (Enter / click away applies, Escape hides; a Click is a press without movement). With DoubleClick / Click the reset to ResetValue moves to Ctrl + double click.")]
         public WheelEdit Edit
@@ -97,7 +100,7 @@ namespace Sr2d64CSport
         int PitchPx(int ts) => _pitch > 0 ? _pitch : (Hz ? LabelLen(ts) + 10 * ts : TextH(ts) + 4 * ts + 4);
         int EditW => _edit == WheelEdit.Beside ? (_editWidth > 0 ? _editWidth : Math.Max(36, Hz ? ClientSize.Width * 3 / 10 : ClientSize.Width * 9 / 20)) : 0;
         /// <summary>Thickness of a metal hub across the drum ends (Detailed style), 0 for Flat.</summary>
-        int HubPx(int len) => _style == WheelStyle.Detailed ? Math.Clamp(len / 14, 3, 10) : 0;
+        int HubPx(int len) => _style == WheelStyle.Detailed && _look == ControlLook.Classic ? Math.Clamp(len / 14, 3, 10) : 0;
 
         /// <summary>Drum rectangle, caption height and text scale.</summary>
         (Rectangle drum, int capH, int ts) Geometry()
@@ -252,7 +255,7 @@ namespace Sr2d64CSport
         protected override void PaintControl(Sprite s)
         {
             var (drum, capH, ts) = Geometry();
-            bool hz = Hz, detailed = _style == WheelStyle.Detailed;
+            bool hz = Hz, flat = _look != ControlLook.Classic, detailed = _style == WheelStyle.Detailed && !flat;
             int len = hz ? drum.Width : drum.Height, thick = hz ? drum.Height : drum.Width;   // along the axis / across
             float R = len / 2f, c0 = (hz ? drum.Left : drum.Top) + R;                             // centre along the axis
             int pitch = PitchPx(ts);
@@ -264,12 +267,16 @@ namespace Sr2d64CSport
 
             // 1. the cylinder: one strip per pixel along the axis, brightness by cos of the surface angle (a soft specular near the middle)
             int lo = hz ? drum.Left : drum.Top;
-            for (int i = 0; i < len; i++)
+            if (flat) s.FillRect(band.Left, band.Top, band.Width, band.Height, _look == ControlLook.Segmented ? dark : Mix(BackColor, ThumbColor, 0.12f));   // seams / flat face
+            else
             {
-                float t = (i + 0.5f - R) / R; float cos = MathF.Sqrt(MathF.Max(0f, 1 - t * t));
-                float k = detailed ? MathF.Pow(cos, 1.1f) * 0.7f + MathF.Pow(cos, 24f) * 0.35f : MathF.Pow(cos, 0.8f) * 0.85f + MathF.Pow(cos, 12f) * 0.25f;
-                int col = Lerp(dark, light, k);
-                if (hz) s.FillRect(lo + i, band.Top, 1, band.Height, col); else s.FillRect(band.Left, lo + i, band.Width, 1, col);
+                for (int i = 0; i < len; i++)
+                {
+                    float t = (i + 0.5f - R) / R; float cos = MathF.Sqrt(MathF.Max(0f, 1 - t * t));
+                    float k = detailed ? MathF.Pow(cos, 1.1f) * 0.7f + MathF.Pow(cos, 24f) * 0.35f : MathF.Pow(cos, 0.8f) * 0.85f + MathF.Pow(cos, 12f) * 0.25f;
+                    int col = Lerp(dark, light, k);
+                    if (hz) s.FillRect(lo + i, band.Top, 1, band.Height, col); else s.FillRect(band.Left, lo + i, band.Width, 1, col);
+                }
             }
             if (detailed)
             {   // the hubs: brushed metal (lighter, with a fine cross grain), a dark seam against the rubber, a bevel at the outer edge
@@ -306,6 +313,16 @@ namespace Sr2d64CSport
                 if (_wrapAround) { double n = Math.Floor(i / maxIdx); idx = (int)Math.Round(i - n * maxIdx); v = Minimum + (i - n * maxIdx) * Step; if (idx >= (int)Math.Round(maxIdx)) idx = 0; }
                 else if (i < 0 || i > maxIdx + 1e-9) continue;
                 float cos = (float)Math.Cos(off), q = c0 + (float)Math.Sin(off) * R * dir;
+                if (_look == ControlLook.Segmented)
+                {   // faceted blocks: one flat tone per step (three tones by the facing angle); the seams show the dark face
+                    float pw = pitch * cos;
+                    int tone = Mix(BackColor, ThumbColor, cos > 0.8f ? 0.30f : cos > 0.45f ? 0.20f : 0.12f);
+                    if (pw > 1.5f)
+                    {
+                        if (hz) s.FillRect(q - pw / 2 + 0.5f, band.Top, pw - 1, band.Height, tone);
+                        else s.FillRect(band.Left, q - pw / 2 + 0.5f, band.Width, pw - 1, tone);
+                    }
+                }
                 if (detailed)
                 {   // a grip groove: dark cut with a light lip on the side that faces the viewer; sub-grooves between labelled steps
                     float gw = MathF.Max(1f, MathF.Min(3f, pitch * 0.18f) * cos);
@@ -322,7 +339,7 @@ namespace Sr2d64CSport
                         }
                     }
                 }
-                else
+                else if (_look != ControlLook.Segmented)
                 {
                     if (hz) s.DrawWideLine(q, drum.Top + 1, q, drum.Bottom - 1, Argb(ridge, (int)(60 + 150 * cos)), 1f, true, SR2D.LineOp.AlphaBlend);
                     else s.DrawWideLine(drum.Left + 1, q, drum.Right - 1, q, Argb(ridge, (int)(60 + 150 * cos)), 1f, true, SR2D.LineOp.AlphaBlend);
@@ -390,6 +407,8 @@ namespace Sr2d64CSport
             int rim = IsDragging ? Accent : Mix(BackColor, ThumbColor, IsHot && Enabled ? 0.55f : 0.4f);
             if (detailed) DrawRound(s, drum.Left - 0.5f, drum.Top - 0.5f, drum.Width + 1, drum.Height + 1, 3f, rim, 1f);
             else s.DrawRect(drum.Left - 0.5f, drum.Top - 0.5f, drum.Width + 1, drum.Height + 1, rim, 1f, false);
+            if (_look == ControlLook.Hairline && drum.Width > 8 && drum.Height > 8)   // the hairline keyline, three pixels in
+                s.DrawRect(drum.Left + 2.5f, drum.Top + 2.5f, drum.Width - 5, drum.Height - 5, Argb(rim, 110), 1f, false, SR2D.LineOp.AlphaBlend);
             if (capH > 0) { int cs = FitScale(Text, ClientSize.Width - 2, ts); T.Draw(s, 1, 1 + (capH - LineHeight(cs)) / 2, FitText(Text, ClientSize.Width - 2, cs), Fore, 0, cs); }
         }
         // dark cap from the end-stop position to the drum edge (beyond Minimum / Maximum)

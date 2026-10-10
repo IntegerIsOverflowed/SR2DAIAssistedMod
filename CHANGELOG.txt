@@ -16,6 +16,30 @@ Conventions
   DOCS     README / comments only
 
 
+2026-10-10  control looks: Hairline and Segmented on the four value / button controls; stale PNG cleanup
+--------------------------------------------------------------------------------------------------------
+ADDED  cs/SpriteControls.Looks.cs: ControlLook { Classic, Hairline, Segmented } and the drawing helpers of the two
+       flat looks. A Look property (default Classic, WFO1000 attributes) on SpriteButton, SpriteSlider,
+       SpriteProgress and SpriteWheel only - nothing else (panels, form, labels, lists, toggles, knobs) changes.
+       Hairline: flat face, 1 px rim and inner keyline; corner ticks on rectangular buttons, dial ticks on round
+       ones; 1 px track with a square thumb; framed flat progress bar and thin dial ring; flat drum with a keyline
+       and ridges. Segmented: dot-matrix face with an LED strip (lit while hot or pressed, and always when
+       Accented); a row of lit cells as the slider track with a bar thumb; cell progress bars and cell rings
+       (Segments sets the count); a faceted drum of three flat tones with 1 px dark gaps. No glow, no gradients.
+CHANGED  SpriteWheel: a non-Classic Look replaces the drum painting; the hub is off (HubPx 0) and the flat
+       painting is used. Style (Detailed by default) keeps its meaning and applies to Classic only.
+       compat: none. Classic is the default; its drawing is unchanged (see TESTS).
+DEMO   Controls page: "Control looks" strip (LooksDemo) with the four controls in each look side by side.
+TESTS  tests/cs/ctlrun: Looks() checks the button accent (Classic 0 / Hairline 36 / Segmented hot 136), the slider
+       fill of Hairline against the Segmented cells (same geometry), a Segments = 10 bar at 50 % (5 cells lit),
+       the hairline bar, and the drum (Classic 43 tones, Segmented 6). Classic output is byte-identical to the
+       committed build on the galleries (anim, buttons, cursors, fonts, furniture, knobs, scroll, textviews,
+       wheels). The control sources are identical to the PR #9 head, so the check covers this branch.
+DOCS   README: "Flat looks: ControlLook" section and the file-tree entry for SpriteControls.Looks.cs.
+CLEANUP  14 unreferenced *_preview.png files removed from tests/ (commit 397de35, separate from the feature).
+         Scratch PNGs in the workspace root were removed (outside the repo).
+
+
 2026-10-09  animated SVG: optional precomposed bitmap loop (bounded memory, full-rate playback)
 ------------------------------------------------------------------------------------------------------------
 ADDED  cs/Vector.Precompose.cs: third VectorSprite cache mode, opt-in Precomposed (default false).
