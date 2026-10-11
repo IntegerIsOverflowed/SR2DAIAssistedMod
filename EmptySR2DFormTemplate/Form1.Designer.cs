@@ -9,25 +9,6 @@ namespace Sr2d64CSport
         /// </summary>
         private System.ComponentModel.IContainer components = null;
 
-        /// <summary>
-        /// Clean up any resources being used.
-        /// </summary>
-        /// <param name="disposing">true if managed resources should be disposed; otherwise, false.</param>
-        protected override void Dispose(bool disposing)
-        {
-            if (disposing)
-            {
-                // The form's own resources go here: a Sprite, Bitmap, ... created in the form's body.
-                // Dispose them before base.Dispose. Sprite.Dispose is safe to call a second time.
-            }
-            // base.Dispose releases the SpriteForm chrome (its title bar surface and the window menu)
-            if (disposing && (components != null))
-            {
-                components.Dispose();
-            }
-            base.Dispose(disposing);
-        }
-
         #region Windows Form Designer generated code
 
         /// <summary>
