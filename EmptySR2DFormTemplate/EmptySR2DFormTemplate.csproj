@@ -50,7 +50,7 @@
 
   <ItemGroup>
     <None Remove="SR2D64.dll" />
-    <None Include="$(Sr2dDll)" Link="SR2D64.dll" CopyToOutputDirectory="PreserveNewest" Visible="false" Condition="Exists('$(Sr2dDll)')" />
+    <None Include="$(Sr2dDll)" Link="SR2D64.dll" CopyToOutputDirectory="PreserveNewest" Condition="Exists('$(Sr2dDll)')" />
   </ItemGroup>
 
   <Target Name="Sr2dDllWarning" BeforeTargets="Build" Condition="!Exists('$(Sr2dDll)')">

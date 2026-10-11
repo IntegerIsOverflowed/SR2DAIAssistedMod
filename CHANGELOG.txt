@@ -37,6 +37,7 @@ TESTS  tests/cs/ctlrun: Looks() checks the button accent (Classic 0 / Hairline 3
        wheels). The control sources are identical to the PR #9 head, so the check covers this branch.
 DEMO   EmptySR2DFormTemplate: Form1.cs overrides Dispose(bool) with an empty `if (disposing)` block for the form's own
        Sprite / Bitmap fields (moved from Form1.Designer.cs). base.Dispose and the components disposal are unchanged. compat: none.
+DEMO   EmptySR2DFormTemplate: the SR2D64.dll link item is visible in Solution Explorer (Visible="false" removed), so the DLL can be seen and replaced there. compat: none.
 DOCS   README: "Flat looks: ControlLook" section and the file-tree entry for SpriteControls.Looks.cs.
 CLEANUP  14 unreferenced *_preview.png files removed from tests/ (commit 397de35, separate from the feature).
          Scratch PNGs in the workspace root were removed (outside the repo).
