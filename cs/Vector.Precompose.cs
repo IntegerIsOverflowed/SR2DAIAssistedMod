@@ -16,9 +16,11 @@ namespace Sr2d64CSport
         bool _precomposed;
         long _maxFilmPixels = 64L * 1024 * 1024;
         double _filmFrameRate;
+        Size _filmResolution;
 
         /// <summary>Opt-in bitmap-loop playback. The first draw bakes the loop synchronously; subsequent draws only blit.
-        /// Turning this off releases the film immediately and returns to the layer compositor. Off by default.</summary>
+        /// Turning this off releases the film immediately and returns to the layer compositor. Off by default.
+        /// The baked grid is independent of the displayed transform: scaling/rotating/moving the container never rebakes.</summary>
         public bool Precomposed
         {
             get => _precomposed;
@@ -55,11 +57,28 @@ namespace Sr2d64CSport
                 _filmFrameRate = value; DropFilm();
             }
         }
+        /// <summary>Requested pixel resolution of the SVG view box, independent of the displayed container.
+        /// Empty = intrinsic view-box units (one texel per unit); one zero dimension preserves aspect ratio.
+        /// The memory budget may reduce this request (FilmSize/FilmScale report the actual result). Higher resolution
+        /// than the displayed size enables supersampling through the area-aware bitmap filter.</summary>
+        public Size FilmResolution
+        {
+            get => _filmResolution;
+            set
+            {
+                if (value.Width < 0 || value.Height < 0) throw new ArgumentOutOfRangeException(nameof(value));
+                if (_filmResolution == value) return;
+                _filmResolution = value; DropFilm();
+            }
+        }
+        /// <summary>Bitmap playback filter (default BilinearArea: area averaging when shrinking, bilinear otherwise).
+        /// Does not invalidate baked frames. AA=false still selects Nearest for a deliberate pixel-art look.</summary>
+        public SR2D.Filter FilmSampling { get; set; } = SR2D.Filter.BilinearArea;
         /// <summary>Number of baked frames currently retained (0 before baking / after release).</summary>
         public int FilmFrames { get; private set; }
         /// <summary>Actual evenly-spaced samples per second: FilmFrames / Duration.</summary>
         public double FilmFps { get; private set; }
-        /// <summary>Spatial bake scale relative to the requested draw transform: 1 = full resolution; less = budget-limited.</summary>
+        /// <summary>Budget scale relative to FilmResolution: 1 = the requested internal resolution; less = budget-limited.</summary>
         public float FilmScale { get; private set; }
         /// <summary>Raw bitmap pixels retained across all frames. Never exceeds MaxFilmPixels (or MaxPixels when 0).</summary>
         public long FilmPixels { get; private set; }
@@ -80,7 +99,7 @@ namespace Sr2d64CSport
 
         Sprite[]? _frames;
         Rectangle _filmCell;
-        Matrix3x2 _filmLinear;
+        Matrix3x2 _filmToImage;
         bool _filmPrepared, _filmClip;
         int _filmVersion = -1;
         RectangleF _filmViewBox;
@@ -111,25 +130,27 @@ namespace Sr2d64CSport
             && _filmOptions.MinStrokeWidth == _opt.MinStrokeWidth
             && _filmOptions.Tolerance == (_opt.Tolerance ?? Sprite.CurveTolerance);
 
-        /// <summary>Explicitly prepares the bitmap loop for a draw matrix (translation is not baked).
+        /// <summary>Explicitly prepares the bitmap loop at FilmResolution. The display matrix is retained as a
+        /// compatibility parameter but no longer determines the bake or its key (use parameterless PrepareFilm()).
         /// Optional warm-up at load time; Draw / DrawAt also prepare on demand. Returns false, with FilmStatus explaining
         /// why, when no useful film fits or the loop is invalid. Cancellation disposes every partial frame and rethrows.
         /// Preparation is synchronous; like other SR2D drawing calls, do not use this wrapper concurrently.</summary>
         public bool PrepareFilm(Matrix3x2 m, CancellationToken cancellationToken = default)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            var lin = new Matrix3x2(m.M11, m.M12, m.M21, m.M22, 0, 0);
+            // A film lives in IMAGE coordinates, not destination coordinates. m is intentionally not baked.
+            var requested = RequestedFilmMatrix();
             double dur = Image.Duration;
             double rate = FilmFrameRate > 0 ? FilmFrameRate : Image.FrameRate;
             long budget = MaxFilmPixels > 0 ? MaxFilmPixels : MaxPixels;
-            if (_filmPrepared && _filmVersion == Image.Version && Same(_filmLinear, lin)
+            if (_filmPrepared && _filmVersion == Image.Version
                 && _filmViewBox == Image.ViewBox && _filmVisible == Image.VisibleArea && _filmClip == Image.ClipViewport
                 && _filmDuration == dur && _filmRate == rate && _filmBudget == budget
                 && _filmMaxCellPixels == MaxPixels && SameFilmOptions()) return _frames != null;
 
             // Free old rasters before allocating the replacement: re-baking never needs two whole loops resident.
             DropFilm(); DropLayers();
-            _filmPrepared = true; _filmVersion = Image.Version; _filmLinear = lin;
+            _filmPrepared = true; _filmVersion = Image.Version;
             _filmViewBox = Image.ViewBox; _filmVisible = Image.VisibleArea; _filmClip = Image.ClipViewport;
             _filmDuration = dur; _filmRate = rate; _filmBudget = budget; _filmMaxCellPixels = MaxPixels;
             _filmOptions = FilmOptionsCopy(_opt);
@@ -145,14 +166,14 @@ namespace Sr2d64CSport
                 int n = Math.Max(1, (int)count);
                 long cellBudget = Math.Min(Math.Min(budget / n, MaxPixels), int.MaxValue / 4);
                 if (cellBudget < 9) { _filmReason = "budget too small"; return false; }
-                if (!float.IsFinite(lin.M11) || !float.IsFinite(lin.M12) || !float.IsFinite(lin.M21) || !float.IsFinite(lin.M22))
-                { _filmReason = "non-finite draw matrix"; return false; }
+                if (!float.IsFinite(requested.M11) || !float.IsFinite(requested.M22) || requested.M11 <= 0 || requested.M22 <= 0)
+                { _filmReason = "invalid internal resolution / view box"; return false; }
 
                 var src = Image.CloneAnimated();             // the caller's seek state / geometry is never changed by the bake
                 RectangleF bounds;
                 var window = Image.VisibleArea ?? (Image.ClipViewport ? Image.ViewBox : (RectangleF?)null);
                 if (window.HasValue)
-                    bounds = VectorRender.TransformRect(window.Value, lin);
+                    bounds = VectorRender.TransformRect(window.Value, requested);
                 else
                 {
                     // No window: union at the ACTUAL bake sample times, not at the caller's current seek. This catches
@@ -162,7 +183,7 @@ namespace Sr2d64CSport
                     {
                         cancellationToken.ThrowIfCancellationRequested();
                         src.SeekToTime(dur * i / n);
-                        var b = VectorRender.TransformRect(src.Bounds(), lin);
+                        var b = VectorRender.TransformRect(src.Bounds(), requested);
                         if (b.Width > 0 && b.Height > 0) bounds = bounds.IsEmpty ? b : RectangleF.Union(bounds, b);
                     }
                 }
@@ -171,7 +192,9 @@ namespace Sr2d64CSport
                 var bakeOptions = FilmOptionsCopy(_opt);
                 bakeOptions.MinStrokeWidth *= scale;
                 bakeOptions.Tolerance *= scale;
-                var bakeMatrix = lin * Matrix3x2.CreateScale(scale) * Matrix3x2.CreateTranslation(-cell.Left, -cell.Top);
+                var bakeMatrix = requested * Matrix3x2.CreateScale(scale) * Matrix3x2.CreateTranslation(-cell.Left, -cell.Top);
+                if (!Matrix3x2.Invert(bakeMatrix, out var toImage))
+                { _filmReason = "singular internal resolution"; return false; }
                 pending = new Sprite[n];
                 for (int i = 0; i < n; i++)
                 {
@@ -183,7 +206,7 @@ namespace Sr2d64CSport
                     src.Draw(frame, bakeMatrix, bakeOptions);
                 }
                 _frames = pending; pending = null;
-                _filmCell = cell; FilmFrames = n; FilmFps = n / dur; FilmScale = scale;
+                _filmCell = cell; _filmToImage = toImage; FilmFrames = n; FilmFps = n / dur; FilmScale = scale;
                 FilmPixels = (long)cell.Width * cell.Height * n;
                 FilmBakes++; Rasterizations += n;
                 return true;
@@ -203,6 +226,20 @@ namespace Sr2d64CSport
                 if (pending != null) foreach (var frame in pending) frame?.Dispose();
                 FilmBakeMs = sw.Elapsed.TotalMilliseconds;
             }
+        }
+
+        /// <summary>Warm the fixed-resolution bitmap loop; no output placement is needed.</summary>
+        public bool PrepareFilm() => PrepareFilm(Matrix3x2.Identity);
+
+        Matrix3x2 RequestedFilmMatrix()
+        {
+            var vb = Image.ViewBox;
+            if (!(vb.Width > 0) || !(vb.Height > 0)) return new Matrix3x2(float.NaN, 0, 0, float.NaN, 0, 0);
+            if (FilmResolution.IsEmpty) return Matrix3x2.Identity;
+            float sx = FilmResolution.Width > 0 ? FilmResolution.Width / vb.Width : FilmResolution.Height / vb.Height;
+            float sy = FilmResolution.Height > 0 ? FilmResolution.Height / vb.Height : sx;
+            if (FilmResolution.Width == 0) sx = sy;
+            return Matrix3x2.CreateScale(sx, sy);
         }
 
         static bool FitFilmCell(RectangleF b, long budget, out Rectangle cell, out float scale)
@@ -243,48 +280,54 @@ namespace Sr2d64CSport
 
         void DrawFilm(Sprite dst, Matrix3x2 m, double time, SR2D.Op op, int blendFactor)
         {
-            if (!float.IsFinite(m.M31) || !float.IsFinite(m.M32)) return;
-            if (!PrepareFilm(m))
+            if (!FiniteFilmPlacement(m)) return;
+            if (!PrepareFilm())
             { Image.SeekToTime(time); DrawAnimated(dst, m, op, blendFactor); return; }
             double phase = double.IsFinite(time) ? time % _filmDuration : 0;
             if (phase < 0) phase += _filmDuration;
             int index = Math.Clamp((int)Math.Floor(phase * FilmFrames / _filmDuration + 1e-9), 0, FilmFrames - 1);
             var frame = _frames![index];
-            float tx = SubPixel ? m.M31 : MathF.Floor(m.M31 + 0.5f), ty = SubPixel ? m.M32 : MathF.Floor(m.M32 + 0.5f);
-            if (FilmScale == 1 && tx == MathF.Floor(tx) && ty == MathF.Floor(ty))
+            if (!SubPixel) { m.M31 = MathF.Floor(m.M31 + 0.5f); m.M32 = MathF.Floor(m.M32 + 0.5f); }
+            var placement = _filmToImage * m;       // frame pixels -> image coordinates -> the CURRENT container transform
+            bool direct = MathF.Abs(placement.M11 - 1) < 1e-6f && MathF.Abs(placement.M22 - 1) < 1e-6f
+                && MathF.Abs(placement.M12) < 1e-6f && MathF.Abs(placement.M21) < 1e-6f
+                && MathF.Abs(placement.M31 - MathF.Round(placement.M31)) < 1e-5f
+                && MathF.Abs(placement.M32 - MathF.Round(placement.M32)) < 1e-5f;
+            if (direct)
             {
-                int dx = (int)tx + _filmCell.Left, dy = (int)ty + _filmCell.Top;
+                int dx = (int)MathF.Round(placement.M31), dy = (int)MathF.Round(placement.M32);
                 if (op == SR2D.Op.Blend) dst.Blend(frame, dx, dy, blendFactor);
                 else dst.Draw(frame, dx, dy, op == SR2D.Op.DefaultOp ? SR2D.Op.AlphaOver : op);
             }
             else
             {
-                float inv = 1f / FilmScale;
-                float left = tx + _filmCell.Left * inv, top = ty + _filmCell.Top * inv;
-                float right = left + _filmCell.Width * inv, bottom = top + _filmCell.Height * inv;
-                Span<PointF> quad = stackalloc PointF[4] { new PointF(left, top), new PointF(right, top), new PointF(right, bottom), new PointF(left, bottom) };
+                Span<PointF> quad = stackalloc PointF[4];
+                quad[0] = FilmPoint(0, 0, placement); quad[1] = FilmPoint(frame.Width, 0, placement);
+                quad[2] = FilmPoint(frame.Width, frame.Height, placement); quad[3] = FilmPoint(0, frame.Height, placement);
                 Span<PointF> clip = stackalloc PointF[4];
                 int clipCount = 0;
                 var window = Image.VisibleArea ?? (Image.ClipViewport ? Image.ViewBox : (RectangleF?)null);
                 if (window is RectangleF va)
                 {
-                    var placement = _filmLinear * Matrix3x2.CreateTranslation(tx, ty);
-                    clip[0] = FilmPoint(va.Left, va.Top, placement); clip[1] = FilmPoint(va.Right, va.Top, placement);
-                    clip[2] = FilmPoint(va.Right, va.Bottom, placement); clip[3] = FilmPoint(va.Left, va.Bottom, placement);
+                    clip[0] = FilmPoint(va.Left, va.Top, m); clip[1] = FilmPoint(va.Right, va.Top, m);
+                    clip[2] = FilmPoint(va.Right, va.Bottom, m); clip[3] = FilmPoint(va.Left, va.Bottom, m);
                     clipCount = 4;
                 }
-                dst.DrawQuad(frame, quad, clip[..clipCount], op, _opt.AA ? SR2D.Filter.Bilinear : SR2D.Filter.Nearest, blendFactor);
+                dst.DrawQuad(frame, quad, clip[..clipCount], op, _opt.AA ? FilmSampling : SR2D.Filter.Nearest, blendFactor);
             }
             FilmBlits++; CacheHits++;
         }
+        static bool FiniteFilmPlacement(Matrix3x2 m) => float.IsFinite(m.M11) && float.IsFinite(m.M12)
+            && float.IsFinite(m.M21) && float.IsFinite(m.M22) && float.IsFinite(m.M31) && float.IsFinite(m.M32);
         static PointF FilmPoint(float x, float y, Matrix3x2 m)
         { var p = Vector2.Transform(new Vector2(x, y), m); return new PointF(p.X, p.Y); }
         Rectangle FilmScreenRect(Matrix3x2 m)
         {
-            float tx = SubPixel ? m.M31 : MathF.Floor(m.M31 + 0.5f), ty = SubPixel ? m.M32 : MathF.Floor(m.M32 + 0.5f);
-            float inv = 1f / FilmScale;
-            return Rectangle.FromLTRB((int)MathF.Floor(tx + _filmCell.Left * inv), (int)MathF.Floor(ty + _filmCell.Top * inv),
-                (int)MathF.Ceiling(tx + _filmCell.Right * inv), (int)MathF.Ceiling(ty + _filmCell.Bottom * inv));
+            if (!FiniteFilmPlacement(m)) return Rectangle.Empty;
+            if (!SubPixel) { m.M31 = MathF.Floor(m.M31 + 0.5f); m.M32 = MathF.Floor(m.M32 + 0.5f); }
+            var box = VectorRender.TransformRect(new RectangleF(0, 0, _filmCell.Width, _filmCell.Height), _filmToImage * m);
+            return Rectangle.FromLTRB((int)MathF.Floor(box.Left), (int)MathF.Floor(box.Top),
+                (int)MathF.Ceiling(box.Right), (int)MathF.Ceiling(box.Bottom));
         }
     }
 }
