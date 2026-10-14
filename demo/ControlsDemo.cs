@@ -1213,7 +1213,7 @@ namespace Sr2d64CSport
             row.Controls.Add(knob);
             Lbl("Numeric");
             var num = new SpriteNumeric { Minimum = 8, Maximum = 256, PowersOfTwo = true, Value = 32, Size = new Size(120, 26), Margin = new Padding(4, 14, 4, 0) };
-            num.ValueChanged += (_, _) => { NumV = num.Value; Last = $"numeric -> {num.Value:0.###}"; ControlsDemo.Events++; };
+            num.ValueChanged += (_, _) => { NumV = (double)num.Value; Last = $"numeric -> {num.Value:0.###}"; ControlsDemo.Events++; };
             row.Controls.Add(num);
             return row;
         }

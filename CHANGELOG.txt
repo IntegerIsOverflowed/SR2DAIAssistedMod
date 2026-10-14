@@ -16,6 +16,20 @@ Conventions
   DOCS     README / comments only
 
 
+2026-10-14  designer: Surface group; SpriteNumeric values are decimal
+--------------------------------------------------------------------------------------------------------
+CHANGED  cs/SpriteNumeric (cs/SpriteControls.Input.cs): Value, Minimum, Maximum and Step are decimal, as in
+       NumericUpDown, not double. compat: breaking for code that assigns or reads doubles - use an m literal
+       (Step = 0.05m) or a cast ((double)n.Value). Values / PowersOfTwo stay double[]. SpriteWheel, SpriteSlider
+       and SpriteKnob are unchanged.
+CHANGED  cs/SpriteBox.cs, cs/SpriteBox.View.cs: Render, GdiSurface, FixedSurfaceSize, SmoothStretch, SizeMode and
+       ImageSize are in the designer category "Surface" (were Appearance / Behavior). Names and behaviour unchanged.
+FIXED    SpriteNumeric.Minimum / Maximum: designer attributes (Browsable, EditorBrowsable, DesignerSerializationVisibility,
+       Bindable, Description) added to match the convention. The cause in the VS designer is not confirmed here.
+DEMO     demo/ControlsDemo.cs: cast for the decimal Value.
+TESTS    tests/cs/ctlrun/Program.cs: decimal literals and casts for the SpriteNumeric changes.
+
+
 2026-10-10  control looks: Hairline and Segmented on the four value / button controls; stale PNG cleanup
 --------------------------------------------------------------------------------------------------------
 ADDED  cs/SpriteControls.Looks.cs: ControlLook { Classic, Hairline, Segmented } and the drawing helpers of the two

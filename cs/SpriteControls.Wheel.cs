@@ -183,7 +183,7 @@ namespace Sr2d64CSport
             if (_field != null) return;
             _field = new SpriteNumeric { Spinner = SpinnerPlacement.None, TextAlign = HorizontalAlignment.Center, TabStop = false, Visible = false };
             _field.AccentColor = AccentColor; _field.TrackColor = TrackColor; _field.ThumbColor = ThumbColor; _field.ForeColor = ForeColor;
-            _field.ValueChanged += (_, _) => { if (_fieldSync) return; _fieldSync = true; try { SetValue(_field.Value, true); } finally { _fieldSync = false; } RefreshField(); };
+            _field.ValueChanged += (_, _) => { if (_fieldSync) return; _fieldSync = true; try { SetValue((double)_field.Value, true); } finally { _fieldSync = false; } RefreshField(); };
             _field.Committed += (_, _) => { if (IsEditing && !_fieldSync) CloseField(false); };   // Enter in the pop-up: apply and hide
             _field.LostFocus += (_, _) => { if (IsEditing) CloseField(false); };
             _field.KeyDown += (_, k) => { if (k.KeyCode == Keys.Escape && IsEditing) { CloseField(false); k.Handled = true; } };
@@ -207,8 +207,8 @@ namespace Sr2d64CSport
             _fieldSync = true;
             try
             {
-                _field.Minimum = Minimum; _field.Maximum = Maximum; _field.Decimals = Decimals; _field.Step = Step; _field.Unit = Unit;
-                if (_field.Value != Shown) _field.Value = Shown;
+                _field.Minimum = (decimal)Minimum; _field.Maximum = (decimal)Maximum; _field.Decimals = Decimals; _field.Step = (decimal)Step; _field.Unit = Unit;
+                if (_field.Value != (decimal)Shown) _field.Value = (decimal)Shown;
                 _field.ForeColor = HasPendingValue ? AccentRaw : ForeColor;
                 _field.BackColor = BackColor;
             }

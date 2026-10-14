@@ -276,7 +276,7 @@ namespace Sr2d64CSport
             }
         }
 
-        static void SetRange(SpriteNumeric n, double min, double max) { n.Minimum = min; n.Maximum = max; }
+        static void SetRange(SpriteNumeric n, double min, double max) { n.Minimum = (decimal)min; n.Maximum = (decimal)max; }
 
         /// <summary>The channel labels the paint code draws left of the entries (the 4th is alpha unless CMYK).</summary>
         static string[] SchemeLabels(ColorScheme s) => s switch
@@ -382,8 +382,8 @@ namespace Sr2d64CSport
         {
             _sync = true;
             var (c0, c1, c2) = RgbToSchemeValues(_value.ToArgb());
-            _c0.Value = (double)(float)c0; _c1.Value = (double)(float)c1; _c2.Value = (double)(float)c2;
-            if (_scheme != ColorScheme.Cmyk) _cA.Value = _a; else _cA.Value = (double)(float)(RgbToCmyk(_value.ToArgb()).K * 100);
+            _c0.Value = (decimal)(float)c0; _c1.Value = (decimal)(float)c1; _c2.Value = (decimal)(float)c2;
+            if (_scheme != ColorScheme.Cmyk) _cA.Value = _a; else _cA.Value = (decimal)(float)(RgbToCmyk(_value.ToArgb()).K * 100);
             string hx = Hex;
             if (!_hex.Focused && _hex.Text != hx) _hex.Text = hx;   // not while the user is typing one; also not on no-change moves
             _sync = false;

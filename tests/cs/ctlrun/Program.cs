@@ -113,7 +113,7 @@ static class P {
     fld.Key(Keys.A | Keys.Control); fld.Type("7,5"); fld.Key(Keys.Enter); double e1 = w3.Value; fld.Key(Keys.A | Keys.Control); fld.Type("abc"); fld.Key(Keys.Enter); double e2 = w3.Value; fld.Key(Keys.A | Keys.Control); fld.Type("99"); fld.Key(Keys.Enter); double e3 = w3.Value;
     Console.WriteLine($"editable (SR2D field beside the drum): typed 7,5 -> {e1} (expect 7.5 if the culture uses a comma, else unchanged 2.5), abc -> {e2} (unchanged), 99 -> {e3} (expect 10, clamped); field shows '{fld.Text}'");
     if (e3 != 10 || fld.Value != 10) Environment.Exit(1);
-    w3.Nudge(-2); if (fld.Value != w3.Value || w3.Value != 9) Environment.Exit(1);   // the field follows the wheel
+    w3.Nudge(-2); if ((double)fld.Value != w3.Value || w3.Value != 9) Environment.Exit(1);   // the field follows the wheel
     // pop-up field: DoubleClick mode opens it over the read-out, Enter applies and closes, Escape closes without applying; Click mode opens on a plain click, a drag does not
     var wdc = new SpriteWheel { Minimum = 0, Maximum = 100, Value = 50, Edit = WheelEdit.DoubleClick, Size = new Size(64, 128) }; wdc.CreateHandle();
     wdc.DoubleClick(32, 64); bool open1 = wdc.IsEditing; var f2 = wdc.EditField!; f2.Key(Keys.A | Keys.Control); f2.Type("70"); f2.Key(Keys.Enter); bool open2 = wdc.IsEditing; double v1 = wdc.Value;
@@ -407,11 +407,11 @@ static class P {
     num.Key(Keys.A | Keys.Control); num.Type("7.6"); num.Key(Keys.Enter); if (num.Value != 8) Fail($"numeric typed 7.6 -> {num.Value} (expect 8, Decimals 0)");
     num.Key(Keys.A | Keys.Control); num.Type("99"); num.Key(Keys.Enter); if (num.Value != 10) Fail($"numeric clamp: {num.Value}");
     num.Key(Keys.A | Keys.Control); num.Type("abc"); num.Key(Keys.Enter); if (num.Value != 10 || num.Text != "10") Fail($"numeric garbage: {num.Value} '{num.Text}'");
-    var num2 = new SpriteNumeric { Size = new Size(140, 28), Minimum = 0, Maximum = 1, Step = 0.05, Decimals = 2, Value = 0.5 };
+    var num2 = new SpriteNumeric { Size = new Size(140, 28), Minimum = 0, Maximum = 1, Step = 0.05m, Decimals = 2, Value = 0.5m };
     Put(num, 250, 130); Put(num2, 380, 130);
     // spinner drag: press on the up button (+1 at once), drag 8 px further up with PixelsPerStep 4 -> +2 more; wrap at the screen top teleports the pointer
     var nd = new SpriteNumeric { Size = new Size(120, 24), Minimum = -100, Maximum = 100, Value = 0, PixelsPerStep = 4 }; nd.CreateHandle();
-    nd.Down(112, 5); double afterPress = nd.Value; nd.Move(112, -3); double afterDrag = nd.Value; nd.Up(112, -3);
+    nd.Down(112, 5); double afterPress = (double)nd.Value; nd.Move(112, -3); double afterDrag = (double)nd.Value; nd.Up(112, -3);
     Console.WriteLine($"numeric spinner drag: press up -> {afterPress} (expect 1), drag 8 px up -> {afterDrag} (expect 3), cursor default again = {nd.Cursor == Cursors.Default}");
     if (afterPress != 1 || afterDrag != 3 || nd.Cursor != Cursors.Default) Fail("numeric spinner drag");
     Cursor.Position = new Point(-1, -1); nd.Location = new Point(0, 0); nd.Down(112, 19); nd.Move(112, 19 + 40); nd.Move(112, 1085); var np = Cursor.Position; nd.Up(112, 1085);
@@ -423,8 +423,8 @@ static class P {
     nt.Down(112, 5); nt.Move(112, -20); nt.Up(112, -20); if (nt.Value != 6) Fail($"numeric DragToChange=false: {nt.Value} (expect 6, the click only)");
     // spinner below the field: minus left, plus right, drag horizontally (right = larger); the I-beam only over the field
     var nb = new SpriteNumeric { Size = new Size(90, 44), Minimum = 0, Maximum = 100, Value = 50, Spinner = SpinnerPlacement.Below, Unit = "%" }; nb.CreateHandle();
-    nb.Tap(20, 36); nb.Tap(70, 36); nb.Tap(70, 36); double nbv = nb.Value;
-    nb.Down(70, 36); nb.Move(70 + 12, 36); double nbd = nb.Value; nb.Up(82, 36);
+    nb.Tap(20, 36); nb.Tap(70, 36); nb.Tap(70, 36); double nbv = (double)nb.Value;
+    nb.Down(70, 36); nb.Move(70 + 12, 36); double nbd = (double)nb.Value; nb.Up(82, 36);
     nb.Move(30, 10); var curField = nb.Cursor; nb.Move(30, 36); var curBtn = nb.Cursor;
     Console.WriteLine($"numeric Spinner=Below: - + + -> {nbv} (expect 51), press + and drag 12 px right -> {nbd} (expect 55), cursor over field IBeam = {curField == Cursors.IBeam}, over buttons default = {curBtn == Cursors.Default}");
     if (nbv != 51 || nbd != 55 || curField != Cursors.IBeam || curBtn != Cursors.Default) Fail("numeric Spinner=Below");
