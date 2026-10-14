@@ -16,6 +16,59 @@ Conventions
   DOCS     README / comments only
 
 
+2026-10-15  Hairline / Segmented rework; viewer members hidden on controls
+--------------------------------------------------------------------------------------------------------
+CHANGED  cs/SpriteControls.Buttons.cs, cs/SpriteControls.cs: the Hairline and Segmented looks of SpriteButton, SpriteSlider and
+       SpriteProgress are reworked. Hairline: accent-tinted rim and an index bar on rectangular buttons, a needle at the end of
+       the progress fill, a solid accent slider thumb. Segmented: solid button face (no dot matrix), chunkier LED strip.
+       Classic is unchanged. SpriteWheel's look is not reworked in this step.
+CHANGED  cs/SpriteBox.View.cs, cs/SpriteBox.cs: the viewer properties (zoom, pan, inertia, friction, scroll bars, pixel grid,
+       view menu, navigation, surface size / stretch / GDI) are virtual.
+       SpriteControlBase overrides them with Browsable(false), so they no longer show in the designer for controls.
+       compat: code can still set them; SpriteBox itself still lists them. The Render event is not changed.
+TESTS    tests/cs/ctlrun/Program.cs: the segmented slider check allows the solid Hairline thumb's half-width.
+
+
+2026-10-14  designer: Surface group; SpriteNumeric values are decimal
+--------------------------------------------------------------------------------------------------------
+CHANGED  cs/SpriteNumeric (cs/SpriteControls.Input.cs): Value, Minimum, Maximum and Step are decimal, as in
+       NumericUpDown, not double. compat: breaking for code that assigns or reads doubles - use an m literal
+       (Step = 0.05m) or a cast ((double)n.Value). Values / PowersOfTwo stay double[]. SpriteWheel, SpriteSlider
+       and SpriteKnob are unchanged.
+CHANGED  cs/SpriteBox.cs, cs/SpriteBox.View.cs: Render, GdiSurface, FixedSurfaceSize, SmoothStretch, SizeMode and
+       ImageSize are in the designer category "Surface" (were Appearance / Behavior). Names and behaviour unchanged.
+FIXED    SpriteNumeric.Minimum / Maximum: designer attributes (Browsable, EditorBrowsable, DesignerSerializationVisibility,
+       Bindable, Description) added to match the convention. The cause in the VS designer is not confirmed here.
+DEMO     demo/ControlsDemo.cs: cast for the decimal Value.
+TESTS    tests/cs/ctlrun/Program.cs: decimal literals and casts for the SpriteNumeric changes.
+
+
+2026-10-10  control looks: Hairline and Segmented on the four value / button controls; stale PNG cleanup
+--------------------------------------------------------------------------------------------------------
+ADDED  cs/SpriteControls.Looks.cs: ControlLook { Classic, Hairline, Segmented } and the drawing helpers of the two
+       flat looks. A Look property (default Classic, WFO1000 attributes) on SpriteButton, SpriteSlider,
+       SpriteProgress and SpriteWheel only - nothing else (panels, form, labels, lists, toggles, knobs) changes.
+       Hairline: flat face, 1 px rim and inner keyline; corner ticks on rectangular buttons, dial ticks on round
+       ones; 1 px track with a square thumb; framed flat progress bar and thin dial ring; flat drum with a keyline
+       and ridges. Segmented: dot-matrix face with an LED strip (lit while hot or pressed, and always when
+       Accented); a row of lit cells as the slider track with a bar thumb; cell progress bars and cell rings
+       (Segments sets the count); a faceted drum of three flat tones with 1 px dark gaps. No glow, no gradients.
+CHANGED  SpriteWheel: a non-Classic Look replaces the drum painting; the hub is off (HubPx 0) and the flat
+       painting is used. Style (Detailed by default) keeps its meaning and applies to Classic only.
+       compat: none. Classic is the default; its drawing is unchanged (see TESTS).
+DEMO   Controls page: "Control looks" strip (LooksDemo) with the four controls in each look side by side.
+TESTS  tests/cs/ctlrun: Looks() checks the button accent (Classic 0 / Hairline 36 / Segmented hot 136), the slider
+       fill of Hairline against the Segmented cells (same geometry), a Segments = 10 bar at 50 % (5 cells lit),
+       the hairline bar, and the drum (Classic 43 tones, Segmented 6). Classic output is byte-identical to the
+       committed build on the galleries (anim, buttons, cursors, fonts, furniture, knobs, scroll, textviews,
+       wheels). The control sources are identical to the PR #9 head, so the check covers this branch.
+DEMO   EmptySR2DFormTemplate: Form1.cs overrides Dispose(bool) with an empty `if (disposing)` block for the form's own
+       Sprite / Bitmap fields (moved from Form1.Designer.cs). base.Dispose and the components disposal are unchanged. compat: none.
+DEMO   EmptySR2DFormTemplate: the SR2D64.dll link item is visible in Solution Explorer (Visible="false" removed), so the DLL can be seen and replaced there. compat: none.
+DOCS   README: "Flat looks: ControlLook" section and the file-tree entry for SpriteControls.Looks.cs.
+CLEANUP  14 unreferenced *_preview.png files removed from tests/ (commit 397de35, separate from the feature).
+         Scratch PNGs in the workspace root were removed (outside the repo).
+
 2026-10-09  portable designer DLL assets + independent precompose resolution / smoother demo
 ------------------------------------------------------------------------------------------------------------
 FIXED  cs/SR2D.Native.targets (new): DLL resolution uses explicit Sr2dDll, normal None/Content

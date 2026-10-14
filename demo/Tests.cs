@@ -900,6 +900,13 @@ namespace Sr2d64CSport
                 c.Note = "corner viewport; the strip's buttons / toggles / radios drive it";
             }, warp: true, needsPoly: true, needsLine2: true).Also(t => { t.ControlStrip = ControlsDemo.BuildButtons; t.StripHeight = ControlsDemo.ButtonsStripHeight; });
 
+            T(GControls, "Control looks: Classic / Hairline / Segmented", "The flat looks of the value and button controls (ControlLook, cs/SpriteControls.Looks.cs), one column per look with the same controls: SpriteButton (Segmented lights its LED strip while hot or pressed), SpriteSlider (Hairline = thin track and square thumb; Segmented = lit cells), SpriteProgress bar and ring (Hairline = keyline and dial ticks; Segmented = cells), SpriteWheel (Hairline = keyline and ridges; Segmented = faceted drum). Classic is the default and unchanged. The Look property is on each of these four controls.",
+            c =>
+            {
+                c.Canvas.ClearBuffer(unchecked((int)0xFF101418));
+                c.Note = "the strip above the canvas shows the three looks side by side";
+            }).Also(t => { t.ControlStrip = LooksDemo.Build; t.StripHeight = LooksDemo.StripHeight; });
+
             T(GControls, "SpriteColorPicker / SpriteColorDialog (colour, on its own test)", "The colour controls on their own test: LEFT - SpriteColorPicker (cs/SpriteControls.Color.cs) as a plain control, the same HSV area + strip + alpha slider + hex box + six-scheme numeric column the dialog uses, as a Value / ValueChanged control for any form; the canvas shows a big swatch of its colour. ON THE CANVAS - the embedded SpriteColorDialog beside the corner viewport: OK paints the viewport's background (instant, no modal loop - it stays open while the picture answers), Cancel reverts. The dialog's preview doubles as the eyedropper: press it, sweep anywhere on the screen, release - one click (or the release after a sweep) takes that pixel's colour and restores the cursor; Esc or right click cancels.", c =>
             {
                 // corner viewport painted by the dialog's OK (ViewBack), the strip's picker colour as a swatch beside it

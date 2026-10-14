@@ -54,6 +54,7 @@ SR2D/
 │  ├─ SpriteView.cs        the view geometry (modes, zoom anchor, pan limits, client <-> image mapping, scroll model, inertia) - no WinForms
 │  ├─ SpriteControls.cs    SpriteControlBase (palette, hover, text, body look, animation) + SpriteRangeControl (CommitOnRelease) + SpriteKnob (rotary) + SpriteSlider
 │  ├─ SpriteControls.Buttons.cs  SpriteButton, SpriteToggle (Switch / Ellipse / Rocker / CheckBox), SpriteRadio, SpriteProgress (H / V / Ring)
+│  ├─ SpriteControls.Looks.cs    ControlLook (Classic / Hairline / Segmented) and the drawing helpers of the two flat looks (cells, keyline, dial and corner ticks, ring arcs)
 │  ├─ SpriteControls.Wheel.cs    SpriteWheel: thumb wheel / drum picker (Detailed / Flat style, WrapMouse, WrapAround, Edit = Beside / DoubleClick / Click SR2D field)
 │  ├─ SpriteControls.Scroll.cs   SpriteScrollBar (flat track, page-sized thumb, arrows) - used by SpriteBox.ScrollBars
 │  ├─ SpriteControls.Menu.cs     SpriteMenu: SR2D-drawn popup menu (commands, checks, radios, sub-menus, inline sliders, keyboard) - replaces ContextMenuStrip on SR2D controls
@@ -2856,6 +2857,39 @@ boxes that switch every knob / slider / wheel on the strip.
 
 `SpriteBox` gained two protected virtuals for such subclasses: `OnRender(Sprite)`
 (the base raises the `Render` event) and `HasRenderer`.
+
+### Flat looks: `ControlLook` (`cs/SpriteControls.Looks.cs`)
+
+Buttons, sliders, progress bars and wheels take a `Look` property with three values:
+
+| `Look` | What it is |
+|---|---|
+| `Classic` (default) | the house look, unchanged - shaded face, highlight, rim; the control's own style (`ButtonShape`, `Style`, `WheelStyle`) applies |
+| `Hairline` | flat, no gradient: a 1 px rim with an inner keyline; corner ticks on rectangular buttons, dial ticks on round ones; a 1 px track with a 3 px accent bar and a square thumb; a framed bar with a flat fill; a thin ring with dial ticks; a flat drum with keyline and ridges |
+| `Segmented` | flat and cut into cells: a dot-matrix button face with an LED strip (lit while hot or pressed, always lit when `Accented`); a row of lit cells as slider track; cell bars and cell rings for progress (`Segments` sets the count; without it a bar is cut to its length, a ring has 24 cells); a faceted drum with one flat tone per step (three tones by the facing angle) |
+
+```csharp
+var ok    = new SpriteButton { Text = "OK", Look = ControlLook.Hairline };
+var level = new SpriteSlider { Text = "Level", Look = ControlLook.Segmented, Value = 60 };
+var load  = new SpriteProgress { Look = ControlLook.Segmented, Segments = 10, Value = 50 };
+var drum  = new SpriteWheel { Look = ControlLook.Hairline, Minimum = 0, Maximum = 20, Value = 7 };
+```
+
+Size, text, caption, keyboard, mouse and events are the same in every look. `Look` only changes
+the painting. The `Look` of a `SpriteWheel` replaces the drum painting, so `Style` (`Detailed` /
+`Flat`) applies to `Classic` only. The ticks, notches, value read-out and captions of a slider or
+progress bar are drawn the same way in every look.
+
+**Compatibility.** Nothing changes for existing code: `Classic` is the default and was checked
+byte for byte against the committed build (`tests/cs/ctlrun`: buttons, knobs, wheels, scroll bars,
+furniture, fonts, text views and cursors are identical). The flat looks snap their edges to whole
+pixels, so they stay crisp at every size.
+
+The gallery of the three looks is in the demo (Controls page, "Control looks: Classic / Hairline /
+Segmented"). `tests/cs/ctlrun` checks the flat looks against their values: the lit accent pixels of
+a 50 % slider match the hairline fill, a `Segments = 10` bar at 50 % lights exactly five cells, a
+segmented drum shows six tones down a column where the classic drum shows forty-three, and an idle
+segmented button has no accent pixels (only the LED strip lights, while hot).
 
 ### Real fonts on the controls (`cs/SpriteControls.Text.cs`)
 

@@ -54,6 +54,7 @@
     <Compile Include="..\cs\SpriteControls.cs" Link="cs\SpriteControls.cs" />
     <Compile Include="..\cs\SpriteControls.Text.cs" Link="cs\SpriteControls.Text.cs" />
     <Compile Include="..\cs\SpriteControls.Buttons.cs" Link="cs\SpriteControls.Buttons.cs" />
+    <Compile Include="..\cs\SpriteControls.Looks.cs" Link="cs\SpriteControls.Looks.cs" />
     <Compile Include="..\cs\SpriteControls.Wheel.cs" Link="cs\SpriteControls.Wheel.cs" />
     <Compile Include="..\cs\SpriteControls.Menu.cs" Link="cs\SpriteControls.Menu.cs" />
     <Compile Include="..\cs\SpriteControls.Static.cs" Link="cs\SpriteControls.Static.cs" />

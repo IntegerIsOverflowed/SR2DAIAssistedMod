@@ -64,7 +64,7 @@ namespace Sr2d64CSport
         /// (like Paint); double-click it there to get <c>void canvas_Render(object sender, RenderEventArgs e)</c> and
         /// draw into <c>e.Surface</c>. Subscribing in code works the same: <c>box.Render += (s, e) => { e.Surface.ClearBuffer(0); ... };</c>
         /// </summary>
-        [Category("Appearance"), Description("Draw the scene into e.Surface (the back buffer). Runs on the next paint after Redraw(); many Redraw() calls coalesce into one Render.")]
+        [Category("Surface"), Description("Draw the scene into e.Surface (the back buffer). Runs on the next paint after Redraw(); many Redraw() calls coalesce into one Render.")]
         public event EventHandler<RenderEventArgs>? Render;
 
         /// <summary>The back buffer: the client area (SizeMode None), <see cref="FixedSurfaceSize"/>, or <see cref="ImageSize"/> when a <see cref="SizeMode"/> is on. Never null after the handle exists.</summary>
@@ -72,8 +72,8 @@ namespace Sr2d64CSport
         public Sprite Surface { get { EnsureSurface(); return _surface!; } }
 
         /// <summary>Use a GDI DIB section (BitBlt present). Default true.</summary>
-        [Category("Behavior"), DefaultValue(true), Description("Back the surface with a GDI DIB section (BitBlt present).")]
-        public bool GdiSurface
+        [Category("Surface"), DefaultValue(true), Description("Back the surface with a GDI DIB section (BitBlt present).")]
+        public virtual bool GdiSurface
         {
             get => _gdi;
             set { if (_gdi == value) return; _gdi = value; _surface?.Dispose(); _surface = null; _dirty = true; Invalidate(); }
@@ -84,9 +84,9 @@ namespace Sr2d64CSport
         /// on present (pixel-art zoom, or render at low res and upscale). Size.Empty =
         /// surface follows the client size 1:1.
         /// </summary>
-        [Category("Behavior"), DesignerSerializationVisibility(DesignerSerializationVisibility.Visible),
+        [Category("Surface"), DesignerSerializationVisibility(DesignerSerializationVisibility.Visible),
          Description("Fixed surface size stretched to the client area; 0,0 = follow the client size 1:1.")]
-        public Size FixedSurfaceSize
+        public virtual Size FixedSurfaceSize
         {
             get => _fixedSize;
             set { if (_fixedSize == value) return; _fixedSize = value; _surface?.Dispose(); _surface = null; _dirty = true; Invalidate(); }
@@ -96,8 +96,8 @@ namespace Sr2d64CSport
         private void ResetFixedSurfaceSize() => FixedSurfaceSize = Size.Empty;
 
         /// <summary>Smooth (HALFTONE) stretching when FixedSurfaceSize is used.</summary>
-        [Category("Behavior"), DefaultValue(false), Description("HALFTONE stretching when FixedSurfaceSize is set.")]
-        public bool SmoothStretch
+        [Category("Surface"), DefaultValue(false), Description("HALFTONE stretching when FixedSurfaceSize is set.")]
+        public virtual bool SmoothStretch
         {
             get => _smooth;
             set { if (_smooth == value) return; _smooth = value; Invalidate(); }

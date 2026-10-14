@@ -96,7 +96,7 @@ namespace Sr2d64CSport
     public sealed class SpriteButton : SpriteClickable
     {
         protected override AccessibleRole DefaultAccessibleRole => AccessibleRole.PushButton;
-        ButtonShape _shape = ButtonShape.Rounded; bool _accented;
+        ButtonShape _shape = ButtonShape.Rounded; bool _accented; ControlLook _look = ControlLook.Classic;
 
         public SpriteButton() { Size = new Size(120, 36); }
 
@@ -106,10 +106,14 @@ namespace Sr2d64CSport
         [Category("Appearance"), DefaultValue(false), Description("Primary look: the face is filled with AccentColor.")]
         public bool Accented { get => _accented; set { _accented = value; Redraw(); } }
 
+        [Category("Appearance"), DefaultValue(ControlLook.Classic), Description("Classic (shaded face), Hairline (flat, keyline and corner ticks) or Segmented (flat dot-matrix face with an LED strip that lights while hot or pressed).")]
+        public ControlLook Look { get => _look; set { _look = value; Redraw(); } }
+
         protected override void PaintControl(Sprite s)
         {
             int w = ClientSize.Width, h = ClientSize.Height;
             bool down = IsPressed, hot = IsHot && Enabled;
+            if (_look != ControlLook.Classic) { PaintLook(s, w, h, down, hot); return; }
             int face = _accented ? (down ? Mix(AccentRaw, Black, 0.25f) : hot ? Mix(AccentRaw, White, 0.12f) : Accent)
                                  : Mix(BackColor, ThumbColor, down ? 0.12f : hot ? 0.24f : 0.18f);
             int hi = _accented ? Mix(face, White, 0.14f) : Mix(BackColor, ThumbColor, down ? 0.16f : 0.26f);
@@ -140,6 +144,95 @@ namespace Sr2d64CSport
             }
             DrawRound(s, inset, inset + off, w - 2 * inset, h - 2 * inset - off, rad, rim, rimW);
             CaptionIn(s, new Rectangle(0, (int)off, w, h), Text, textCol, ts);
+        }
+
+        /// <summary>The flat looks: <see cref="ControlLook.Hairline"/> and <see cref="ControlLook.Segmented"/> (same shapes, sizes and caption as Classic).</summary>
+        void PaintLook(Sprite s, int w, int h, bool down, bool hot)
+        {
+            bool hair = _look == ControlLook.Hairline;
+            float inset = 1.5f, off = down ? 1f : 0f;
+            int face = _accented ? (down ? Mix(AccentRaw, Black, 0.2f) : hot ? Mix(AccentRaw, White, 0.12f) : Accent)
+                       : hair ? (down ? Mix(BackColor, Accent, 0.24f) : Mix(BackColor, ThumbColor, hot ? 0.12f : 0.07f))
+                       : (down ? Mix(BackColor, ThumbColor, 0.12f) : Mix(BackColor, ThumbColor, hot ? 0.24f : 0.18f));
+            int rim = down || _accented ? Accent : _look == ControlLook.Hairline ? Mix(Accent, BackColor, hot ? 0.25f : 0.5f) : Mix(BackColor, ThumbColor, hot ? 0.7f : 0.5f);
+            int mark = _accented ? White : Accent;                  // keyline, corner / dial ticks, LED strip
+            int dim = Mix(face, Black, 0.35f), dots = Mix(face, Black, 0.2f);   // unlit LED cells, dot-matrix dots
+            bool lit = _accented || hot || down;                    // the LED strip (Segmented) lights up
+            int textCol = _accented ? (Enabled ? White : Fore) : Fore;
+            int ts = AutoTextScale(h * 2);
+            if (_shape == ButtonShape.Round)
+            {
+                float r = Math.Min(w, h) / 2f - 1.5f, cx = w / 2f, cy = h / 2f;
+                s.FillCircle(cx, cy, r, face, SR2D.LineOp.Set, true);
+                if (hair)
+                {
+                    s.DrawCircle(cx, cy, r, rim, 1f, true);
+                    s.DrawCircle(cx, cy, r - 3f, Argb(mark, 110), 1f, true, SR2D.LineOp.AlphaBlend);
+                    LookDial(s, cx, cy, r - 9f, 12, 2, 4, 3, Argb(mark, 200));
+                }
+                else
+                {
+                    LookDots(s, w, h, r, true, dots);
+                    for (int k = 0; k < 24; k++)
+                    {
+                        double a = (270 + 360.0 * k / 24) * Math.PI / 180;
+                        s.FillCircle(cx + (float)Math.Cos(a) * (r - 3f), cy + (float)Math.Sin(a) * (r - 3f), 1.4f, lit ? mark : dim, SR2D.LineOp.Set, true);
+                    }
+                }
+                if (!string.IsNullOrEmpty(Text))
+                {
+                    int avail = (int)(r * 1.5f), sc = FitScale(Text, avail, ts);
+                    T.Draw(s, (int)MathF.Round(cx), (int)MathF.Round(cy), FitText(Text, avail, sc), textCol, 0, sc, 0, 0, SR2D.LineOp.Set, 128, TextAnchor.Center);
+                }
+                return;
+            }
+            float rad = _shape == ButtonShape.Pill ? h / 2f : _shape == ButtonShape.Square ? 0f : h * 0.2f;
+            float x = inset, y = inset + off, ww = w - 2 * inset, hh = h - 2 * inset - off;
+            FillRound(s, x, y, ww, hh, rad, face);
+            if (hair)
+            {
+                DrawRound(s, x, y, ww, hh, rad, rim, 1f);
+                s.DrawRoundRect(x + 3f, y + 3f, ww - 6, hh - 6, Math.Max(0, rad - 3), Argb(mark, 110), 1f, true, SR2D.LineOp.AlphaBlend);
+                // corner ticks sit inside the keyline; a pill's ends are round, so it keeps the keyline alone
+                if (_shape != ButtonShape.Pill && ww >= 24 && hh >= 16)
+                    LookCornerTicks(s, x + 5f, y + 5f, ww - 10, hh - 10, Math.Clamp((int)Math.Min(ww, hh) / 6, 2, 6), mark);
+                // an instrument index bar along the top inside edge (not on pills: their ends are round)
+                if (_shape != ButtonShape.Pill && ww >= 40 && hh >= 16)
+                    s.FillRect((int)MathF.Round(x + 8f), (int)MathF.Round(y + 3f), (int)MathF.Round(ww - 16f), 2, mark);
+            }
+            else
+            {
+                // solid face (no dot matrix); LED strip: chunky cells along the bottom inside edge, lit while hot, pressed or accented
+                float sy = y + hh - 6f, sx0 = x + Math.Max(rad, 6f), sx1 = x + ww - Math.Max(rad, 6f);
+                int n = Math.Max(3, (int)((sx1 - sx0) / 9f));
+                if (sx1 > sx0) LookCells(s, sx0, sx1, sy + 1.5f, 3f, true, n, 3f, _ => lit ? mark : dim);
+            }
+            CaptionIn(s, new Rectangle(0, (int)off, w, h), Text, textCol, ts);
+        }
+
+        /// <summary>
+        /// The dot-matrix texture of the Segmented face: one dot every four pixels, kept inside the rounded outline
+        /// (<paramref name="rad"/>; <paramref name="round"/> = a disc of radius <paramref name="rad"/> instead).
+        /// </summary>
+        static void LookDots(Sprite s, int w, int h, float rad, bool round, int col)
+        {
+            for (int y = 4; y < h - 4; y += 4)
+                for (int x = 4; x < w - 4; x += 4)
+                {
+                    float px = x + 0.5f, py = y + 0.5f;
+                    if (round)
+                    {
+                        float dx = px - w / 2f, dy = py - h / 2f;
+                        if (dx * dx + dy * dy > (rad - 4) * (rad - 4)) continue;
+                    }
+                    else if (rad > 4)
+                    {
+                        float qx = Math.Clamp(px, rad, w - rad), qy = Math.Clamp(py, rad, h - rad);
+                        float dx = px - qx, dy = py - qy;
+                        if (dx * dx + dy * dy > (rad - 3) * (rad - 3)) continue;
+                    }
+                    s.FillRect(x, y, 1, 1, col);
+                }
         }
     }
 
@@ -376,7 +469,7 @@ namespace Sr2d64CSport
     public sealed class SpriteProgress : SpriteControlBase
     {
         protected override AccessibleRole DefaultAccessibleRole => AccessibleRole.ProgressBar;
-        ProgressStyle _style = ProgressStyle.Horizontal;
+        ProgressStyle _style = ProgressStyle.Horizontal; ControlLook _look = ControlLook.Classic;
         double _min, _max = 100, _value; bool _showPercent = true, _marquee; float _phase; int _segments;
 
         public SpriteProgress() { Size = new Size(220, 22); TabStop = false; Cursor = Cursors.Default; }
@@ -395,6 +488,8 @@ namespace Sr2d64CSport
         public float Phase { get => _phase; set { _phase = value - MathF.Floor(value); if (IsHandleCreated) RedrawNow(); else Redraw(); } }
         [Category("Appearance"), DefaultValue(0), Description("Number of LED-like segments (0 = continuous fill).")]
         public int Segments { get => _segments; set { _segments = Math.Max(0, value); Redraw(); } }
+        [Category("Appearance"), DefaultValue(ControlLook.Classic), Description("Classic (shaded bar or ring), Hairline (framed bar with a keyline, thin ring with dial ticks) or Segmented (a row of lit cells; Segments sets how many).")]
+        public ControlLook Look { get => _look; set { _look = value; Redraw(); } }
 
         /// <summary>Advance the marquee by <paramref name="dt"/> of a full sweep (e.g. 0.02 from a 20 ms timer).</summary>
         public void Tick(float dt = 0.02f) => Phase = _phase + dt;
@@ -408,6 +503,7 @@ namespace Sr2d64CSport
             double f = Fraction; string cap = Caption;
             if (_style == ProgressStyle.Ring)
             {
+                if (_look != ControlLook.Classic) { PaintLookRing(s, w, h, f, cap); return; }
                 float r = Math.Min(w, h) / 2f - 1.5f, cx = w / 2f, cy = h / 2f, tw = Math.Max(2f, r * 0.16f), tr = r - tw / 2;
                 s.DrawCircle(cx, cy, tr, Track, tw, true);
                 int maxN = (int)(tr * 2 * MathF.PI / 3f) + 2;
@@ -428,6 +524,7 @@ namespace Sr2d64CSport
                 return;
             }
             bool hz = _style == ProgressStyle.Horizontal;
+            if (_look != ControlLook.Classic) { PaintLookBar(s, w, h, hz, f, cap); return; }
             float x = 1.5f, y = 1.5f, ww = w - 3, hh = h - 3, rad = Math.Min(ww, hh) * 0.3f;
             FillRound(s, x, y, ww, hh, rad, Track);
             float inset = Math.Max(1f, Math.Min(ww, hh) * 0.12f);
@@ -452,6 +549,75 @@ namespace Sr2d64CSport
                 // text over the bar: light on the track, dark where the accent fill would clash - use an outline colour
                 if (hz) T.Draw(s, w / 2, h / 2, FitText(cap, avail, sc), Fore, 0, sc, 0, 0, SR2D.LineOp.Set, 128, TextAnchor.Center);
                 else T.Draw(s, w / 2, h / 2, FitText(cap, avail, sc), Fore, 0, sc, 0, 0, SR2D.LineOp.Set, 128, TextAnchor.Center);
+            }
+        }
+
+        // a cell is lit inside the marquee window (a run of `window` of a turn that wraps), otherwise up to the value
+        bool LitCell(double c, double f, double window) => _marquee ? ((c - _phase) % 1 + 1) % 1 <= window : c <= f;
+
+        // the flat looks of the ring: Hairline = a thin track ring with dial ticks and a 2 px arc; Segmented = arc cells
+        void PaintLookRing(Sprite s, int w, int h, double f, string cap)
+        {
+            bool hair = _look == ControlLook.Hairline;
+            float r = Math.Min(w, h) / 2f - 1.5f, cx = w / 2f, cy = h / 2f;
+            float tw = hair ? 2f : Math.Max(3f, r * 0.2f);
+            float tr = hair ? r - 9f : r - tw / 2;                      // the stroke's centre; the hairline keeps room for the dial
+            if (hair)
+            {
+                s.DrawCircle(cx, cy, tr, Track, 1f, true);
+                LookDial(s, cx, cy, tr + 4f, 60, 2, 4, 5, Mix(BackColor, ThumbColor, 0.5f));
+                if (_marquee) { LookArc(s, cx, cy, tr, tw, _phase, 0.25, Accent); if (_phase > 0.75) LookArc(s, cx, cy, tr, tw, 0, _phase - 0.75, Accent); }
+                else LookArc(s, cx, cy, tr, tw, 0, f, Accent);
+            }
+            else
+            {
+                int n = _segments > 0 ? _segments : 24;
+                for (int i = 0; i < n; i++)
+                    LookArc(s, cx, cy, tr, tw, (double)i / n + 0.12 / n, 0.76 / n, LitCell((i + 0.5) / n, f, 0.25) ? Accent : Track);
+            }
+            int ts = AutoTextScale((int)(r * 2.2f));
+            if (cap.Length > 0) { int sc = FitScale(cap, (int)(tr * 1.4f), ts); T.Draw(s, (int)cx, (int)cy, FitText(cap, (int)(tr * 1.4f), sc), Fore, 0, sc, 0, 0, SR2D.LineOp.Set, 128, TextAnchor.Center); }
+        }
+
+        // the flat looks of the bar: Hairline = a keyline frame and a flat accent fill; Segmented = a row of cells (no frame)
+        void PaintLookBar(Sprite s, int w, int h, bool hz, double f, string cap)
+        {
+            if (_look == ControlLook.Hairline)
+            {
+                int rim = Mix(BackColor, ThumbColor, 0.5f);
+                LookKeyline(s, 0, 0, w, h, 0, rim, Argb(rim, 110));
+                float ix = 4f, iy = 4f, iw = w - 8, ih = h - 8;         // inside the keyline
+                void Fill(double from, double len)
+                {
+                    if (len <= 0) return;
+                    if (hz) LookBar(s, ix + iw * (float)from, ix + iw * (float)(from + len), iy + ih / 2f, ih, true, Accent);
+                    else LookBar(s, iy + ih * (float)(1 - from), iy + ih * (float)(1 - from - len), ix + iw / 2f, iw, false, Accent);
+                }
+                if (_marquee) { double len = 0.3, p = _phase * (1 + len) - len; Fill(Math.Max(0, p), Math.Min(len, Math.Min(p + len, 1) - Math.Max(0, p))); }
+                else
+                {
+                    Fill(0, f);
+                    if (f > 0.01 && f < 0.99)                        // the needle: a light 2 px mark at the end of the fill
+                    {
+                        int needle = Mix(Accent, White, 0.55f);
+                        if (hz) s.FillRect((int)MathF.Round(ix + iw * (float)f) - 1, (int)iy, 2, (int)ih, needle);
+                        else s.FillRect((int)ix, (int)MathF.Round(iy + ih * (float)(1 - f)) - 1, (int)iw, 2, needle);
+                    }
+                }
+            }
+            else
+            {
+                float across = hz ? h : w, extent = hz ? w : h;
+                float th = Math.Min(across - 2, Math.Max(4f, across * 0.55f));
+                int n = _segments > 0 ? _segments : Math.Max(4, (int)((extent - 2) / (th * 1.1f)));
+                float qa = hz ? 1f : h - 1f, qb = hz ? w - 1f : 1f;
+                LookCells(s, qa, qb, hz ? h / 2f : w / 2f, th, hz, n, 2f, c => LitCell(c, f, 0.3) ? Accent : Track);
+            }
+            if (cap.Length > 0)
+            {
+                int ts = AutoTextScale(hz ? h * 3 : w * 3), avail = hz ? w - 8 : h - 8;
+                int sc = FitScale(cap, avail, ts);
+                T.Draw(s, w / 2, h / 2, FitText(cap, avail, sc), Fore, 0, sc, 0, 0, SR2D.LineOp.Set, 128, TextAnchor.Center);
             }
         }
     }

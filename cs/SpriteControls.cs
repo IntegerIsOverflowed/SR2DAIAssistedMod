@@ -33,6 +33,64 @@ namespace Sr2d64CSport
 
     public abstract partial class SpriteControlBase : SpriteBox
     {
+
+        // ---- viewer members inherited from SpriteBox ----
+        // A control is not a picture viewer: zoom, pan, inertia, friction, scroll bars, pixel grid, view menu, navigation and
+        // the render-surface properties are hidden from the designer here. They stay public (code can still use them) and stay
+        // visible on SpriteBox itself.
+        [Browsable(false), DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
+        public override SpriteSizeMode SizeMode { get => base.SizeMode; set => base.SizeMode = value; }
+        [Browsable(false), DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
+        public override Size ImageSize { get => base.ImageSize; set => base.ImageSize = value; }
+        [Browsable(false), DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
+        public override double Zoom { get => base.Zoom; set => base.Zoom = value; }
+        [Browsable(false), DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
+        public override double MinZoom { get => base.MinZoom; set => base.MinZoom = value; }
+        [Browsable(false), DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
+        public override double MaxZoom { get => base.MaxZoom; set => base.MaxZoom = value; }
+        [Browsable(false), DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
+        public override double ZoomStep { get => base.ZoomStep; set => base.ZoomStep = value; }
+        [Browsable(false), DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
+        public override SpritePanMode PanMode { get => base.PanMode; set => base.PanMode = value; }
+        [Browsable(false), DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
+        public override float Overscroll { get => base.Overscroll; set => base.Overscroll = value; }
+        [Browsable(false), DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
+        public override PointF Pan { get => base.Pan; set => base.Pan = value; }
+        [Browsable(false), DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
+        public override bool Inertia { get => base.Inertia; set => base.Inertia = value; }
+        [Browsable(false), DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
+        public override float Friction { get => base.Friction; set => base.Friction = value; }
+        [Browsable(false), DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
+        public override float InertiaThreshold { get => base.InertiaThreshold; set => base.InertiaThreshold = value; }
+        [Browsable(false), DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
+        public override float InertiaGain { get => base.InertiaGain; set => base.InertiaGain = value; }
+        [Browsable(false), DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
+        public override bool SmoothZoom { get => base.SmoothZoom; set => base.SmoothZoom = value; }
+        [Browsable(false), DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
+        public override int SmoothZoomTime { get => base.SmoothZoomTime; set => base.SmoothZoomTime = value; }
+        [Browsable(false), DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
+        public override bool ScrollBars { get => base.ScrollBars; set => base.ScrollBars = value; }
+        [Browsable(false), DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
+        public override int ScrollBarWidth { get => base.ScrollBarWidth; set => base.ScrollBarWidth = value; }
+        [Browsable(false), DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
+        public override SR2D.Filter ViewFilter { get => base.ViewFilter; set => base.ViewFilter = value; }
+        [Browsable(false), DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
+        public override bool PixelGrid { get => base.PixelGrid; set => base.PixelGrid = value; }
+        [Browsable(false), DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
+        public override float PixelGridMinScale { get => base.PixelGridMinScale; set => base.PixelGridMinScale = value; }
+        [Browsable(false), DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
+        public override Color PixelGridColor { get => base.PixelGridColor; set => base.PixelGridColor = value; }
+        [Browsable(false), DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
+        public override SpriteNavigation Navigation { get => base.Navigation; set => base.Navigation = value; }
+        [Browsable(false), DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
+        public override bool ViewMenu { get => base.ViewMenu; set => base.ViewMenu = value; }
+        [Browsable(false), DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
+        public override bool GdiSurface { get => base.GdiSurface; set => base.GdiSurface = value; }
+        [Browsable(false), DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
+        public override Size FixedSurfaceSize { get => base.FixedSurfaceSize; set => base.FixedSurfaceSize = value; }
+        [Browsable(false), DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
+        public override bool SmoothStretch { get => base.SmoothStretch; set => base.SmoothStretch = value; }
+
         int _textScale;
         // the palette defaults (Color, because the properties are Color for the designer; the paint code reads them as ints once per paint)
         internal static readonly Color DefaultBack = Color.FromArgb(0x20, 0x24, 0x28), DefaultAccent = Color.FromArgb(0x33, 0x99, 0xFF),
@@ -1031,7 +1089,7 @@ namespace Sr2d64CSport
     {
         protected override AccessibleRole DefaultAccessibleRole => AccessibleRole.Slider;
         Orientation _orient = Orientation.Horizontal;
-        int _ticks;
+        int _ticks; ControlLook _look = ControlLook.Classic;
 
         public SpriteSlider() { Size = new Size(220, 40); }
 
@@ -1040,6 +1098,9 @@ namespace Sr2d64CSport
 
         [Category("Appearance"), DefaultValue(0), Description("Number of tick intervals drawn along the track (0 = none).")]
         public int Ticks { get => _ticks; set { _ticks = Math.Max(0, value); Redraw(); } }
+
+        [Category("Appearance"), DefaultValue(ControlLook.Classic), Description("Classic (shaded track, disc thumb), Hairline (1 px track, accent bar, square thumb) or Segmented (a row of lit cells with a marker).")]
+        public ControlLook Look { get => _look; set { _look = value; Redraw(); } }
 
         // geometry: track from a to b along the main axis at cross position m; thumb radius tr
         (float a, float b, float m, float tr, int ts, Rectangle textArea) Geometry()
@@ -1080,9 +1141,13 @@ namespace Sr2d64CSport
             // fill: zero .. committed value solid, committed .. pending (deferred drag) in a faded accent
             float f0 = (float)ZeroFraction, fc = (float)CommittedFraction, fp = (float)Fraction;
             float qc = a + (b - a) * fc, qp = a + (b - a) * fp, tq = qp;
-            Bar(s, a, b, m, th, Track, hz);
-            { float q0 = Math.Min(a + (b - a) * f0, qc), q1 = Math.Max(a + (b - a) * f0, qc); if (q1 - q0 > 0.5f) Bar(s, q0, q1, m, th, Accent, hz); }
-            if (Math.Abs(qp - qc) > 0.5f) Bar(s, Math.Min(qc, qp), Math.Max(qc, qp), m, th, Mix(Accent, Track, 0.5f), hz);
+            if (_look != ControlLook.Classic) PaintLookTrack(s, a, b, m, tr, hz, f0, fc, fp);
+            else
+            {
+                Bar(s, a, b, m, th, Track, hz);
+                { float q0 = Math.Min(a + (b - a) * f0, qc), q1 = Math.Max(a + (b - a) * f0, qc); if (q1 - q0 > 0.5f) Bar(s, q0, q1, m, th, Accent, hz); }
+                if (Math.Abs(qp - qc) > 0.5f) Bar(s, Math.Min(qc, qp), Math.Max(qc, qp), m, th, Mix(Accent, Track, 0.5f), hz);
+            }
             if (_ticks > 0)
             {
                 int tick = Mix(BackColor, ForeColor, 0.45f);
@@ -1116,21 +1181,25 @@ namespace Sr2d64CSport
                     }
                 }
             }
-            // thumb: disc with rim (brighter while dragging), small accent dot. A deferred drag lifts it off the track
-            // (shadow below-right, a little bigger) and leaves a ghost ring at the committed value; release drops it back.
-            float lift = Lift, tx = hz ? tq : m, ty = hz ? m : tq;
-            if (HasPendingValue && Math.Abs(qp - qc) > 0.5f)
-                s.DrawCircle(hz ? qc : m, hz ? m : qc, tr * 0.8f, Mix(Track, ThumbColor, 0.5f), 1.5f, true);
-            if (lift > 0.01f)
+            if (_look != ControlLook.Classic) PaintLookThumb(s, m, tr, hz, tq);
+            else
             {
-                float up = Math.Max(2f, tr * 0.4f) * lift, tr2 = tr * (1 + 0.15f * lift);
-                s.FillCircle(tx + up * 0.6f, ty + up * 0.9f, tr2, Argb(Black, (int)(110 * lift)), SR2D.LineOp.AlphaBlend, true);
-                if (hz) ty -= up; else tx -= up;
-                tr = tr2;
+                // thumb: disc with rim (brighter while dragging), small accent dot. A deferred drag lifts it off the track
+                // (shadow below-right, a little bigger) and leaves a ghost ring at the committed value; release drops it back.
+                float lift = Lift, tx = hz ? tq : m, ty = hz ? m : tq;
+                if (HasPendingValue && Math.Abs(qp - qc) > 0.5f)
+                    s.DrawCircle(hz ? qc : m, hz ? m : qc, tr * 0.8f, Mix(Track, ThumbColor, 0.5f), 1.5f, true);
+                if (lift > 0.01f)
+                {
+                    float up = Math.Max(2f, tr * 0.4f) * lift, tr2 = tr * (1 + 0.15f * lift);
+                    s.FillCircle(tx + up * 0.6f, ty + up * 0.9f, tr2, Argb(Black, (int)(110 * lift)), SR2D.LineOp.AlphaBlend, true);
+                    if (hz) ty -= up; else tx -= up;
+                    tr = tr2;
+                }
+                s.FillCircle(tx, ty, tr, Thumb, SR2D.LineOp.Set, true);
+                s.DrawCircle(tx, ty, tr, IsDragging ? Accent : Mix(ThumbColor, BackColor, 0.4f), 1.5f, true);
+                s.FillCircle(tx, ty, tr * 0.3f, Accent, SR2D.LineOp.Set, true);
             }
-            s.FillCircle(tx, ty, tr, Thumb, SR2D.LineOp.Set, true);
-            s.DrawCircle(tx, ty, tr, IsDragging ? Accent : Mix(ThumbColor, BackColor, 0.4f), 1.5f, true);
-            s.FillCircle(tx, ty, tr * 0.3f, Accent, SR2D.LineOp.Set, true);
             // texts
             if (hz)
             {
@@ -1146,6 +1215,41 @@ namespace Sr2d64CSport
                 if (!string.IsNullOrEmpty(Text)) { int cs = FitScale(Text, ClientSize.Width - 2, ts); T.Draw(s, (int)m, 1, FitText(Text, ClientSize.Width - 2, cs), Fore, 0, cs, 0, 0, SR2D.LineOp.Set, 128, TextAnchor.TopCenter); }
                 if (ShowValue) T.Draw(s, (int)m, ClientSize.Height - 1, ValueText, HasPendingValue ? Accent : Fore, 0, FitScale(ValueText, ClientSize.Width - 2, ts), 0, 0, SR2D.LineOp.Set, 128, TextAnchor.BottomCenter);
             }
+        }
+
+        // the flat looks' track and value: Hairline = a 1 px track with a 3 px accent bar (the pending part of a deferred
+        // drag in the faded accent); Segmented = a row of cells, lit from zero to the committed value
+        void PaintLookTrack(Sprite s, float a, float b, float m, float tr, bool hz, float f0, float fc, float fp)
+        {
+            if (_look == ControlLook.Hairline)
+            {
+                LookBar(s, a, b, m, 1f, hz, Mix(BackColor, ThumbColor, 0.45f));
+                LookBar(s, a + (b - a) * f0, a + (b - a) * fc, m, 3f, hz, Accent);
+                LookBar(s, a + (b - a) * fc, a + (b - a) * fp, m, 3f, hz, Mix(Accent, Track, 0.5f));
+                return;
+            }
+            double lo = Math.Min(f0, fc), hi = Math.Max(f0, fc), plo = Math.Min(fc, fp), phi = Math.Max(fc, fp);
+            float th = Math.Max(3f, tr * 0.4f);
+            int n = Math.Clamp((int)(Math.Abs(b - a) / (th + 2f)), 4, 60);
+            LookCells(s, a, b, m, th, hz, n, 2f, c => c >= lo && c <= hi ? Accent : c > plo && c <= phi ? Mix(Accent, Track, 0.5f) : Track);
+        }
+
+        // the flat thumb: Hairline = a solid accent square; Segmented = a marker across the cells
+        void PaintLookThumb(Sprite s, float m, float tr, bool hz, float tq)
+        {
+            int cx = (int)MathF.Round(hz ? tq : m), cy = (int)MathF.Round(hz ? m : tq);
+            if (_look == ControlLook.Hairline)
+            {
+                // a solid accent square with a darker edge (white while dragged)
+                int half = Math.Max(3, (int)MathF.Round(tr * 0.8f));
+                s.FillRect(cx - half, cy - half, 2 * half, 2 * half, IsDragging ? White : Accent);
+                s.DrawRect(cx - half + 0.5f, cy - half + 0.5f, 2 * half - 1, 2 * half - 1, Mix(Accent, Black, 0.45f), 1f, false);
+                return;
+            }
+            int hh = (int)MathF.Round(Math.Max(3f, tr * 0.4f) / 2 + 2);
+            int col = IsDragging ? White : Thumb;
+            if (hz) s.FillRect(cx - 1, cy - hh, 3, 2 * hh, col);
+            else s.FillRect(cx - hh, cy - 1, 2 * hh, 3, col);
         }
 
         // rounded bar from q0 to q1 along the axis (round caps via DrawWideLine)

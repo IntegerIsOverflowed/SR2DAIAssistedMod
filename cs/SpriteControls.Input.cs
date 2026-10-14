@@ -255,11 +255,11 @@ namespace Sr2d64CSport
     public sealed class SpriteNumeric : SpriteTextBox
     {
         protected override AccessibleRole DefaultAccessibleRole => AccessibleRole.Slider;
-        double _value, _min, _max = 100, _step = 1; int _dec; string _unit = ""; int _pressedBtn; Timer? _repeat; int _repeatDir;
+        decimal _value, _min, _max = 100, _step = 1; int _dec; string _unit = ""; int _pressedBtn; Timer? _repeat; int _repeatDir;
         double[]? _values; bool _pow2;
         SpinnerPlacement _spinner = SpinnerPlacement.Right; bool _wrapMouse = true, _dragSpin = true; int _pixelsPerStep = 4;
         // spinner drag: press on a button, move = value follows the pointer (up / right = larger); a press without movement is a click
-        bool _spinDragging, _spinMoved; Point _spinLast; double _spinAcc, _spinStart; int _hotBtn;
+        bool _spinDragging, _spinMoved; Point _spinLast; decimal _spinAcc, _spinStart; int _hotBtn;
 
         public SpriteNumeric() { Size = new Size(96, 24); TextAlign = HorizontalAlignment.Right; SyncText(); }
 
@@ -278,14 +278,14 @@ namespace Sr2d64CSport
         [Category("Action"), Description("Raised after Value changed (user or code).")]
         public event EventHandler? ValueChanged;
 
-        [Category("Behavior"), DefaultValue(0.0)]
-        public double Value { get => _value; set => SetValue(value, false); }
-        [Category("Behavior"), DefaultValue(0.0)]
-        public double Minimum { get => _min; set { _min = value; if (_max < _min) _max = _min; if (_pow2) _values = Discrete.Pow2(_min, _max); SetValue(_value, false); } }
-        [Category("Behavior"), DefaultValue(100.0)]
-        public double Maximum { get => _max; set { _max = value; if (_min > _max) _min = _max; if (_pow2) _values = Discrete.Pow2(_min, _max); SetValue(_value, false); } }
-        [Category("Behavior"), DefaultValue(1.0), Description("Increment of the buttons / arrow keys / wheel (Shift = a tenth).")]
-        public double Step { get => _step; set { _step = value <= 0 ? 1 : value; } }
+        [Category("Behavior"), DefaultValue(typeof(decimal), "0")]
+        public decimal Value { get => _value; set => SetValue(value, false); }
+        [Category("Behavior"), DefaultValue(typeof(decimal), "0"), Description("Smallest value: typed numbers, buttons, keys and the wheel are clamped to Minimum..Maximum."), Browsable(true), EditorBrowsable(EditorBrowsableState.Always), DesignerSerializationVisibility(DesignerSerializationVisibility.Visible), Bindable(true)]
+        public decimal Minimum { get => _min; set { _min = value; if (_max < _min) _max = _min; if (_pow2) _values = Discrete.Pow2((double)_min, (double)_max); SetValue(_value, false); } }
+        [Category("Behavior"), DefaultValue(typeof(decimal), "100"), Description("Largest value: typed numbers, buttons, keys and the wheel are clamped to Minimum..Maximum."), Browsable(true), EditorBrowsable(EditorBrowsableState.Always), DesignerSerializationVisibility(DesignerSerializationVisibility.Visible), Bindable(true)]
+        public decimal Maximum { get => _max; set { _max = value; if (_min > _max) _min = _max; if (_pow2) _values = Discrete.Pow2((double)_min, (double)_max); SetValue(_value, false); } }
+        [Category("Behavior"), DefaultValue(typeof(decimal), "1"), Description("Increment of the buttons / arrow keys / wheel (Shift = a tenth).")]
+        public decimal Step { get => _step; set { _step = value <= 0 ? 1 : value; } }
 
         /// <summary>Discrete values the control snaps to: sorted and de-duplicated automatically, every input (typing, buttons, keys, code) picks the nearest entry, and the buttons / arrow keys step through the list one entry at a time. When set, Step is ignored.</summary>
         [Category("Behavior"), Description("Discrete values to snap to (e.g. 2 4 6 8 10 12, or any predetermined set). Every value picks the nearest entry; the buttons and the arrow keys step through the list.")]
@@ -296,37 +296,36 @@ namespace Sr2d64CSport
         public bool PowersOfTwo
         {
             get => _pow2;
-            set { _pow2 = value; _values = value ? Discrete.Pow2(_min, _max) : null; SetValue(_value, false); }
+            set { _pow2 = value; _values = value ? Discrete.Pow2((double)_min, (double)_max) : null; SetValue(_value, false); }
         }
         [Category("Appearance"), DefaultValue(0)]
         public int Decimals { get => _dec; set { _dec = Math.Clamp(value, 0, 6); SyncText(); } }
         [Category("Appearance"), DefaultValue(""), Description("Suffix shown after the number (not editable).")]
         public string Unit { get => _unit; set { _unit = value ?? ""; SyncText(); } }
 
-        void SetValue(double v, bool fromUser)
+        void SetValue(decimal v, bool fromUser)
         {
-            if (double.IsNaN(v)) v = _min;
             v = Math.Clamp(v, _min, _max);
             v = Math.Round(v, _dec);
-            if (_values is { Length: > 0 }) v = Discrete.Nearest(_values, v);          // the discrete list wins (after rounding, so entries survive Decimals = 0)
+            if (_values is { Length: > 0 }) v = (decimal)Discrete.Nearest(_values, (double)v);          // the discrete list wins (after rounding, so entries survive Decimals = 0)
             bool changed = v != _value; _value = v;
             SyncText();
             if (changed) ValueChanged?.Invoke(this, EventArgs.Empty);
         }
         void SyncText() { string s = Format(_value); if (Text != s) Text = s; }
-        string Format(double v) => v.ToString("F" + _dec, System.Globalization.CultureInfo.CurrentCulture);
+        string Format(decimal v) => v.ToString("F" + _dec, System.Globalization.CultureInfo.CurrentCulture);
         public void Nudge(int steps, bool fine = false)
         {
             if (_values is { Length: > 0 } && steps != 0)                              // one list entry per step (never stuck between entries)
             {
-                int dir = Math.Sign(steps); double v = _value;
+                int dir = Math.Sign(steps); double v = (double)_value;
                 for (int i = 0; i < Math.Abs(steps); i++)
                 {
                     double next = Discrete.Next(_values, v, dir);
                     if (next == v) break;
                     v = next;
                 }
-                SetValue(v, true);
+                SetValue((decimal)v, true);
                 return;
             }
             SetValue(_value + steps * (fine ? _step / 10 : _step), true);
@@ -336,8 +335,8 @@ namespace Sr2d64CSport
         {
             // parse what was typed (the unit / spaces stripped); garbage keeps the old value
             string t = Text.Trim(); if (_unit.Length > 0 && t.EndsWith(_unit, StringComparison.OrdinalIgnoreCase)) t = t.Substring(0, t.Length - _unit.Length).Trim();
-            if (double.TryParse(t, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.CurrentCulture, out double v) ||
-                double.TryParse(t, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out v)) SetValue(v, true);
+            if (decimal.TryParse(t, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.CurrentCulture, out decimal v) ||
+                decimal.TryParse(t, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out v)) SetValue(v, true);
             else SyncText();
             base.OnCommitted();
         }
@@ -393,7 +392,7 @@ namespace Sr2d64CSport
                 if (!_spinMoved && Math.Abs(d) < 3) return;                     // dead zone: a wobbly click is still a click
                 if (!_spinMoved) { _spinMoved = true; _repeat?.Stop(); Cursor = SpriteCursors.Get(SpriteCursors.Kind.HandGrab, this); }
                 _spinLast = e.Location;
-                _spinAcc += (double)d / _pixelsPerStep * ((ModifierKeys & Keys.Shift) != 0 ? _step / 10 : _step);
+                _spinAcc += (decimal)d / _pixelsPerStep * ((ModifierKeys & Keys.Shift) != 0 ? _step / 10 : _step);
                 _spinAcc = Math.Clamp(_spinAcc, _min, _max);
                 SetValue(_spinAcc, true);
                 if (_wrapMouse) { var np = WrapPointerOnScreen(e.Location, vertical); if (np != e.Location) _spinLast = np; }
