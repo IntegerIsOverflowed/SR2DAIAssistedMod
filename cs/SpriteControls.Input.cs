@@ -280,9 +280,9 @@ namespace Sr2d64CSport
 
         [Category("Behavior"), DefaultValue(0.0)]
         public double Value { get => _value; set => SetValue(value, false); }
-        [Category("Behavior"), DefaultValue(0.0)]
+        [Category("Behavior"), DefaultValue(0.0), Description("Smallest value: typed numbers, buttons, keys and the wheel are clamped to Minimum..Maximum."), Browsable(true), EditorBrowsable(EditorBrowsableState.Always), DesignerSerializationVisibility(DesignerSerializationVisibility.Visible), Bindable(true)]
         public double Minimum { get => _min; set { _min = value; if (_max < _min) _max = _min; if (_pow2) _values = Discrete.Pow2(_min, _max); SetValue(_value, false); } }
-        [Category("Behavior"), DefaultValue(100.0)]
+        [Category("Behavior"), DefaultValue(100.0), Description("Largest value: typed numbers, buttons, keys and the wheel are clamped to Minimum..Maximum."), Browsable(true), EditorBrowsable(EditorBrowsableState.Always), DesignerSerializationVisibility(DesignerSerializationVisibility.Visible), Bindable(true)]
         public double Maximum { get => _max; set { _max = value; if (_min > _max) _min = _max; if (_pow2) _values = Discrete.Pow2(_min, _max); SetValue(_value, false); } }
         [Category("Behavior"), DefaultValue(1.0), Description("Increment of the buttons / arrow keys / wheel (Shift = a tenth).")]
         public double Step { get => _step; set { _step = value <= 0 ? 1 : value; } }

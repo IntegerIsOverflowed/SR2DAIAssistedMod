@@ -44,7 +44,7 @@ namespace Sr2d64CSport
         bool Viewed => _sizeMode != SpriteSizeMode.None;
 
         // ------------------------------------------------------------------ properties
-        [Category("Behavior"), DefaultValue(SpriteSizeMode.None), Description("None: the surface is the client area (classic). Otherwise the surface has ImageSize and is placed like a PictureBox image: centred, stretched, zoomed to fit (borders), filled (clipped), fitted to the width or the height - times Zoom, moved by Pan.")]
+        [Category("Surface"), DefaultValue(SpriteSizeMode.None), Description("None: the surface is the client area (classic). Otherwise the surface has ImageSize and is placed like a PictureBox image: centred, stretched, zoomed to fit (borders), filled (clipped), fitted to the width or the height - times Zoom, moved by Pan.")]
         public SpriteSizeMode SizeMode
         {
             get => _sizeMode;
@@ -79,7 +79,7 @@ namespace Sr2d64CSport
             }
         }
 
-        [Category("Behavior"), Description("Size of the image (the Surface) when a SizeMode is on. 0,0 = the client size at the moment the mode is switched on.")]
+        [Category("Surface"), Description("Size of the image (the Surface) when a SizeMode is on. 0,0 = the client size at the moment the mode is switched on.")]
         public Size ImageSize
         {
             get => _imageSize;
