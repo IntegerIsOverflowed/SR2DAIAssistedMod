@@ -39,6 +39,10 @@ if tpl_bad: print('EmptySR2DFormTemplate/EmptySR2DFormTemplate.csproj: expected 
 log = open(os.path.join(root, 'CHANGELOG.txt')).read() if os.path.exists(os.path.join(root, 'CHANGELOG.txt')) else ''
 newest = max(have, key=lambda f: os.path.getmtime(os.path.join(root, 'cs', f)))
 if log and newest not in log: print(f'note: CHANGELOG.txt does not mention the most recently changed source cs/{newest} - add an entry?')
-bad = missing or stale or tpl_missing or tpl_bad or tbl_missing
+# The source folder is a copyable dependency; its audited analyzer policy must travel with it.
+portable_config = os.path.join(root, 'cs', '.editorconfig')
+config_bad = not os.path.exists(portable_config) or open(portable_config).read() != open(os.path.join(root, '.editorconfig')).read()
+if config_bad: print('cs/.editorconfig must mirror the root analyzer policy for standalone template copies')
+bad = missing or stale or tpl_missing or tpl_bad or tbl_missing or config_bad
 print('projchk:', 'OK' if not bad else 'FAILED', f'({len(have)} cs files, {len(listed)} listed; empty template {"OK" if not (tpl_missing or tpl_bad) else "BROKEN"})')
 sys.exit(1 if bad else 0)

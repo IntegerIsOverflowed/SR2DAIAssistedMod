@@ -103,11 +103,5 @@
     <EmbeddedResource Include="ControlsDemo.cs" LogicalName="src/ControlsDemo.cs" />
     <EmbeddedResource Include="FractalLayout.cs" LogicalName="src/FractalLayout.cs" />
   </ItemGroup>
-  <ItemGroup>
-    <!-- drop SR2D64.dll next to the .csproj (or into bin\...) ; swap it freely to compare builds -->
-    <None Include="SR2D64.dll" Condition="Exists('SR2D64.dll')" CopyToOutputDirectory="PreserveNewest" />
-    <!-- design-time hint for the WinForms designer (its host process does not run from bin\...): where the DLL is -->
-    <AssemblyMetadata Include="SR2D.DllPath" Value="$(MSBuildProjectDirectory)\SR2D64.dll" Condition="Exists('SR2D64.dll')" />
-    <AssemblyMetadata Include="SR2D.DllPath" Value="$([System.IO.Path]::GetFullPath('$(MSBuildProjectDirectory)\..\native\bin\x64\SR2D64.dll'))" Condition="!Exists('SR2D64.dll') and Exists('$(MSBuildProjectDirectory)\..\native\bin\x64\SR2D64.dll')" />
-  </ItemGroup>
+  <Import Project="../cs/SR2D.Native.targets" />
 </Project>

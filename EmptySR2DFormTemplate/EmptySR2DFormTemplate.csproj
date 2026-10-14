@@ -11,8 +11,9 @@
 
     Everything from ..\cs is compiled INTO this assembly (the SR2D classes are internal, and one
     assembly keeps them visible and lets the JIT inline across them), so nothing is referenced.
-    SR2D64.dll is picked up from (first that exists) this folder, then ..\native\bin\x64\, and
-    copied next to the exe.
+    SR2D64.dll is a normal None/Content project asset (including a linked file), a file beside
+    this .csproj, or the copy already in the build output. Native repo folders are optional.
+    cs/SR2D.Native.targets records source/output paths so the out-of-process designer finds it.
   -->
   <PropertyGroup>
     <OutputType>WinExe</OutputType>
@@ -32,28 +33,17 @@
          AutoScaleMode.None (see Form1.Designer.cs). -->
     <ApplicationHighDpiMode>SystemAware</ApplicationHighDpiMode>
     <!-- where the SR2D sources and the DLL live, relative to this file -->
-    <Sr2dCs>..\cs</Sr2dCs>
-    <Sr2dDll Condition="Exists('$(MSBuildProjectDirectory)\SR2D64.dll')">$(MSBuildProjectDirectory)\SR2D64.dll</Sr2dDll>
-    <Sr2dDll Condition="'$(Sr2dDll)' == ''">..\native\bin\x64\SR2D64.dll</Sr2dDll>
+    <Sr2dCs Condition="'$(Sr2dCs)' == '' and Exists('$(MSBuildProjectDirectory)/cs/SR2D.cs')">$(MSBuildProjectDirectory)/cs</Sr2dCs>
+    <Sr2dCs Condition="'$(Sr2dCs)' == ''">$(MSBuildProjectDirectory)/../cs</Sr2dCs>
   </PropertyGroup>
 
   <ItemGroup>
+    <!-- Prevent duplicate default Compile items when cs/ is copied INSIDE this project. -->
+    <Compile Remove="$(Sr2dCs)\**\*.cs" />
     <Compile Include="$(Sr2dCs)\*.cs" Link="cs\%(Filename)%(Extension)" />
     <EmbeddedResource Include="$(Sr2dCs)\icons\*.bmp" LogicalName="Sr2d64CSport.%(Filename).bmp" Visible="false" />
   </ItemGroup>
 
-  <ItemGroup>
-    <!-- Design-time hint: the absolute path of the DLL this build used, so the Visual Studio form
-         designer (which does not run from bin\...) can load SR2D64.dll. -->
-    <AssemblyMetadata Include="SR2D.DllPath" Value="$([System.IO.Path]::GetFullPath($([System.IO.Path]::Combine('$(MSBuildProjectDirectory)', '$(Sr2dDll)'))))" Condition="Exists('$(Sr2dDll)')" />
-  </ItemGroup>
-
-  <ItemGroup>
-    <None Remove="SR2D64.dll" />
-    <None Include="$(Sr2dDll)" Link="SR2D64.dll" CopyToOutputDirectory="PreserveNewest" Visible="false" Condition="Exists('$(Sr2dDll)')" />
-  </ItemGroup>
-
-  <Target Name="Sr2dDllWarning" BeforeTargets="Build" Condition="!Exists('$(Sr2dDll)')">
-    <Warning Text="SR2D64.dll not found ($(Sr2dDll)). Build it with build_release.bat (or native\SR2D.vcxproj, Release x64) or drop a copy next to this .csproj - the app will not start without it." />
-  </Target>
+  <!-- Keep this import when copying the project and cs/: no native/ repository layout is required. -->
+  <Import Project="$(Sr2dCs)/SR2D.Native.targets" />
 </Project>
