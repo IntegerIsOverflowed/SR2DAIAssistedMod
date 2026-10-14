@@ -45,7 +45,7 @@ namespace Sr2d64CSport
 
         // ------------------------------------------------------------------ properties
         [Category("Surface"), DefaultValue(SpriteSizeMode.None), Description("None: the surface is the client area (classic). Otherwise the surface has ImageSize and is placed like a PictureBox image: centred, stretched, zoomed to fit (borders), filled (clipped), fitted to the width or the height - times Zoom, moved by Pan.")]
-        public SpriteSizeMode SizeMode
+        public virtual SpriteSizeMode SizeMode
         {
             get => _sizeMode;
             set
@@ -80,7 +80,7 @@ namespace Sr2d64CSport
         }
 
         [Category("Surface"), Description("Size of the image (the Surface) when a SizeMode is on. 0,0 = the client size at the moment the mode is switched on.")]
-        public Size ImageSize
+        public virtual Size ImageSize
         {
             get => _imageSize;
             set
@@ -100,57 +100,57 @@ namespace Sr2d64CSport
         void ResetImageSize() => ImageSize = Size.Empty;
 
         [Category("Behavior"), DefaultValue(1.0), Description("Zoom multiplier on top of what the SizeMode gives (1 = the mode's own scale: 1:1 for CenterImage, 'fits' for Zoom ...). Clamped to MinZoom..MaxZoom.")]
-        public double Zoom { get => _view.Zoom; set { StopGlide(false); _view.ZoomAtCentre(value); ViewInvalidate(true); } }
+        public virtual double Zoom { get => _view.Zoom; set { StopGlide(false); _view.ZoomAtCentre(value); ViewInvalidate(true); } }
         [Category("Behavior"), DefaultValue(1.0 / 64), Description("Smallest Zoom.")]
-        public double MinZoom { get => _view.MinZoom; set { _view.MinZoom = value; ViewInvalidate(true); } }
+        public virtual double MinZoom { get => _view.MinZoom; set { _view.MinZoom = value; ViewInvalidate(true); } }
         [Category("Behavior"), DefaultValue(64.0), Description("Largest Zoom.")]
-        public double MaxZoom { get => _view.MaxZoom; set { _view.MaxZoom = value; ViewInvalidate(true); } }
+        public virtual double MaxZoom { get => _view.MaxZoom; set { _view.MaxZoom = value; ViewInvalidate(true); } }
         [Category("Behavior"), DefaultValue(1.25), Description("Factor of one zoom step (Ctrl + wheel, Ctrl + plus / minus, menu). A magnifier click uses two steps.")]
-        public double ZoomStep { get => _zoomStep; set => _zoomStep = Math.Max(1.01, value); }
+        public virtual double ZoomStep { get => _zoomStep; set => _zoomStep = Math.Max(1.01, value); }
         /// <summary>Effective scale of the image on screen in per cent (100 = one image pixel is one screen pixel).</summary>
         [Browsable(false)] public double ZoomPercent => Viewed ? _view.ScaleX * 100 : 100;
 
         [Category("Behavior"), DefaultValue(SpritePanMode.Free), Description("None: the image stays where the mode puts it. Scroll: it can be moved only as far as it is larger than the view. Free: Photoshop-like - it can be pushed almost out of the view (Overscroll).")]
-        public SpritePanMode PanMode { get => _view.PanMode; set { _view.PanMode = value; ViewInvalidate(true); } }
+        public virtual SpritePanMode PanMode { get => _view.PanMode; set { _view.PanMode = value; ViewInvalidate(true); } }
         [Category("Behavior"), DefaultValue(0.9f), Description("Free pan: fraction of the image (per axis) that may be dragged out of the view; 0.9 = up to 90 % may leave, 10 % always stays visible.")]
-        public float Overscroll { get => _view.Overscroll; set { _view.Overscroll = value; ViewInvalidate(true); } }
+        public virtual float Overscroll { get => _view.Overscroll; set { _view.Overscroll = value; ViewInvalidate(true); } }
         /// <summary>Offset of the image from where the mode would put it (client pixels). Clamped to the pan limits.</summary>
         [Browsable(false), DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
-        public PointF Pan { get => _view.Pan; set { _view.Pan = value; ViewInvalidate(true); } }
+        public virtual PointF Pan { get => _view.Pan; set { _view.Pan = value; ViewInvalidate(true); } }
         [Category("Behavior"), DefaultValue(true), Description("Photoshop-like flick: a dragged image keeps sliding after the button is released until friction stops it or it is grabbed again.")]
-        public bool Inertia { get => _inertia; set { _inertia = value; if (!value) StopSlide(); } }
+        public virtual bool Inertia { get => _inertia; set { _inertia = value; if (!value) StopSlide(); } }
         [Category("Behavior"), DefaultValue(0.55f), Description("Friction of the slide: fraction of the speed lost per 100 ms.")]
-        public float Friction { get => _view.Friction; set => _view.Friction = Math.Clamp(value, 0.01f, 0.99f); }
+        public virtual float Friction { get => _view.Friction; set => _view.Friction = Math.Clamp(value, 0.01f, 0.99f); }
         [Category("Behavior"), DefaultValue(30f), Description("Inertia sensitivity: the slowest release speed (px per second) that still starts a slide. Lower = a gentler flick is enough.")]
-        public float InertiaThreshold { get => _view.FlingThreshold * 1000; set => _view.FlingThreshold = Math.Clamp(value, 0f, 5000f) / 1000; }
+        public virtual float InertiaThreshold { get => _view.FlingThreshold * 1000; set => _view.FlingThreshold = Math.Clamp(value, 0f, 5000f) / 1000; }
         [Category("Behavior"), DefaultValue(1.3f), Description("Inertia gain: the release speed is multiplied by this. Above 1 the image slides further for the same flick, below 1 it is tamer.")]
-        public float InertiaGain { get => _view.FlingGain; set => _view.FlingGain = Math.Clamp(value, 0.1f, 5f); }
+        public virtual float InertiaGain { get => _view.FlingGain; set => _view.FlingGain = Math.Clamp(value, 0.1f, 5f); }
         [Category("Behavior"), DefaultValue(true), Description("Zoom commands (magnifier click, wheel, keys, menu, Fit / 100 % / Reset) glide to the new zoom instead of jumping. The scrubby zoom drag is always immediate.")]
-        public bool SmoothZoom { get => _smoothZoom; set { _smoothZoom = value; if (!value) StopGlide(true); } }
+        public virtual bool SmoothZoom { get => _smoothZoom; set { _smoothZoom = value; if (!value) StopGlide(true); } }
         [Category("Behavior"), DefaultValue(180), Description("Length of the zoom glide in ms (0 = jump).")]
-        public int SmoothZoomTime { get => _glideMs; set => _glideMs = Math.Clamp(value, 0, 2000); }
+        public virtual int SmoothZoomTime { get => _glideMs; set => _glideMs = Math.Clamp(value, 0, 2000); }
         bool _smoothZoom = true; int _glideMs = 180;
 
         [Category("Appearance"), DefaultValue(false), Description("Show SR2D scroll bars (SpriteScrollBar) when the image is larger than the view (always in Free pan mode).")]
-        public bool ScrollBars { get => _scrollBars; set { if (_scrollBars == value) return; _scrollBars = value; if (Viewed) ViewResized(); else ViewInvalidate(true); } }
+        public virtual bool ScrollBars { get => _scrollBars; set { if (_scrollBars == value) return; _scrollBars = value; if (Viewed) ViewResized(); else ViewInvalidate(true); } }
         [Category("Appearance"), DefaultValue(14), Description("Thickness of the scroll bars.")]
-        public int ScrollBarWidth { get => _barWidth; set { _barWidth = Math.Clamp(value, 6, 40); if (Viewed) ViewResized(); } }
+        public virtual int ScrollBarWidth { get => _barWidth; set { _barWidth = Math.Clamp(value, 6, 40); if (Viewed) ViewResized(); } }
         [Category("Appearance"), DefaultValue(SR2D.Filter.Auto), Description("Resampling filter of the view. Auto = Nearest when magnifying (pixels stay pixels), area-averaged when shrinking.")]
-        public SR2D.Filter ViewFilter { get => _filter; set { _filter = value; ViewInvalidate(false); } }
+        public virtual SR2D.Filter ViewFilter { get => _filter; set { _filter = value; ViewInvalidate(false); } }
         [Category("Appearance"), DefaultValue(false), Description("Draw a grid between image pixels once the picture is magnified to PixelGridMinScale or more (the view menu shows the threshold and the current zoom).")]
-        public bool PixelGrid { get => _pixelGrid; set { if (_pixelGrid == value) return; _pixelGrid = value; ViewInvalidate(false); } }
+        public virtual bool PixelGrid { get => _pixelGrid; set { if (_pixelGrid == value) return; _pixelGrid = value; ViewInvalidate(false); } }
         /// <summary>Effective scale (screen pixels per image pixel) from which <see cref="PixelGrid"/> is drawn. Default 4 (= 400 %). Below it the cells would be too small to separate.</summary>
         [Category("Appearance"), DefaultValue(4f), Description("Effective scale (screen pixels per image pixel) from which the pixel grid is drawn. Default 4 = 400 %.")]
-        public float PixelGridMinScale { get => _pixelGridMin; set { value = Math.Max(2f, value); if (_pixelGridMin == value) return; _pixelGridMin = value; ViewInvalidate(false); } }
+        public virtual float PixelGridMinScale { get => _pixelGridMin; set { value = Math.Max(2f, value); if (_pixelGridMin == value) return; _pixelGridMin = value; ViewInvalidate(false); } }
         /// <summary>Colour of the pixel grid lines (ARGB, alpha blended over the picture). Default 0x60000000.</summary>
         [Category("Appearance"), DefaultValue(typeof(Color), "96, 0, 0, 0"), Description("Colour of the pixel grid lines (alpha blended).")]
-        public Color PixelGridColor { get => Color.FromArgb(_pixelGridColor); set { if (_pixelGridColor == value.ToArgb()) return; _pixelGridColor = value.ToArgb(); ViewInvalidate(false); } }
+        public virtual Color PixelGridColor { get => Color.FromArgb(_pixelGridColor); set { if (_pixelGridColor == value.ToArgb()) return; _pixelGridColor = value.ToArgb(); ViewInvalidate(false); } }
         /// <summary>True when the grid is switched on and the current zoom is high enough for it to be drawn.</summary>
         [Browsable(false)] public bool PixelGridVisible => _pixelGrid && Viewed && _view.ScaleX >= _pixelGridMin && _view.ScaleY >= _pixelGridMin;
         [Category("Behavior"), DefaultValue(SpriteNavigation.Full), Description("Built-in mouse / keyboard navigation while a SizeMode is on: None; Hand (Space = hand, middle button drags, Ctrl + wheel zooms); Full (as Hand, plus the magnifier on the plain left button: drag left / right = zoom, click = in, Alt + click = out).")]
-        public SpriteNavigation Navigation { get => _nav; set { _nav = value; UpdateCursor(); } }
+        public virtual SpriteNavigation Navigation { get => _nav; set { _nav = value; UpdateCursor(); } }
         [Category("Behavior"), DefaultValue(true), Description("Right click opens the built-in SR2D-drawn menu (size modes, zoom, reset, drag mode, scroll bars, inertia) while a SizeMode is on and no ContextMenuStrip is set.")]
-        public bool ViewMenu { get => _viewMenu; set { _viewMenu = value; if (!value) _menu?.Close(); } }
+        public virtual bool ViewMenu { get => _viewMenu; set { _viewMenu = value; if (!value) _menu?.Close(); } }
         /// <summary>The built-in view menu (a <see cref="SpriteMenu"/>, built on first use) - add your own items to it.</summary>
         [Browsable(false), DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)] public SpriteMenu ViewMenuItems => Menu;
 

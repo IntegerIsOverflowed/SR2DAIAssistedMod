@@ -16,6 +16,19 @@ Conventions
   DOCS     README / comments only
 
 
+2026-10-15  Hairline / Segmented rework; viewer members hidden on controls
+--------------------------------------------------------------------------------------------------------
+CHANGED  cs/SpriteControls.Buttons.cs, cs/SpriteControls.cs: the Hairline and Segmented looks of SpriteButton, SpriteSlider and
+       SpriteProgress are reworked. Hairline: accent-tinted rim and an index bar on rectangular buttons, a needle at the end of
+       the progress fill, a solid accent slider thumb. Segmented: solid button face (no dot matrix), chunkier LED strip.
+       Classic is unchanged. SpriteWheel's look is not reworked in this step.
+CHANGED  cs/SpriteBox.View.cs, cs/SpriteBox.cs: the viewer properties (zoom, pan, inertia, friction, scroll bars, pixel grid,
+       view menu, navigation, surface size / stretch / GDI) are virtual.
+       SpriteControlBase overrides them with Browsable(false), so they no longer show in the designer for controls.
+       compat: code can still set them; SpriteBox itself still lists them. The Render event is not changed.
+TESTS    tests/cs/ctlrun/Program.cs: the segmented slider check allows the solid Hairline thumb's half-width.
+
+
 2026-10-14  designer: Surface group; SpriteNumeric values are decimal
 --------------------------------------------------------------------------------------------------------
 CHANGED  cs/SpriteNumeric (cs/SpriteControls.Input.cs): Value, Minimum, Maximum and Step are decimal, as in

@@ -154,7 +154,7 @@ namespace Sr2d64CSport
             int face = _accented ? (down ? Mix(AccentRaw, Black, 0.2f) : hot ? Mix(AccentRaw, White, 0.12f) : Accent)
                        : hair ? (down ? Mix(BackColor, Accent, 0.24f) : Mix(BackColor, ThumbColor, hot ? 0.12f : 0.07f))
                        : (down ? Mix(BackColor, ThumbColor, 0.12f) : Mix(BackColor, ThumbColor, hot ? 0.24f : 0.18f));
-            int rim = down || _accented ? Accent : Mix(BackColor, ThumbColor, hot ? 0.7f : 0.5f);
+            int rim = down || _accented ? Accent : _look == ControlLook.Hairline ? Mix(Accent, BackColor, hot ? 0.25f : 0.5f) : Mix(BackColor, ThumbColor, hot ? 0.7f : 0.5f);
             int mark = _accented ? White : Accent;                  // keyline, corner / dial ticks, LED strip
             int dim = Mix(face, Black, 0.35f), dots = Mix(face, Black, 0.2f);   // unlit LED cells, dot-matrix dots
             bool lit = _accented || hot || down;                    // the LED strip (Segmented) lights up
@@ -196,14 +196,16 @@ namespace Sr2d64CSport
                 // corner ticks sit inside the keyline; a pill's ends are round, so it keeps the keyline alone
                 if (_shape != ButtonShape.Pill && ww >= 24 && hh >= 16)
                     LookCornerTicks(s, x + 5f, y + 5f, ww - 10, hh - 10, Math.Clamp((int)Math.Min(ww, hh) / 6, 2, 6), mark);
+                // an instrument index bar along the top inside edge (not on pills: their ends are round)
+                if (_shape != ButtonShape.Pill && ww >= 40 && hh >= 16)
+                    s.FillRect((int)MathF.Round(x + 8f), (int)MathF.Round(y + 3f), (int)MathF.Round(ww - 16f), 2, mark);
             }
             else
             {
-                LookDots(s, w, h, rad, false, dots);
-                // LED strip: a row of cells along the bottom inside edge, lit while hot, pressed or accented
-                float sy = y + hh - 5f, sx0 = x + Math.Max(rad, 4f), sx1 = x + ww - Math.Max(rad, 4f);
-                int n = Math.Max(3, (int)((sx1 - sx0) / 6f));
-                if (sx1 > sx0) LookCells(s, sx0, sx1, sy + 1f, 2f, true, n, 2f, _ => lit ? mark : dim);
+                // solid face (no dot matrix); LED strip: chunky cells along the bottom inside edge, lit while hot, pressed or accented
+                float sy = y + hh - 6f, sx0 = x + Math.Max(rad, 6f), sx1 = x + ww - Math.Max(rad, 6f);
+                int n = Math.Max(3, (int)((sx1 - sx0) / 9f));
+                if (sx1 > sx0) LookCells(s, sx0, sx1, sy + 1.5f, 3f, true, n, 3f, _ => lit ? mark : dim);
             }
             CaptionIn(s, new Rectangle(0, (int)off, w, h), Text, textCol, ts);
         }
@@ -592,7 +594,16 @@ namespace Sr2d64CSport
                     else LookBar(s, iy + ih * (float)(1 - from), iy + ih * (float)(1 - from - len), ix + iw / 2f, iw, false, Accent);
                 }
                 if (_marquee) { double len = 0.3, p = _phase * (1 + len) - len; Fill(Math.Max(0, p), Math.Min(len, Math.Min(p + len, 1) - Math.Max(0, p))); }
-                else Fill(0, f);
+                else
+                {
+                    Fill(0, f);
+                    if (f > 0.01 && f < 0.99)                        // the needle: a light 2 px mark at the end of the fill
+                    {
+                        int needle = Mix(Accent, White, 0.55f);
+                        if (hz) s.FillRect((int)MathF.Round(ix + iw * (float)f) - 1, (int)iy, 2, (int)ih, needle);
+                        else s.FillRect((int)ix, (int)MathF.Round(iy + ih * (float)(1 - f)) - 1, (int)iw, 2, needle);
+                    }
+                }
             }
             else
             {

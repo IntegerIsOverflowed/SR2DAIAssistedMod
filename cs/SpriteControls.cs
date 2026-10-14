@@ -33,6 +33,64 @@ namespace Sr2d64CSport
 
     public abstract partial class SpriteControlBase : SpriteBox
     {
+
+        // ---- viewer members inherited from SpriteBox ----
+        // A control is not a picture viewer: zoom, pan, inertia, friction, scroll bars, pixel grid, view menu, navigation and
+        // the render-surface properties are hidden from the designer here. They stay public (code can still use them) and stay
+        // visible on SpriteBox itself.
+        [Browsable(false), DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
+        public override SpriteSizeMode SizeMode { get => base.SizeMode; set => base.SizeMode = value; }
+        [Browsable(false), DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
+        public override Size ImageSize { get => base.ImageSize; set => base.ImageSize = value; }
+        [Browsable(false), DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
+        public override double Zoom { get => base.Zoom; set => base.Zoom = value; }
+        [Browsable(false), DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
+        public override double MinZoom { get => base.MinZoom; set => base.MinZoom = value; }
+        [Browsable(false), DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
+        public override double MaxZoom { get => base.MaxZoom; set => base.MaxZoom = value; }
+        [Browsable(false), DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
+        public override double ZoomStep { get => base.ZoomStep; set => base.ZoomStep = value; }
+        [Browsable(false), DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
+        public override SpritePanMode PanMode { get => base.PanMode; set => base.PanMode = value; }
+        [Browsable(false), DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
+        public override float Overscroll { get => base.Overscroll; set => base.Overscroll = value; }
+        [Browsable(false), DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
+        public override PointF Pan { get => base.Pan; set => base.Pan = value; }
+        [Browsable(false), DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
+        public override bool Inertia { get => base.Inertia; set => base.Inertia = value; }
+        [Browsable(false), DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
+        public override float Friction { get => base.Friction; set => base.Friction = value; }
+        [Browsable(false), DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
+        public override float InertiaThreshold { get => base.InertiaThreshold; set => base.InertiaThreshold = value; }
+        [Browsable(false), DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
+        public override float InertiaGain { get => base.InertiaGain; set => base.InertiaGain = value; }
+        [Browsable(false), DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
+        public override bool SmoothZoom { get => base.SmoothZoom; set => base.SmoothZoom = value; }
+        [Browsable(false), DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
+        public override int SmoothZoomTime { get => base.SmoothZoomTime; set => base.SmoothZoomTime = value; }
+        [Browsable(false), DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
+        public override bool ScrollBars { get => base.ScrollBars; set => base.ScrollBars = value; }
+        [Browsable(false), DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
+        public override int ScrollBarWidth { get => base.ScrollBarWidth; set => base.ScrollBarWidth = value; }
+        [Browsable(false), DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
+        public override SR2D.Filter ViewFilter { get => base.ViewFilter; set => base.ViewFilter = value; }
+        [Browsable(false), DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
+        public override bool PixelGrid { get => base.PixelGrid; set => base.PixelGrid = value; }
+        [Browsable(false), DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
+        public override float PixelGridMinScale { get => base.PixelGridMinScale; set => base.PixelGridMinScale = value; }
+        [Browsable(false), DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
+        public override Color PixelGridColor { get => base.PixelGridColor; set => base.PixelGridColor = value; }
+        [Browsable(false), DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
+        public override SpriteNavigation Navigation { get => base.Navigation; set => base.Navigation = value; }
+        [Browsable(false), DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
+        public override bool ViewMenu { get => base.ViewMenu; set => base.ViewMenu = value; }
+        [Browsable(false), DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
+        public override bool GdiSurface { get => base.GdiSurface; set => base.GdiSurface = value; }
+        [Browsable(false), DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
+        public override Size FixedSurfaceSize { get => base.FixedSurfaceSize; set => base.FixedSurfaceSize = value; }
+        [Browsable(false), DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
+        public override bool SmoothStretch { get => base.SmoothStretch; set => base.SmoothStretch = value; }
+
         int _textScale;
         // the palette defaults (Color, because the properties are Color for the designer; the paint code reads them as ints once per paint)
         internal static readonly Color DefaultBack = Color.FromArgb(0x20, 0x24, 0x28), DefaultAccent = Color.FromArgb(0x33, 0x99, 0xFF),
@@ -1176,16 +1234,16 @@ namespace Sr2d64CSport
             LookCells(s, a, b, m, th, hz, n, 2f, c => c >= lo && c <= hi ? Accent : c > plo && c <= phi ? Mix(Accent, Track, 0.5f) : Track);
         }
 
-        // the flat thumb: Hairline = a small square outline with an accent dot; Segmented = a marker across the cells
+        // the flat thumb: Hairline = a solid accent square; Segmented = a marker across the cells
         void PaintLookThumb(Sprite s, float m, float tr, bool hz, float tq)
         {
             int cx = (int)MathF.Round(hz ? tq : m), cy = (int)MathF.Round(hz ? m : tq);
             if (_look == ControlLook.Hairline)
             {
+                // a solid accent square with a darker edge (white while dragged)
                 int half = Math.Max(3, (int)MathF.Round(tr * 0.8f));
-                s.FillRect(cx - half + 1, cy - half + 1, 2 * half - 2, 2 * half - 2, Mix(BackColor, ThumbColor, 0.12f));
-                s.DrawRect(cx - half + 0.5f, cy - half + 0.5f, 2 * half - 1, 2 * half - 1, IsDragging ? Accent : Mix(ThumbColor, BackColor, 0.3f), 1f, false);
-                s.FillRect(cx - 1, cy - 1, 2, 2, Accent);
+                s.FillRect(cx - half, cy - half, 2 * half, 2 * half, IsDragging ? White : Accent);
+                s.DrawRect(cx - half + 0.5f, cy - half + 0.5f, 2 * half - 1, 2 * half - 1, Mix(Accent, Black, 0.45f), 1f, false);
                 return;
             }
             int hh = (int)MathF.Round(Math.Max(3f, tr * 0.4f) / 2 + 2);

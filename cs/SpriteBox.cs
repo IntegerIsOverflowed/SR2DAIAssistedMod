@@ -73,7 +73,7 @@ namespace Sr2d64CSport
 
         /// <summary>Use a GDI DIB section (BitBlt present). Default true.</summary>
         [Category("Surface"), DefaultValue(true), Description("Back the surface with a GDI DIB section (BitBlt present).")]
-        public bool GdiSurface
+        public virtual bool GdiSurface
         {
             get => _gdi;
             set { if (_gdi == value) return; _gdi = value; _surface?.Dispose(); _surface = null; _dirty = true; Invalidate(); }
@@ -86,7 +86,7 @@ namespace Sr2d64CSport
         /// </summary>
         [Category("Surface"), DesignerSerializationVisibility(DesignerSerializationVisibility.Visible),
          Description("Fixed surface size stretched to the client area; 0,0 = follow the client size 1:1.")]
-        public Size FixedSurfaceSize
+        public virtual Size FixedSurfaceSize
         {
             get => _fixedSize;
             set { if (_fixedSize == value) return; _fixedSize = value; _surface?.Dispose(); _surface = null; _dirty = true; Invalidate(); }
@@ -97,7 +97,7 @@ namespace Sr2d64CSport
 
         /// <summary>Smooth (HALFTONE) stretching when FixedSurfaceSize is used.</summary>
         [Category("Surface"), DefaultValue(false), Description("HALFTONE stretching when FixedSurfaceSize is set.")]
-        public bool SmoothStretch
+        public virtual bool SmoothStretch
         {
             get => _smooth;
             set { if (_smooth == value) return; _smooth = value; Invalidate(); }

@@ -769,7 +769,8 @@ static class P {
       int hx0 = -1, hx1 = -1, gx0 = -1, gx1 = -1;
       for (int x = 0; x < 310; x++) { if ((sh.Pixels[hy * sh.Width + x] & 0xFFFFFF) == (acc & 0xFFFFFF)) { if (hx0 < 0) hx0 = x; hx1 = x; } if ((sg.Pixels[gy * sg.Width + x] & 0xFFFFFF) == (acc & 0xFFFFFF)) { if (gx0 < 0) gx0 = x; gx1 = x; } }
       Console.WriteLine($"slider 50 %: hairline fill x {hx0}-{hx1}, segmented cells x {gx0}-{gx1} in {gruns} cells");
-      Chk(Math.Abs(gx0 - hx0) <= 2 && Math.Abs(gx1 - hx1) <= 8 && gruns >= 10, "segmented slider: lit cells end where the value is (matches the hairline fill)");
+      // the Hairline thumb is a solid accent square (half-width 9 px at this size): the accent run reaches its far edge
+      Chk(Math.Abs(gx0 - hx0) <= 2 && Math.Abs(gx1 - hx1) <= 8 + 9 && gruns >= 10, "segmented slider: lit cells end where the value is (matches the hairline fill)");
     }
     // segmented progress bar: Segments = 10 at 50 % lights exactly five cells
     { var p = new SpriteProgress { Look = ControlLook.Segmented, Value = 50, Segments = 10, ShowPercent = false, Size = new Size(300, 22) }; var sp = Framed(310, 30); sp.Draw(p.RenderOnce(), 5, 4, SR2D.Op.Paint);
