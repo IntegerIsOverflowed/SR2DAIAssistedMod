@@ -1247,6 +1247,7 @@ namespace Sr2d64CSport
         protected override void OnControlAdded(ControlEventArgs e)
         {
             base.OnControlAdded(e);
+            ContainerButtons.MakePopup(e.Control);
             if (barLive && !ReferenceEquals(e.Control, bar) && Controls.GetChildIndex(bar) != Controls.Count - 1) bar.SendToBack();
         }
 

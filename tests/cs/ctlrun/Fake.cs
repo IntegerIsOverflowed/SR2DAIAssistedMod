@@ -11,6 +11,8 @@ namespace System.Windows.Forms {
   public class KeyPressEventArgs : EventArgs { public char KeyChar; public bool Handled; public KeyPressEventArgs(char c) { KeyChar = c; } }
   public class LayoutEventArgs : EventArgs { public Control? AffectedControl; public string? AffectedProperty; public LayoutEventArgs(Control? c, string? p) { AffectedControl = c; AffectedProperty = p; } }
   public class ControlEventArgs : EventArgs { public Control Control; public ControlEventArgs(Control c) { Control = c; } }
+  public enum FlatStyle { Flat, Popup, Standard, System }
+  public class Button : Control { public FlatStyle FlatStyle { get; set; } = FlatStyle.Standard; }
   public struct Padding { public int Left, Top, Right, Bottom; public Padding(int all) { Left = Top = Right = Bottom = all; } public Padding(int l, int t, int r, int b) { Left = l; Top = t; Right = r; Bottom = b; } public int Horizontal => Left + Right; public int Vertical => Top + Bottom; public static readonly Padding Empty = new Padding(0); }
   public static class Clipboard { static string _t = ""; public static void SetText(string t) => _t = t; public static bool ContainsText() => _t.Length > 0; public static string GetText() => _t; }
   [Flags] public enum ControlStyles { ContainerControl = 1, StandardClick = 0x100, StandardDoubleClick = 0x1000, Selectable = 0x200, UserPaint = 2, AllPaintingInWmPaint = 0x2000, Opaque = 4, ResizeRedraw = 0x40, OptimizedDoubleBuffer = 0x20000, DoubleBuffer = 0x10000 }

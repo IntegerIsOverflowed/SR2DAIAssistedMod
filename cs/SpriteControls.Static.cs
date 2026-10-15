@@ -274,9 +274,21 @@ namespace Sr2d64CSport
     [Designer("System.Windows.Forms.Design.ParentControlDesigner, System.Design", typeof(IDesigner))]
     [ToolboxBitmap(typeof(SpritePanel), "SpritePanel.bmp")]
     [DefaultEvent("Click")]
+    /// <summary>Native buttons placed on an SR2D container. WinForms' Standard style ignores BackColor (the OS paints the
+    /// face), so a Button that is still Standard when it is added becomes Popup: flat until the pointer is over it,
+    /// and it takes BackColor / ForeColor like the other SR2D controls. Changing it later in the designer still works.</summary>
+    internal static class ContainerButtons
+    {
+        internal static void MakePopup(Control? added)
+        {
+            if (added is Button b && b.FlatStyle == FlatStyle.Standard) b.FlatStyle = FlatStyle.Popup;
+        }
+    }
+
     public class SpritePanel : SpriteControlBase
     {
         protected override AccessibleRole DefaultAccessibleRole => AccessibleRole.Client;
+        protected override void OnControlAdded(ControlEventArgs e) { base.OnControlAdded(e); ContainerButtons.MakePopup(e.Control); }
         PanelStyle _style = PanelStyle.Sunken; int _radius = 6;
         public SpritePanel()
         {
@@ -488,6 +500,7 @@ namespace Sr2d64CSport
         protected override void OnControlAdded(ControlEventArgs e)
         {
             base.OnControlAdded(e);
+            ContainerButtons.MakePopup(e.Control);
             if (e.Control is SpriteTabPage p && !_pages.Contains(p)) { _pages.Add(p); p.Visible = false; if (_sel < 0) SelectedIndex = 0; else { LayoutPages(); Redraw(); } }
         }
         protected override void OnControlRemoved(ControlEventArgs e)

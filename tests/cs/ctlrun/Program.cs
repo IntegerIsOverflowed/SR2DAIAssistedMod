@@ -711,6 +711,15 @@ static class P {
     return n;
   }
   static Sprite Framed(int w, int h) { var s = new Sprite(w, h); s.ClearBuffer(unchecked((int)0xFF202428)); return s; }
+  // native buttons placed on an SR2D container become Popup (Standard ignores BackColor); other styles are kept
+  static void ContainerButtonStyle() {
+    var pnl = new SpritePanel(); var std = new Button(); pnl.Controls.Add(std);
+    Chk(std.FlatStyle == FlatStyle.Popup, "a Button added to a SpritePanel gets FlatStyle.Popup");
+    var flat = new Button { FlatStyle = FlatStyle.Flat }; pnl.Controls.Add(flat);
+    Chk(flat.FlatStyle == FlatStyle.Flat, "an explicit FlatStyle.Flat is kept");
+    var grp = new SpriteGroupBox(); var gb = new Button(); grp.Controls.Add(gb);
+    Chk(gb.FlatStyle == FlatStyle.Popup, "a Button added to a SpriteGroupBox gets FlatStyle.Popup");
+  }
   static void Looks() {
     var looks = new[] { ControlLook.Classic, ControlLook.Hairline, ControlLook.Segmented };
     Chk(new SpriteButton().Look == ControlLook.Classic && new SpriteSlider().Look == ControlLook.Classic && new SpriteProgress().Look == ControlLook.Classic && new SpriteWheel().Look == ControlLook.Classic, "Look defaults to Classic on button, slider, progress and wheel");
@@ -2040,6 +2049,7 @@ static class P {
     Fonts();
     TextViews();
     Wheels();
+    ContainerButtonStyle();
     Looks();
     Views();
     SizeModeBox();

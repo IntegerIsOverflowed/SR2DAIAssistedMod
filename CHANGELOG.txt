@@ -16,6 +16,15 @@ Conventions
   DOCS     README / comments only
 
 
+2026-10-15  native buttons on SR2D containers get FlatStyle.Popup
+--------------------------------------------------------------------------------------------------------
+CHANGED  cs/SpriteControls.Static.cs (SpritePanel, SpriteGroupBox, SpriteTabControl), cs/SpriteForm.cs: a System.Windows.Forms.Button
+       added to one of these containers with FlatStyle.Standard becomes FlatStyle.Popup. Standard ignores BackColor
+       (the OS paints the face); Popup is flat until hovered and takes BackColor / ForeColor. Other FlatStyle values are kept.
+       compat: buttons added in code or by the designer now show Popup; set FlatStyle back to Standard to restore the old face.
+TESTS    tests/cs/ctlrun/Program.cs: checks the Popup default on SpritePanel and SpriteGroupBox.
+
+
 2026-10-15  designer: double-click creates the expected event
 --------------------------------------------------------------------------------------------------------
 CHANGED  every control has a [DefaultEvent]: SpriteButton Click, SpriteToggle / SpriteRadio / SpriteGroupBox CheckedChanged,
