@@ -16,6 +16,16 @@ Conventions
   DOCS     README / comments only
 
 
+2026-10-15  MouseClick works on SR2D controls
+--------------------------------------------------------------------------------------------------------
+FIXED    cs/SpriteControls.cs (SpriteControlBase): MouseClick was never raised. The controls that switch WinForms'
+       StandardClick off (buttons, toggles, radios, text boxes, combo and list boxes) decide clicks themselves, and
+       WinForms raises MouseClick from its own click path. Now MouseClick is raised when the mouse is pressed and released
+       inside the control with the same button. Controls that keep StandardClick are unchanged, so nothing fires twice.
+       Keyboard activation (Space / Enter) does not raise MouseClick, as in WinForms. Click is unchanged.
+TESTS    tests/cs/ctlrun/Program.cs, Fake.cs: MouseClick on a button (with Click), a release outside, a text box.
+
+
 2026-10-15  native buttons on SR2D containers get FlatStyle.Popup
 --------------------------------------------------------------------------------------------------------
 CHANGED  cs/SpriteControls.Static.cs (SpritePanel, SpriteGroupBox, SpriteTabControl), cs/SpriteForm.cs: a System.Windows.Forms.Button

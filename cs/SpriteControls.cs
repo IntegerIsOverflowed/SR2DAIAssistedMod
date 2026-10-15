@@ -33,6 +33,20 @@ namespace Sr2d64CSport
 
     public abstract partial class SpriteControlBase : SpriteBox
     {
+        // MouseClick: WinForms raises it from its own click path (StandardClick). Several SR2D controls switch that path off
+        // because they decide clicks themselves (buttons, text boxes, combo and list boxes), so for those MouseClick is raised
+        // here: pressed and released inside the control with the same button. Controls that keep StandardClick get it from
+        // WinForms and are left alone, so nothing fires twice.
+        MouseButtons _clickDown = MouseButtons.None;
+        protected override void OnMouseDown(MouseEventArgs e) { _clickDown = e.Button; base.OnMouseDown(e); }
+        protected override void OnMouseUp(MouseEventArgs e)
+        {
+            var down = _clickDown; _clickDown = MouseButtons.None;
+            base.OnMouseUp(e);
+            if (down != MouseButtons.None && e.Button == down && ClientRectangle.Contains(e.Location) && !GetStyle(ControlStyles.StandardClick))
+                OnMouseClick(new MouseEventArgs(e.Button, 1, e.X, e.Y, e.Delta));
+        }
+
 
         // ---- viewer members inherited from SpriteBox ----
         // A control is not a picture viewer: zoom, pan, inertia, friction, scroll bars, pixel grid, view menu, navigation and

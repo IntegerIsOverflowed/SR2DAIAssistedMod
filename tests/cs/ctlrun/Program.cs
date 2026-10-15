@@ -712,6 +712,19 @@ static class P {
   }
   static Sprite Framed(int w, int h) { var s = new Sprite(w, h); s.ClearBuffer(unchecked((int)0xFF202428)); return s; }
   // native buttons placed on an SR2D container become Popup (Standard ignores BackColor); other styles are kept
+  // MouseClick follows the mouse (press and release inside, same button); keyboard activation does not raise it
+  static void MouseClickEvents() {
+    var b = new SpriteButton { Size = new Size(90, 26) }; int mc = 0, cl = 0;
+    b.MouseClick += (_, _) => mc++; b.Click += (_, _) => cl++;
+    b.Down(10, 10); b.Up(10, 10);
+    Chk(mc == 1 && cl == 1, $"a button raises MouseClick once with Click (mouse {mc}, click {cl})");
+    b.Down(10, 10); b.Move(500, 500); b.Up(500, 500);   // real input always moves before the release
+    Chk(mc == 1 && cl == 1, "a release outside the button raises neither event");
+    var t = new SpriteTextBox { Size = new Size(120, 24) }; int tm = 0;
+    t.MouseClick += (_, _) => tm++;
+    t.Down(20, 10); t.Up(20, 10);
+    Chk(tm == 1, $"a text box raises MouseClick (count {tm})");
+  }
   static void ContainerButtonStyle() {
     var pnl = new SpritePanel(); var std = new Button(); pnl.Controls.Add(std);
     Chk(std.FlatStyle == FlatStyle.Popup, "a Button added to a SpritePanel gets FlatStyle.Popup");
@@ -2050,6 +2063,7 @@ static class P {
     TextViews();
     Wheels();
     ContainerButtonStyle();
+    MouseClickEvents();
     Looks();
     Views();
     SizeModeBox();
