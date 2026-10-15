@@ -21,6 +21,7 @@ namespace Sr2d64CSport
     /// pop-up modes the double-click reset of the base class moves to Ctrl + double click.</para>
     /// </summary>
     [ToolboxBitmap(typeof(SpriteWheel), "SpriteWheel.bmp")]
+    [DefaultEvent("ValueChanged")]
     public sealed class SpriteWheel : SpriteRangeControl
     {
         protected override AccessibleRole DefaultAccessibleRole => AccessibleRole.Slider;

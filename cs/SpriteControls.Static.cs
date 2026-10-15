@@ -34,6 +34,7 @@ namespace Sr2d64CSport
     /// (it grows with the text; turn it off for a fixed box), five styles (<see cref="LabelStyle"/>). It is not selectable.
     /// </summary>
     [ToolboxBitmap(typeof(SpriteLabel), "SpriteLabel.bmp")]
+    [DefaultEvent("Click")]
     public sealed class SpriteLabel : SpriteControlBase
     {
         protected override AccessibleRole DefaultAccessibleRole => AccessibleRole.StaticText;
@@ -132,6 +133,7 @@ namespace Sr2d64CSport
 
     /// <summary>A thin rule (horizontal or vertical) with an optional centred caption: "── or ──".</summary>
     [ToolboxBitmap(typeof(SpriteSeparator), "SpriteSeparator.bmp")]
+    [DefaultEvent("Click")]
     public sealed class SpriteSeparator : SpriteControlBase
     {
         Orientation _orient = Orientation.Horizontal;
@@ -169,6 +171,7 @@ namespace Sr2d64CSport
     /// <see cref="Clickable"/> - then it toggles and raises <see cref="OnChanged"/>, which makes it a very small toggle.
     /// </summary>
     [ToolboxBitmap(typeof(SpriteLed), "SpriteLed.bmp")]
+    [DefaultEvent("OnChanged")]
     public sealed class SpriteLed : SpriteControlBase
     {
         bool _on, _clickable, _phase = true; int _blink; Color _led = DefaultLed; LedShape _shape; Timer? _timer;
@@ -270,6 +273,7 @@ namespace Sr2d64CSport
     /// </summary>
     [Designer("System.Windows.Forms.Design.ParentControlDesigner, System.Design", typeof(IDesigner))]
     [ToolboxBitmap(typeof(SpritePanel), "SpritePanel.bmp")]
+    [DefaultEvent("Click")]
     public class SpritePanel : SpriteControlBase
     {
         protected override AccessibleRole DefaultAccessibleRole => AccessibleRole.Client;
@@ -337,6 +341,7 @@ namespace Sr2d64CSport
     /// </summary>
     [Designer("System.Windows.Forms.Design.ParentControlDesigner, System.Design", typeof(IDesigner))]
     [ToolboxBitmap(typeof(SpriteGroupBox), "SpriteGroupBox.bmp")]
+    [DefaultEvent("CheckedChanged")]
     public sealed class SpriteGroupBox : SpritePanel
     {
         protected override AccessibleRole DefaultAccessibleRole => AccessibleRole.Grouping;
@@ -429,6 +434,7 @@ namespace Sr2d64CSport
     /// strip has the focus; the wheel over the strip does too. The rest of the client area is the page (Dock = Fill inside it).
     /// </summary>
     [ToolboxBitmap(typeof(SpriteTabControl), "SpriteTabControl.bmp")]
+    [DefaultEvent("SelectedIndexChanged")]
     public sealed class SpriteTabControl : SpriteControlBase
     {
         protected override AccessibleRole DefaultAccessibleRole => AccessibleRole.PageTabList;

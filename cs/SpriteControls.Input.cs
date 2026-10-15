@@ -18,6 +18,7 @@ namespace Sr2d64CSport
     /// (and Escape restores the text from the last commit) so a form can react to "done" like a NumericUpDown.
     /// </summary>
     [ToolboxBitmap(typeof(SpriteTextBox), "SpriteTextBox.bmp")]
+    [DefaultEvent("Committed")]
     public class SpriteTextBox : SpriteControlBase
     {
         protected override AccessibleRole DefaultAccessibleRole => AccessibleRole.Text;
@@ -252,6 +253,7 @@ namespace Sr2d64CSport
     /// loss, a button, a key or the wheel); typing alone does not change <see cref="Value"/> yet.
     /// </summary>
     [ToolboxBitmap(typeof(SpriteNumeric), "SpriteNumeric.bmp")]
+    [DefaultEvent("ValueChanged")]
     public sealed class SpriteNumeric : SpriteTextBox
     {
         protected override AccessibleRole DefaultAccessibleRole => AccessibleRole.Slider;
@@ -481,6 +483,7 @@ namespace Sr2d64CSport
     /// SR2D <see cref="SpriteMenu"/> with the <see cref="Items"/>; Up / Down and the wheel change the selection directly.
     /// </summary>
     [ToolboxBitmap(typeof(SpriteCombo), "SpriteCombo.bmp")]
+    [DefaultEvent("SelectedIndexChanged")]
     public sealed class SpriteCombo : SpriteControlBase
     {
         protected override AccessibleRole DefaultAccessibleRole => AccessibleRole.ComboBox;
@@ -609,6 +612,7 @@ namespace Sr2d64CSport
     /// <see cref="ItemActivated"/>.
     /// </summary>
     [ToolboxBitmap(typeof(SpriteListBox), "SpriteListBox.bmp")]
+    [DefaultEvent("SelectedIndexChanged")]
     public sealed class SpriteListBox : SpriteControlBase
     {
         protected override AccessibleRole DefaultAccessibleRole => AccessibleRole.List;

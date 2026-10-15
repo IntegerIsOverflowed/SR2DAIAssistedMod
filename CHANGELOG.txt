@@ -16,6 +16,16 @@ Conventions
   DOCS     README / comments only
 
 
+2026-10-15  designer: double-click creates the expected event
+--------------------------------------------------------------------------------------------------------
+CHANGED  every control has a [DefaultEvent]: SpriteButton Click, SpriteToggle / SpriteRadio / SpriteGroupBox CheckedChanged,
+       SpriteSlider / SpriteKnob / SpriteWheel / SpriteScrollBar / SpriteNumeric / SpriteColorPicker ValueChanged,
+       SpriteTextBox Committed, SpriteCombo / SpriteListBox / SpriteTabControl SelectedIndexChanged, SpriteLed OnChanged,
+       VoxelBox VoxelClick. Controls without an event of their own (SpriteProgress, SpriteLabel, SpriteSeparator, SpritePanel,
+       SpriteCurveEditor, SpriteTextView) use the inherited Click. SpriteBox keeps Render.
+       compat: none (attribute only).
+
+
 2026-10-15  Hairline / Segmented rework; viewer members hidden on controls
 --------------------------------------------------------------------------------------------------------
 CHANGED  cs/SpriteControls.Buttons.cs, cs/SpriteControls.cs: the Hairline and Segmented looks of SpriteButton, SpriteSlider and

@@ -93,6 +93,7 @@ namespace Sr2d64CSport
     /// (accent-coloured face). Raises <see cref="Control.Click"/> on release inside (or Space / Enter).
     /// </summary>
     [ToolboxBitmap(typeof(SpriteButton), "SpriteButton.bmp")]
+    [DefaultEvent("Click")]
     public sealed class SpriteButton : SpriteClickable
     {
         protected override AccessibleRole DefaultAccessibleRole => AccessibleRole.PushButton;
@@ -255,6 +256,7 @@ namespace Sr2d64CSport
     /// of the control; the caption uses the rest of the width.
     /// </summary>
     [ToolboxBitmap(typeof(SpriteToggle), "SpriteToggle.bmp")]
+    [DefaultEvent("CheckedChanged")]
     public sealed class SpriteToggle : SpriteClickable
     {
         protected override AccessibleRole DefaultAccessibleRole => AccessibleRole.CheckButton;
@@ -393,6 +395,7 @@ namespace Sr2d64CSport
     /// the group; the name lets several groups share a panel).
     /// </summary>
     [ToolboxBitmap(typeof(SpriteRadio), "SpriteRadio.bmp")]
+    [DefaultEvent("CheckedChanged")]
     public sealed class SpriteRadio : SpriteClickable
     {
         protected override AccessibleRole DefaultAccessibleRole => AccessibleRole.RadioButton;
@@ -466,6 +469,7 @@ namespace Sr2d64CSport
     /// drawn with <see cref="Segments"/> (LED-style bar).
     /// </summary>
     [ToolboxBitmap(typeof(SpriteProgress), "SpriteProgress.bmp")]
+    [DefaultEvent("Click")]
     public sealed class SpriteProgress : SpriteControlBase
     {
         protected override AccessibleRole DefaultAccessibleRole => AccessibleRole.ProgressBar;

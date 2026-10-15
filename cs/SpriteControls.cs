@@ -791,6 +791,7 @@ namespace Sr2d64CSport
     /// mouse turns it), <see cref="Gauge"/> (how the value is shown) and <see cref="Pointer"/> (whether the pointer stops at the ends).
     /// </summary>
     [ToolboxBitmap(typeof(SpriteKnob), "SpriteKnob.bmp")]
+    [DefaultEvent("ValueChanged")]
     public sealed class SpriteKnob : SpriteRangeControl
     {
         protected override AccessibleRole DefaultAccessibleRole => AccessibleRole.Slider;
@@ -1085,6 +1086,7 @@ namespace Sr2d64CSport
     /// value text. Same interaction model as <see cref="SpriteKnob"/>: the thumb is always exactly under the pointer.
     /// </summary>
     [ToolboxBitmap(typeof(SpriteSlider), "SpriteSlider.bmp")]
+    [DefaultEvent("ValueChanged")]
     public class SpriteSlider : SpriteRangeControl
     {
         protected override AccessibleRole DefaultAccessibleRole => AccessibleRole.Slider;

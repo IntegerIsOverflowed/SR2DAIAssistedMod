@@ -47,6 +47,7 @@ namespace Sr2d64CSport
     /// the settings each frame; <see cref="CameraChanged"/> lets you tweak it (light direction, shade tables) before use.
     /// </summary>
     [ToolboxBitmap(typeof(VoxelBox), "VoxelBox.bmp")]
+    [DefaultEvent("VoxelClick")]
     public class VoxelBox : SpriteBox
     {
         VoxelGrid? _grid; bool _ownsGrid;
