@@ -2109,6 +2109,7 @@ static class P {
     Wheels();
     ContainerButtonStyle();
     MbTilesChecks.Run();
+    VectorTextChecks.Run();
     MouseClickEvents();
     Looks();
     Views();

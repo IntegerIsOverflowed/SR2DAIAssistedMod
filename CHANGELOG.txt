@@ -16,6 +16,26 @@ Conventions
   DOCS     README / comments only
 
 
+2026-10-19  Fills on transparent canvases; map demo; VectorText (stroke font, text on a path)
+------------------------------------------------------------------------------------------------
+FIXED    Vector fills drawn onto a sprite with Op.Paint or Op.AlphaBlend (for example a canvas that starts
+         transparent) wrote the colour with alpha 0. A viewer shows those pixels as black or blank: the "black
+         parts" in the vector import demo. Fills now use source-over (LineOp.AlphaOver) for these destinations.
+         On an opaque destination the colours are the same as before. Compat: none for opaque canvases.
+CHANGED  MBTiles import puts a background shape under the map: an area without tiles is no longer transparent.
+ADDED    Demo group "Maps": open a .mbtiles file, Z = level, Scale = extra zoom past the data (vector, stays
+         sharp), drag to pan. Vector import's open dialog lists *.mbtiles.
+ADDED    VectorText (cs/VectorText.cs): text from open strokes, no font files. Latin, digits, punctuation, full
+         Cyrillic (some Cyrillic letters are rough approximations). Bold = wider stroke, Italic = skew.
+         VectorText.Create(text, size, style); VectorText.OnPath(text, points, size, options) bends text along
+         a polyline (Align, Above/below, FitToPath). The OnPath picture is in path coordinates: draw it with
+         Matrix3x2.Identity.
+CHECKED  ctlrun: VectorText metrics, bold / italic, Cyrillic, straight and curved paths, fit (MbTilesChecks,
+         VectorTextChecks); all 410 ok lines, 0 FAIL. Map alpha histogram after the fix: transparent pixels
+         only where no shape covers them. Demo, template and edgechk build with 0 errors. Demo and map views not
+         run on Windows.
+PROJECTS VectorText.cs is listed in demo, webpchk, fontchk, edgechk, vecfuzz and ctlrun.
+
 2026-10-19  MBTiles vector map tiles in the vector container
 ------------------------------------------------------------------------------------------------
 ADDED    VectorImage.Load("map.mbtiles") and VectorImage.FromMbTiles(path, view) load vector map tiles (MBTiles,

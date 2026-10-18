@@ -262,6 +262,8 @@ namespace Sr2d64CSport
         public const string GBlend = "Blend modes (Sprite.Blend.cs)";
         public const string GFiles = "Files (Png.cs, WebP.cs, Vector.*.cs)";
         public const string GVoxel = "Voxels (VoxelGrid.cs)";
+        public const string GMaps = "Maps (MBTiles vector tiles, VectorImage)";
+        public const string GVText = "Vector text (VectorText.cs, no font files)";
         public const string GAnim = "Animation keys (Animation.cs)";
         static readonly TangentMode[] starts = { TangentMode.Smooth, TangentMode.Fast, TangentMode.Slow, TangentMode.Linear };
         static readonly TangentMode[] ends = { TangentMode.Smooth, TangentMode.Slow, TangentMode.Fast, TangentMode.Linear };
@@ -1213,7 +1215,44 @@ T(GControls, "SpriteLabel / GroupBox / Tabs / TextBox / Numeric / Combo / ListBo
                 RecolorDemo.PickAt(new PointF(vi.ViewBox.X + ox / fit, vi.ViewBox.Y + oy / fit));
                 return true;
             };
-            L[L.Count - 1].FileFilter = "Vector files|*.svg;*.svgz;*.eps;*.ps;*.ai;*.pdf|SVG (*.svg, *.svgz)|*.svg;*.svgz|PostScript / EPS (*.eps, *.ps, *.ai)|*.eps;*.ps;*.ai|PDF (*.pdf)|*.pdf|All files|*.*";
+            L[L.Count - 1].FileFilter = "Vector files|*.svg;*.svgz;*.eps;*.ps;*.ai;*.pdf;*.mbtiles|SVG (*.svg, *.svgz)|*.svg;*.svgz|MBTiles vector tiles (*.mbtiles)|*.mbtiles|PostScript / EPS (*.eps, *.ps, *.ai)|*.eps;*.ps;*.ai|PDF (*.pdf)|*.pdf|All files|*.*";
+
+            // ===================================================== VectorText (stroke font)
+            T(GVText, "VectorText: plain, bold, italic (open strokes, no font file)",
+              "VectorText.Create draws text from lines and arcs (Latin, digits, basic punctuation, Cyrillic). Bold widens the stroke, Italic skews it. Size = cap height in pixels.",
+              c =>
+              {
+                  float size = 14f * MathF.Max(0.1f, c.Scale);
+                  VectorText.Create("Plain: Hello Челябинск 2026", size).Draw(c.Canvas, c.X, c.Y);
+                  VectorText.Create("Bold: Жёлтый шарик", size, new VectorTextStyle { Bold = true }).Draw(c.Canvas, c.X, c.Y + (int)(size * 2));
+                  VectorText.Create("Italic: улица Кирова", size, new VectorTextStyle { Italic = true }).Draw(c.Canvas, c.X, c.Y + (int)(size * 4));
+              }).Ui(Param.Mouse, "Move the text (the mouse)", Param.Scale, "Size (x14 px cap height)");
+
+            T(GVText, "VectorText on a curve: text along a path, centred, or fitted to the whole path",
+              "VectorText.OnPath places each glyph by its distance along a polyline and its height above it, so the letters follow the curve. The bottom line is stretched to span its path (FitToPath).",
+              c =>
+              {
+                  float size = 14f * MathF.Max(0.1f, c.Scale);
+                  var arc = new List<PointF>();
+                  for (int i = 0; i <= 96; i++)
+                  {
+                      double a = Math.PI - Math.PI * i / 96.0;
+                      arc.Add(new PointF(c.X + 220f * (float)Math.Cos(a), c.Y - 220f * (float)Math.Sin(a)));
+                  }
+                  VectorText.OnPath("ул. Кирова - проспект Ленина", arc, size,
+                      new VectorTextPathOptions { Style = new VectorTextStyle { Bold = true }, Align = VectorTextAlign.Center })
+                      .Draw(c.Canvas, System.Numerics.Matrix3x2.Identity);
+                  var line = new List<PointF> { new PointF(c.X - 200, c.Y + 260), new PointF(c.X + 200, c.Y + 260) };
+                  VectorText.OnPath("Fit to the path", line, size, new VectorTextPathOptions { FitToPath = true })
+                      .Draw(c.Canvas, System.Numerics.Matrix3x2.Identity);
+              }).Ui(Param.Mouse, "Move the arc (the mouse)", Param.Scale, "Size (x14 px cap height)");
+
+            // ===================================================== Vector map (MBTiles)
+            T(GMaps, "Vector map: open a .mbtiles file ('Open file...'); zoom past the data as far as you like",
+              "A vector MBTiles file (format pbf) becomes a VectorImage for the chosen zoom level Z. Extra zoom (Scale) past it is still vector, so the lines stay sharp. Drag the map to pan. Nothing is drawn for missing tiles except the background colour.",
+              c => MapDemo.Draw(c, L.Find(x => x.Name.StartsWith("Vector map", StringComparison.Ordinal))!.FilePath))
+              .Ui(Param.Z, "Zoom level Z (0..14, the level the shapes are imported at)", Param.Scale, "Extra zoom past Z (x1.00 = none; the shapes are vectors, so it stays sharp)", Param.Mouse, "Drag the map to pan", Param.Smooth, "Anti-aliased edges");
+            L[L.Count - 1].FileFilter = "MBTiles (*.mbtiles)|*.mbtiles|All files|*.*";
 
             // ===================================================== Animated SVG (SMIL)
             T(GFiles, "Animated SVG (SMIL + CSS): FrameAt / SeekToTime (button 'Open file...')", "VectorImage keeps the animation of a file while importing: SMIL tracks (<animate> of the d attribute, <animateTransform>, <animateMotion>, <set>) AND CSS animations (@keyframes of transform / opacity / stroke-dashoffset with animation-* timing, transform-box / transform-origin - the style AI-generated game art uses). SeekToTime(t) applies every track at time t (paths morph per command, transforms interpolate per function - a 0 to 360 deg spin sweeps), FrameAt(t) returns an independent frame copy, Duration / FrameCount / FrameRate / GetFrame(i) iterate the loop (FrameCount = Duration * 30 fps here). Built-in sample = a small loop when no file was chosen. 'Animate' plays the loop (the clock runs while the check box is ticked; off = frame 0); the playback rate is Speed / 6 (6 = real time). Drag to move; drag outside = rotate; Scale = zoom; Smooth = anti-aliased edges; Blend = opacity; Brite < 0 = wireframe. ClipViewport is on here: decoration the file parks beyond its canvas stays out, like in a browser. The draw goes through the layer compositor (img.Cached): content whose chain only moves is rasterised once per zoom and blitted with the chain's current matrix (slow dollies re-rasterise only when the linear part drifts); morphs / opacity / dashes stay live. Tick 'Precompose' to bake the whole loop into bitmaps once. Playback then evaluates no vector tracks: one bitmap draw per tick. First use and changes to internal resolution / fps / paint settings require a synchronous bake (can take a few seconds). Display zoom / rotation / skew only transform bitmaps and never rebake. The film budget is in MiB; if full-size frames do not fit, smaller bitmaps are baked and enlarged, without silently lowering fps. Film width fixes the internal bitmap grid independently of container size (0 = SVG intrinsic); a higher grid than the display enables area-filtered supersampling. Film fps defaults to 60 here (0 = file FrameRate, usually 30; up to 240 for high-refresh displays). Live vectors sample every render; a 30 fps film holds each sample for 33 ms, so image resolution alone cannot fix temporal choppiness. The note reports actual fps, bitmap size, resolution percentage, memory and bake time. The note shows the track count, the seek + draw cost and the cache stats.", c =>
@@ -2498,6 +2537,67 @@ T(GControls, "SpriteLabel / GroupBox / Tabs / TextBox / Numeric / Combo / ListBo
         }
 
         // ---- files ---------------------------------------------------------------------------
+        /// <summary>
+        /// The map test's camera. One VectorImage per zoom level (imported once, reused while Z stays), drawn with a
+        /// centre, the level and an extra scale. Centre = normalised web-mercator (0..1); panning changes it.
+        /// </summary>
+        static class MapDemo
+        {
+            static VectorImage? img; static string imgKey = "", status = "";
+            static double originX, originY;              // world pixels (at the level) of the picture's (0,0)
+            static double nx = double.NaN, ny;           // centre, normalised world (0..1)
+            static int lastX, lastY; static bool haveLast;
+
+            static double MercY(double lat) { double r = lat * Math.PI / 180.0; return (1.0 - Math.Log(Math.Tan(r) + 1.0 / Math.Cos(r)) / Math.PI) / 2.0; }
+
+            public static void Draw(Ctx c, string? path)
+            {
+                c.Canvas.ClearBuffer(MbTilesStyle.Background);
+                if (string.IsNullOrEmpty(path) || !System.IO.File.Exists(path))
+                {
+                    c.Note = "Open a .mbtiles file with the 'Open file...' button (format pbf = vector tiles).";
+                    return;
+                }
+                int z = Math.Clamp(c.Z, 0, 14);
+                string key = path + "|" + z;
+                if (img == null || imgKey != key)
+                {
+                    var sw = System.Diagnostics.Stopwatch.StartNew();
+                    try
+                    {
+                        using var mb = MbTiles.Open(path);
+                        if (double.IsNaN(nx)) { nx = ((mb.West + mb.East) / 2 + 180) / 360; ny = MercY((mb.North + mb.South) / 2); }
+                        img = VectorImage.FromMbTiles(mb, new MbTilesView { Zoom = z });
+                        double world = 256.0 * Math.Pow(2, z);
+                        var va = img.VisibleArea ?? img.ViewBox;
+                        originX = (mb.West + 180) / 360 * world - va.X;
+                        originY = MercY(mb.North) * world - va.Y;
+                        status = $"{img.Shapes.Count} shapes at z{z}, imported in {sw.ElapsedMilliseconds} ms";
+                    }
+                    catch (Exception ex) { img = null; status = ex.Message; }
+                    imgKey = key;
+                }
+                if (img == null) { c.Note = status; return; }
+
+                float k = MathF.Max(0.01f, c.Scale);      // extra zoom past the level; 1 = none
+                double per = 256.0 * Math.Pow(2, z) * k;  // screen pixels per normalised unit
+                if (haveLast && (c.X != lastX || c.Y != lastY))
+                {
+                    nx -= (c.X - lastX) / per; ny -= (c.Y - lastY) / per;
+                    nx = Math.Clamp(nx, 0, 1); ny = Math.Clamp(ny, 0, 1);
+                }
+                lastX = c.X; lastY = c.Y; haveLast = true;
+
+                double cx = nx * 256.0 * Math.Pow(2, z) - originX, cy = ny * 256.0 * Math.Pow(2, z) - originY;
+                var m = System.Numerics.Matrix3x2.CreateTranslation((float)-cx, (float)-cy)
+                      * System.Numerics.Matrix3x2.CreateScale(k)
+                      * System.Numerics.Matrix3x2.CreateTranslation(c.W * 0.5f, c.H * 0.5f);
+                img.Draw(c.Canvas, m, new VectorRenderOptions { AA = c.Smooth });
+                double lon = nx * 360 - 180, lat = Math.Atan(Math.Sinh(Math.PI * (1 - 2 * ny))) * 180 / Math.PI;
+                c.Note = $"{status} | Z{z} x{k:0.00} | centre {lat:F5}, {lon:F5} | drag to pan";
+            }
+        }
+
         static VectorImage? tvec; static string tvecKey = "", tvecInfo = "";
         const string SampleSvg = "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 200 200'><defs><linearGradient id='g' x1='0' y1='0' x2='1' y2='1'><stop offset='0' stop-color='#ffcc33'/><stop offset='1' stop-color='#ff3366'/></linearGradient><radialGradient id='r'><stop offset='0' stop-color='#fff'/><stop offset='1' stop-color='#3366ff'/></radialGradient></defs>"
             + "<rect x='10' y='10' width='180' height='180' rx='24' fill='url(#g)' stroke='#402' stroke-width='4'/><circle cx='70' cy='70' r='40' fill='url(#r)' fill-opacity='0.9'/>"

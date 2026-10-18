@@ -162,6 +162,35 @@ static class MbTilesChecks
                 city.DrawFit(sprite);
                 Console.WriteLine($"  info  z13 draw: {sw.ElapsedMilliseconds} ms");
                 SaveSprite(sprite, "mbtiles_city_z13.png");
+                // diagnostics: near-black pixels (all channels < 40) in three ways the demo draws the same picture
+                static int Dark(Sprite s) { int n = 0; foreach (var px in s.Pixels) { int r = (px >> 16) & 255, g = (px >> 8) & 255, b = px & 255; if (r < 40 && g < 40 && b < 40) n++; } return n; }
+                Console.WriteLine($"  info  dark pixels, direct DrawFit: {Dark(sprite)}");
+                var cached = new Sprite(1280, 800); cached.ClearBuffer(MbTilesStyle.Background);
+                city.Cached.DrawFit(cached, new System.Drawing.RectangleF(0, 0, 1280, 800));
+                Console.WriteLine($"  info  dark pixels, VectorSprite cache: {Dark(cached)}");
+                SaveSprite(cached, "diag_cached_z13.png");
+                var zoomed = new Sprite(1280, 800); zoomed.ClearBuffer(MbTilesStyle.Background);
+                var fit = city.FitMatrix(new System.Drawing.RectangleF(0, 0, 1280, 800), true);
+                city.Draw(zoomed, System.Numerics.Matrix3x2.CreateScale(8f, 8f, new System.Numerics.Vector2(640, 400)) * fit);
+                Console.WriteLine($"  info  dark pixels, 8x zoom: {Dark(zoomed)}");
+                SaveSprite(zoomed, "diag_zoom8_z13.png");
+                var clear = new Sprite(1280, 800); clear.ClearBuffer(0);          // a canvas that starts transparent, as the demo's may
+                city.DrawFit(clear);
+                int transparent = 0; foreach (var px in clear.Pixels) if ((px >> 24) == 0) transparent++;
+                Console.WriteLine($"  info  transparent pixels left on a cleared-to-0 canvas: {transparent * 100.0 / (1280 * 800):0.0}%");
+                SaveSprite(clear, "diag_clear0_z13.png");
+                foreach (var op in new[] { SR2D.Op.Paint, SR2D.Op.AlphaBlend, SR2D.Op.AlphaOver })
+                {
+                    var t = new Sprite(640, 400, op); t.ClearBuffer(0);
+                    city.DrawFit(t);
+                    int tr = 0, opq = 0; foreach (var px in t.Pixels) { if ((px >> 24) == 0) tr++; else if ((px >> 24) == 255) opq++; }
+                    Console.WriteLine($"  info  op {op}: transparent {tr * 100.0 / (640 * 400):0.0}%, opaque {opq * 100.0 / (640 * 400):0.0}%");
+                    var hist = new Dictionary<int, int>(); foreach (var px in t.Pixels) { int al = px >> 24; hist[al] = hist.TryGetValue(al, out var h) ? h + 1 : 1; }
+                    Console.WriteLine($"  info  op {op} alpha values: " + string.Join(" ", hist.OrderByDescending(kv => kv.Value).Take(6).Select(kv => $"{kv.Key}x{kv.Value}")));
+                    int rgbOnA0 = 0; foreach (var px in t.Pixels) if ((px >> 24) == 0 && (px & 0xFFFFFF) != 0) rgbOnA0++;
+                    Console.WriteLine($"  info  op {op}: alpha 0 but colour written: {rgbOnA0} px");
+                    SaveSprite(t, "diag_op_" + op + ".png");
+                }
             }
         }
         else Console.WriteLine("  skip full-size sample (set MBTILES_FILE to chelyabinsk.mbtiles)");

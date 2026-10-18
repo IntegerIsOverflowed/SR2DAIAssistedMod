@@ -2223,6 +2223,25 @@ Limits: raster MBTiles (png / jpg) throw `NotSupportedException`; labels and ico
 (the importer adds that to `Warnings`). Loading a whole city at zoom 13 is tens of thousands of shapes,
 so pick a smaller `West/South/East/North` or a lower `Zoom` when you only need an overview.
 
+### Text without fonts: `VectorText` (`cs/VectorText.cs`)
+
+Text drawn from open strokes (lines and elliptical arcs), so it needs no font file and stays sharp at any
+scale. Latin, digits, basic punctuation and Cyrillic. `Bold` widens the stroke, `Italic` skews it.
+
+```csharp
+var title = VectorText.Create("Hello 2026", 20f, new VectorTextStyle { Bold = true });  // size = cap height
+title.Draw(canvas, 10, 10);
+
+var pts = new List<PointF> { /* a road or river, image coordinates */ };
+var label = VectorText.OnPath("ул. Кирова", pts, 12f,
+    new VectorTextPathOptions { Align = VectorTextAlign.Center, Above = true });   // or FitToPath = true
+label.Draw(canvas, System.Numerics.Matrix3x2.Identity);                              // path coordinates
+```
+
+Limits: some Cyrillic letters are simple approximations; characters without a glyph are left as a gap
+(`VectorText.HasGlyph`). Text on a path places every glyph point by its distance along the path, so long
+straight segments of a glyph are not bent.
+
 ## WebP pictures: `cs/WebP.cs` (`Sprite.FromWebP`, automatic in `new Sprite(file)`)
 
 .NET has no WebP codec: `System.Drawing` on Windows only opens `.webp` when the Microsoft

@@ -460,7 +460,10 @@ namespace Sr2d64CSport
                     var save = dst.LockRect; dst.SetLockRect(lr);
                     if (premul)   // LineOp.AlphaOver takes a STRAIGHT colour and writes premultiplied source-over (alpha accumulates)
                         dst.FillPolygons(span, System.Runtime.InteropServices.CollectionsMarshal.AsSpan(cnt), argb, SR2D.LineOp.AlphaOver, o.AA, evenOdd);
-                    else dst.FillPolygons(span, System.Runtime.InteropServices.CollectionsMarshal.AsSpan(cnt), argb, a == 255 && !o.AA ? SR2D.LineOp.Set : SR2D.LineOp.AlphaBlend, o.AA, evenOdd);
+                    // AlphaOver (not AlphaBlend): source-over that also accumulates the destination alpha. AlphaBlend keeps
+                    // the destination alpha, so a fill on a transparent sprite left its colour with alpha 0 (shown as black / blank).
+                    // On an opaque destination both give the same colours.
+                    else dst.FillPolygons(span, System.Runtime.InteropServices.CollectionsMarshal.AsSpan(cnt), argb, a == 255 && !o.AA ? SR2D.LineOp.Set : SR2D.LineOp.AlphaOver, o.AA, evenOdd);
                     dst.SetLockRect(save);
                     return;
                 }
