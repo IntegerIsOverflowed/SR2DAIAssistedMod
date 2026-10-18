@@ -4,11 +4,86 @@ Drop-in replacement for the original `SR2D.dll` / `SR2D64.dll` sprite engine plu
 rewritten `Sprite` / `SR2D` C# layer. **Every exported function keeps its name,
 calling convention, argument order and bit-exact pixel results.**
 
+## Start here (for people and AI agents)
+
+SR2D has two layers, and the README is organised so you can find any topic from the table below.
+
+- **Native** (`native/`, C++): the `SR2D64.dll` pixel engine. Every export keeps its original name, calling
+  convention and bit-exact output. `tests/difftest.cpp` compares it with the untouched original sources.
+- **Managed** (`cs/`, C#): the `Sprite` / `SR2D` classes, shapes, text, codecs, voxels, vectors, the WinForms
+  controls (`SpriteBox`, `SpriteForm`, `SpriteKnob`, `SpriteSlider`, ...) and the animation helpers. Every
+  managed project compiles `cs/*.cs` directly; there is no separate managed package.
+
+Around them: `demo/` is the interactive test app (one `T(group, name, description, lambda)` call per
+capability, shown in the Code view with F2), `tests/` holds the headless checks, and `EmptySR2DFormTemplate/` is
+the starting point for a new application.
+
+| Topic | Files | Where it is explained |
+|---|---|---|
+| Drawing: lines, shapes, fills, blur, effects, warp, text | `native/sr2d_api.h`, `cs/SR2D.cs`, `cs/Sprite*.cs` | the sections from "What changed in the native library" on |
+| Sprite on a control: zoom, scroll, view modes | `cs/SpriteBox*.cs`, `cs/SpriteView.cs` | "Showing a Sprite on a control" |
+| Value controls (`decimal` values) | `cs/SpriteControls*.cs` | "SR2D-drawn value controls" |
+| Title bar with colour bars, animated bars | `cs/SpriteForm.cs`, `cs/ChromeDesign.cs` | "Animated colour bars on SpriteForm" |
+| Keyframes, tangents, tweens, curves | `cs/Animation*.cs`, `cs/Curve.cs`, `cs/SpriteControls.Curve.cs`, `cs/Tween.cs` | Cookbook 8, 8b, 8c |
+| Designer behaviour: visible properties, default events, clicks | attributes in `cs/SpriteControls*.cs`, `cs/SpriteBox*.cs` | "Designer and events" |
+| Voxels, vectors, fonts, codecs | `cs/VoxelGrid*.cs`, `cs/Vector*.cs`, `cs/SpriteFont*.cs`, `cs/WebP.cs`, `cs/Png.cs`, `cs/ImageCodec.cs` | their own sections below |
+
+### Build and test
+
+```
+# native library and its C++ suite (Linux/GCC here; on Windows use build_release.bat or native/SR2D.sln)
+cd tests && make so && make test          # writes tests/build/libSR2D64.so, then runs the native checks
+
+# managed projects
+dotnet build demo/SR2DDemo.csproj -c Release
+dotnet build EmptySR2DFormTemplate/EmptySR2DFormTemplate.csproj -c Release -p:EnableWindowsTargeting=true
+dotnet build tests/cs/ctlrun -c Release
+```
+
+The demo and the template target `net10.0-windows`. On Linux the demo builds (with one expected warning,
+SR2D0001, because the native DLL is not beside it), and the template needs `-p:EnableWindowsTargeting=true`.
+`global.json` pins the SDK line (10.0.x, roll forward to the latest major).
+
+To run ctlrun on Linux: `LD_LIBRARY_PATH=<repo>/tests/build dotnet <output folder>/ctlrun.dll`. The output
+folder is `tests/cs/ctlrun/bin/Release/net10.0` by default. `tests/cs/ctlrun/ctlrun.csproj` sends it to
+`~/.cache/ctlrun/bin/` when that folder exists (a sandbox convenience that keeps build output out of the
+workspace snapshot), so check the `-> ...ctlrun.dll` line of the build. The render dumps (`*.rgba`) go to
+`$CTLRUN_OUT`, or `<temp>/ctlrun` when that variable is not set. ctlrun prints `ok` for every check and `FAIL`
+for a failed one, and stops with exit code 1 at the first failure. A check run after an edit must use a dll that is
+newer than the edit: a stale dll gives the old results without any error.
+
+`tests/cs/projchk.py` checks that the verification table below lists every check project.
+
+### Conventions (read before changing anything)
+
+- `CHANGELOG.txt` (CRLF, newest first) gets one entry per delivery, with ADDED / CHANGED / FIXED / DEMO / TESTS /
+  DOCS lines. Anything that changes existing behaviour gets a `compat` note.
+- Numeric values of the controls (`Value`, `Minimum`, `Maximum`, `Step`, `Values`, ...) are `decimal` in the public
+  API. Internal arithmetic stays `double`; the conversion happens in the property. See "Values are decimal".
+- Change only the library (`cs/`, `native/`), the demo (`demo/`) and the tests (`tests/`). The user's own projects
+  are not touched.
+- The demo's Code view (F2) finds a test's code through `CodeView.ExtractLambda`, which needs the lambda written as
+  `c =>` at the top level of the `T(...)` call. `(c) =>` breaks it.
+- The shape of every segment comes from the Out tangent of its left key and the In tangent of its right key
+  (`cs/Animation.cs`). `Track.EaseSegment` is the one-segment core that `Track`, the colour-bar animation and
+  `Interpolate.SplineLerp` all use.
+- Do not change analyzer severities in `.editorconfig` without the Visual Studio Error List output and the project
+  settings (the CA1051 / CA2213 history is in "Analyzers and the .editorconfig").
+- WinForms does not run on Linux. Controls are checked by ctlrun on a fake WinForms layer and by PNG renders, not
+  by eye. Anything visual that ctlrun cannot show must be checked on Windows.
+- `bin/` and `obj/` are big. Delete them after a build; the workspace snapshot has a size limit.
+
+### Repository map
+
 ```
 SR2D/
 ├─ CHANGELOG.txt           what changed, newest first (kept up to date with every addition / change)
 ├─ SpriteForm-fixes.txt    the window chrome bug list: what broke, how each fix works, and the measurement that proves it
 ├─ build_release.bat       one click: DLL (clang-cl, x64, Release) + bench (Release) + DLL copied next to the exe; OK / FAILED summary
+├─ build-and-test.sh / .bat  the driver: native build + make test, managed checks, demo, template, ctlrun (see "Build and test" above)
+├─ global.json            .NET SDK pin (10.0.x, roll forward to the latest major)
+├─ legacy/                the ORIGINAL engine source, built unchanged for the tests/cs/legacybench comparison
+├─ LICENSE
 ├─ EmptySR2DFormTemplate/  as empty as Visual Studio's own WinForms template (stock Program.cs + a blank Form1) - only the form derives from SpriteForm, so a new app has the SR2D chrome from the start; copy it and start
 ├─ native/                 C++ DLL (Visual Studio 2022 solution, ClangCL toolset + x64 by default, Win32 still available)
 │  ├─ sr2d_api.h           single X-macro list of all exports (54 original + DRAW_WARP, DRAW_LINE2)
@@ -38,8 +113,9 @@ SR2D/
 │  ├─ Sprite.Effects.cs    partial Sprite: DrawBlurred / DrawBlurredAt / Blur / ToBlurred (Gaussian-like blur, soft edges)
 │  ├─ Effects.cs           Effects chain class (Blur / Wave / Ripple / Noise / Turbulence / DistortMap / Color / Shadow / Glow / Outline / Dilate / Erode / MotionBlur, per-stage Enable) + MotionEcho (real-time feedback blur) + Sprite.DrawFx* / Sprite.DrawMotionTaps (real-time multi-tap blur)
 │  ├─ LayeredSprite.cs     stack of sprites (own effects / placement / op each) that composes itself into one premultiplied sprite, re-composing only what changed
-│  ├─ Animation.cs         keyframe tracks with in / out tangents (3ds Max model): TangentMode (Smooth / Linear / Step / Fast / Slow / Spline / Auto), Keyframe, Track.Evaluate - shapes any lerp's speed
-│  ├─ Curve.cs             an editable 0..1 curve: sorted points + monotone cubic (Fritsch-Carlson, never overshoots) - the data behind the curve editor; usable as a speed profile or a Levels-style ramp
+│  ├─ Animation.cs         keyframe tracks (3ds Max model: a segment is shaped by the Out tangent of its left key and the In tangent of its right key): TangentMode (Smooth / Linear / Step / Fast / Slow / Spline / Auto / Bezier / Flat / Curve), Keyframe, Track.Evaluate / EaseSegment / EaseAt, and Interpolate.SplineLerp (one point from A to B with a tangent at each end, or a Curve)
+│  ├─ Animation.Graph.cs   TangentGraph: the progress graph of one shape (Draw) and of a whole Track (DrawTrack: grid, value and time labels, keys, playhead)
+│  ├─ Curve.cs             an editable 0..1 curve: sorted points + monotone cubic (Fritsch-Carlson, never overshoots) - the data behind the curve editor; usable as a speed profile or a Levels-style ramp; ToCode() / TryParse copy it as text
 │  ├─ SpriteControls.Curve.cs  SpriteCurveEditor: the Photoshop-curves / 3ds Max Color-Map style control - drag points, click adds, right click selects one and opens its menu (node type, Delete node); evaluates through Curve
 │  ├─ Selection.cs         8-bit coverage selection (magic wand, polygon, ellipse, rect, from alpha / luma; Add / Subtract / Intersect, Feather, Grow, Border) + Sprite.FloodFill / ReplaceColor / Fill / Apply / CopyThrough / Extract
 │  ├─ Sprite.Move.cs       selection-scoped Sprite.Move (Photoshop move tool) and Sprite.Offset (Photoshop offset, wrap = bounding box or along the selected spans), coverage-weighted (feathered selections travel soft)
@@ -52,13 +128,14 @@ SR2D/
 │  ├─ SpriteBox.View.cs    SizeMode (PictureBox-like placement + zoom multiplier + pan / overscroll / inertia), scroll bars, magnifier / hand navigation, SR2D-drawn view menu
 │  ├─ SpriteBox.Voxel.cs   VoxelBox: a SpriteBox viewport onto a VoxelGrid (orbit / pan / zoom, presets, lighting tiers, fade, preview while dragging, VoxelClick / VoxelHover, right-click settings menu)
 │  ├─ SpriteView.cs        the view geometry (modes, zoom anchor, pan limits, client <-> image mapping, scroll model, inertia) - no WinForms
-│  ├─ SpriteControls.cs    SpriteControlBase (palette, hover, text, body look, animation) + SpriteRangeControl (CommitOnRelease) + SpriteKnob (rotary) + SpriteSlider
+│  ├─ SpriteControls.cs    SpriteControlBase (palette, hover, text, body look, animation) + SpriteRangeControl (CommitOnRelease; Value / Minimum / Maximum / Step / Values are decimal) + SpriteKnob (rotary) + SpriteSlider
+│  ├─ Tween.cs             Tween.To: a small internal tween engine that animates a control property over wall-clock time and invalidates the control on each step (one shared 60 Hz pump; Tween.Pump() for tests)
 │  ├─ SpriteControls.Buttons.cs  SpriteButton, SpriteToggle (Switch / Ellipse / Rocker / CheckBox), SpriteRadio, SpriteProgress (H / V / Ring)
 │  ├─ SpriteControls.Looks.cs    ControlLook (Classic / Hairline / Segmented) and the drawing helpers of the two flat looks (cells, keyline, dial and corner ticks, ring arcs)
 │  ├─ SpriteControls.Wheel.cs    SpriteWheel: thumb wheel / drum picker (Detailed / Flat style, WrapMouse, WrapAround, Edit = Beside / DoubleClick / Click SR2D field)
 │  ├─ SpriteControls.Scroll.cs   SpriteScrollBar (flat track, page-sized thumb, arrows) - used by SpriteBox.ScrollBars
 │  ├─ SpriteControls.Menu.cs     SpriteMenu: SR2D-drawn popup menu (commands, checks, radios, sub-menus, inline sliders, keyboard) - replaces ContextMenuStrip on SR2D controls
-│  ├─ SpriteForm.cs             SpriteForm: a form whose title bar is ONE SR2D sprite (nothing can cover or dispose it): skewed colour bars in the left corner (StripeMode / StripeBarWidth / StripeBarCount / StripeBarExtra / StripeSkew / StripeStyle / StripeSeed / StripeColors / StripeColorList / StripeOffset / StripeAlignment / StripeBrightness - the length the run mirrors is the ICON + TEXT block it is furniture for, in pixels; the two pairings are custom width / auto amount (StripeBarWidth > 0: that width exactly, and just as many bars as cover the block) and auto width / custom amount (StripeBarWidth = 0: the block divided between the mode's bar count, so count 10 over a 327 px block is 32,7 px per bar); StripeBarsMode.FixedCount is the mode where both numbers are yours literally and nothing is derived; StripeBarExtra then adds (or takes off, negative) bars on TOP of whichever number the mode derived, so "caption length + one more bar" is StripeBarExtra = 1 in any mode - the length mirrored stays the same, so on a width-derived run an extra bar makes every bar one share thinner and on a literal width it makes the run longer; StripeAlignment WithText centres the run ON that block instead of in the bar), the window icon on a rounded chip (IconBackdrop), the caption + extra tags each with a drop shadow by default (TitleTextShadow) and drawn IN FRONT of the bars (StripesBehindText=false puts them after), the darkening plate behind the texts (TitleDarkenMode None / BehindTitle / BehindAllText, TitleDarkenExtraWidth / TitleDarkenExtraHeight / TitleDarkenFeatherWidth / TitleDarkenFeatherHeight / TitleDarkenOpacity - a black rectangle sized to the covered texts' INK pixels (Sprite.MeasureTextInk: the set pixels, not the advance box - a leading space or a trailing glyph gap are not ink), grown by the extra width / height on each side, its left / right edges fading over the feather WIDTH and its top / bottom edges over the feather HEIGHT, drawn under the icon and the texts), a caption in a REAL font instead of the pixel font (TitleTextFont, or TitleTextFontFamily / TitleTextFontSize), minimise / maximise / close, right click on maximise = full screen, right-click window menu, DOUBLE-CLICK the bar = maximize / restore - the bar defaults to its smallest 18 px with the 1 px pixel font, the frame is BorderColor / BorderThickness drawn as Padding with the eight resize grabs (corners included) answered in WM_NCHITTEST, MinimumSize is derived from the chrome so it can never be resized away, dragging a maximized window restores it, and NativeWindowFrame keeps a real WS_CAPTION / WS_THICKFRAME frame that WM_NCCALCSIZE makes invisible again - which is what gives the Windows 11 minimize / restore animations, the DWM shadow and the corner rounding (off in full screen); the frame never repaints on WM_NCACTIVATE (losing focus cannot expose a native caption), never writes your BackColor, SmoothChrome buffers the chrome so a resize drag does not rebuild the bar for every pixel, and WM_NCPAINT is left to the default handler so the surface a resize hands the window is painted whole rather than showing the desktop behind it for a frame at a time
+│  ├─ SpriteForm.cs             SpriteForm: a form whose title bar is ONE SR2D sprite (nothing can cover or dispose it), with animated colour bars (StripeAnimation, see "Animated colour bars on SpriteForm"): skewed colour bars in the left corner (StripeMode / StripeBarWidth / StripeBarCount / StripeBarExtra / StripeSkew / StripeStyle / StripeSeed / StripeColors / StripeColorList / StripeOffset / StripeAlignment / StripeBrightness - the length the run mirrors is the ICON + TEXT block it is furniture for, in pixels; the two pairings are custom width / auto amount (StripeBarWidth > 0: that width exactly, and just as many bars as cover the block) and auto width / custom amount (StripeBarWidth = 0: the block divided between the mode's bar count, so count 10 over a 327 px block is 32,7 px per bar); StripeBarsMode.FixedCount is the mode where both numbers are yours literally and nothing is derived; StripeBarExtra then adds (or takes off, negative) bars on TOP of whichever number the mode derived, so "caption length + one more bar" is StripeBarExtra = 1 in any mode - the length mirrored stays the same, so on a width-derived run an extra bar makes every bar one share thinner and on a literal width it makes the run longer; StripeAlignment WithText centres the run ON that block instead of in the bar), the window icon on a rounded chip (IconBackdrop), the caption + extra tags each with a drop shadow by default (TitleTextShadow) and drawn IN FRONT of the bars (StripesBehindText=false puts them after), the darkening plate behind the texts (TitleDarkenMode None / BehindTitle / BehindAllText, TitleDarkenExtraWidth / TitleDarkenExtraHeight / TitleDarkenFeatherWidth / TitleDarkenFeatherHeight / TitleDarkenOpacity - a black rectangle sized to the covered texts' INK pixels (Sprite.MeasureTextInk: the set pixels, not the advance box - a leading space or a trailing glyph gap are not ink), grown by the extra width / height on each side, its left / right edges fading over the feather WIDTH and its top / bottom edges over the feather HEIGHT, drawn under the icon and the texts), a caption in a REAL font instead of the pixel font (TitleTextFont, or TitleTextFontFamily / TitleTextFontSize), minimise / maximise / close, right click on maximise = full screen, right-click window menu, DOUBLE-CLICK the bar = maximize / restore - the bar defaults to its smallest 18 px with the 1 px pixel font, the frame is BorderColor / BorderThickness drawn as Padding with the eight resize grabs (corners included) answered in WM_NCHITTEST, MinimumSize is derived from the chrome so it can never be resized away, dragging a maximized window restores it, and NativeWindowFrame keeps a real WS_CAPTION / WS_THICKFRAME frame that WM_NCCALCSIZE makes invisible again - which is what gives the Windows 11 minimize / restore animations, the DWM shadow and the corner rounding (off in full screen); the frame never repaints on WM_NCACTIVATE (losing focus cannot expose a native caption), never writes your BackColor, SmoothChrome buffers the chrome so a resize drag does not rebuild the bar for every pixel, and WM_NCPAINT is left to the default handler so the surface a resize hands the window is painted whole rather than showing the desktop behind it for a frame at a time
 │  ├─ ChromeDesign.cs      designer support for the chrome palette: the SpriteForm colour properties (TitleBarColor / BorderColor / TitleTextColor / TitleTextShadowColor) are System.Drawing.Color, so the grid gives them the NATIVE Color cell - swatch rectangle, the colour's name or [A=, R=, G=, B=] values, the drop-down arrow with the Custom / Web / System pages, exactly like BackColor. What remains here is for the palette: ArgbColorConverter parses every spelling (AARRGGBB, RRGGBB, #RRGGBB, 0xRRGGBB, a decimal ARGB integer, a name) for StripeColorList, which parses ONCE in the setter into the int[] the bars paint from (the string is only the editor's text). StripePaletteEditor is that list's "..." dialog - a swatch + AARRGGBB list with Add / Edit / Remove over the standard colour dialog, writing back the same comma-separated text the box holds - the caption font gets Visual Studio's own font dialog through TitleTextFont
 │  ├─ SpriteControls.Static.cs   SpriteLabel (5 styles), SpriteSeparator, SpriteLed, SpritePanel, SpriteStackPanel (column / row layout, wrap, scroll), SpriteGroupBox (check in the caption), SpriteTabControl / SpriteTabPage
 │  ├─ SpriteControls.TextView.cs SpriteTextView: read-only multi-line text (log / description / code) - wrap, line numbers, colour runs, selection + copy, scroll bars
@@ -69,12 +146,13 @@ SR2D/
 │  └─ Sprite.Text.cs       Sprite.DrawText / MeasureText (colour, scale, weight, ops, anchors, drop shadow)
 ├─ demo/                   C# WinForms demo / visual test app (SR2DDemo, formerly "bench")
 │  ├─ SR2DDemo.csproj      net10.0-windows x64, compiles ../cs/*.cs into the exe
-│  ├─ Tests.cs             one test per SR2D capability (original + new API); embedded in the exe for the Code view
+│  ├─ Tests.cs             one test per SR2D capability (original + new API); embedded in the exe for the Code view; the animation tests are the group "Animation keys (Animation.cs)"
 │  ├─ CodeView.cs          "Code (F2)": extracts the selected test's lambda + helpers from the embedded Tests.cs, C# tokenizer -> colour runs for the SpriteTextView
 │  ├─ Assets.cs            test sprites: Lenna + normal map (embedded) or legacy
 │  │                       procedural bricks; alpha glow, keyed, light map, mask, tile
 │  ├─ assets_builtin/      lenna.webp (q95), lenna_normal.webp (lossless) (EmbeddedResource)
-│  ├─ ControlsDemo.cs      strip of SpriteKnob / SpriteSlider controls for the controls test
+│  ├─ ControlsDemo.cs      strip of SpriteKnob / SpriteSlider controls for the controls test; TangentTools (the curve editor bound to the Move and animation tests)
+│  ├─ MoveDemo.cs          the Move / grid-shuffle test pages: MoveGrid, the tangent graphs, Sprite.Move / Offset
 │  ├─ Caps.cs              probes the loaded DLL's exports (gates new-API tests)
 │  └─ MainForm.cs          UI, render loop, FPS/ms readout, headless suite + CSV
 └─ tests/                  Linux/GCC harness that compiles the ORIGINAL sources
@@ -100,7 +178,7 @@ SR2D/
    ├─ cs/webpchk/          WebP decoder vs libwebp reference decodes (tests/webp/*.ref.png, pixel-exact) + mutation fuzz
    ├─ cs/fontchk/          Png codec, ImageCodec (20 Pillow-made BMP / GIF / TGA / JPEG variants via mkimg.py, Op defaulting, hostile input), SVG <text> import, (colour-type selection, bit-exact round trips, 17 Pillow-made variants via mkpng.py), StrokeStyle stroker (analytic coverage per cap / join, miter limit, dashes, single blend per pixel), SpriteFont (metrics, cmap, kerning, wrap, anchors, sub-pixel, fake bold / italic, cache, .ttc, every installed family)
    ├─ cs/selchk/           FloodFill / Selection: contiguity, tolerance, ops, Apply, shapes, boolean ops, bounds, Feather / Grow / Border, Extract, timings
-   ├─ cs/                  headless C# checks (curvetest, blur/) that render to a raw dump -> PNG
+   ├─ cs/                  the managed check projects; ctlrun is the main one (end to end on a fake WinForms layer). The table in "Verification" lists every one with what it needs
    ├─ bench.cpp            micro-benchmark original vs SSE2 vs AVX2
    └─ Makefile             `make test` / `make bench`
 ```
@@ -2734,10 +2812,17 @@ shape calls (anti-aliased polylines / discs, `DrawText`):
 * **`SpriteSlider`** — horizontal or vertical (`Orientation`), rounded track,
   round thumb, optional `Ticks`, caption left / value right.
 
+**Values are `decimal`.** `Value`, `Minimum`, `Maximum`, `Step`, `ResetValue`, `ValuePerTurn` and `PendingValue`
+on `SpriteKnob`, `SpriteSlider`, `SpriteWheel`, `SpriteScrollBar` and `SpriteProgress` are `decimal`, and so is `PageSize`
+on the scroll bar. `Values` is a `decimal[]` on the range controls and on `SpriteNumeric`, which already had `decimal`
+`Value` / `Minimum` / `Maximum` / `Step`. The internal arithmetic stays `double` and is converted in the property.
+Compatibility (2026-10-18): a `double` variable needs a cast (`(decimal)x` going in, `(double)c.Value` coming out),
+a literal such as `1.5` needs the suffix `1.5M`, and an integer literal still converts.
+
 **Discrete values.** `SpriteKnob`, `SpriteSlider`, `SpriteWheel` and `SpriteNumeric`
 share a snapping mode (the entries are spread EVENLY - the thumb sits between the entries,
 not at their numeric position): `Values` (any predetermined set - `2 4 6 8 10 12`, gear ratios,
-`new double[]{ 0.5, 1, 2, 4 }`) or `PowersOfTwo = true` (the powers of two inside
+`new decimal[]{ 0.5M, 1, 2, 4 }`) or `PowersOfTwo = true` (the powers of two inside
 Minimum..Maximum, e.g. `8 16 32 64 128 256` - the demo's grid slider). Every input snaps
 to the nearest entry - drags (the `CommitOnRelease` preview too), typed text, wheel,
 arrow keys, buttons, code - and the wheel / arrows / buttons step one ENTRY at a time
@@ -3035,6 +3120,59 @@ buttons that drive the same controls from code — and the canvas follows every
 value. The headless `ctlrun` (`tests/cs/ctlrun`) types into the text box,
 steps the numeric, clicks the list with Shift / Ctrl, unchecks the group box
 and switches tabs, checking the results.
+
+## Animated colour bars on `SpriteForm` (`cs/SpriteForm.cs`, `cs/Animation.cs`)
+
+The colour bars in the title bar can move. Set `StripeAnimation` (category Animation in the designer):
+
+| Mode | What moves |
+|---|---|
+| `None` | nothing; the default. No timer runs. |
+| `Custom` | nothing built in. `StripeFrame` is raised on every frame; put the colours for that frame into `e.Colors`. |
+| `WrapOffset` | the palette slides along the strip and wraps at its ends. The strip is exactly one period of the palette, so a bar that leaves one end re-enters at the other and no bar is cut. |
+| `HueShift` | the colours turn round the hue circle. |
+| `StepBars` | the bars change one by one, in discrete steps. |
+| `BrightnessWave` | a brightness wave runs across the bars; `StripeAnimationDepth` sets how far it dims. |
+
+Properties:
+
+- `StripeAnimationSpeed`: palette cycles (WrapOffset), turns (HueShift), steps (StepBars) or waves
+  (BrightnessWave) per second. Default 0.5. 0 freezes the animation.
+- `StripeAnimationDirection`: `Left` (default) or `Right`.
+- `StripeStartTangent` / `StripeEndTangent`: the motion at the start and at the end of each cycle, each a
+  `TangentMode`. Default `Linear` at both ends. The two are independent, like Out and In on a key in 3ds Max.
+- `StripeCurve`: a custom motion as text. Paste the output of the curve editor's Copy as code, or point pairs such as
+  `0,0 0.5,0.2 1,1`. When it is set, the tangents are ignored. StepBars ignores the curve.
+- `StripeAnimationFps`: the repaint rate of the animation timer, 1 to 120. Default 30.
+- `StripeAnimationDepth`: BrightnessWave only, 0 to 100. Default 50.
+
+One cycle is one keyframe segment from 0 to 1, shaped by the two tangents with `Track.EaseSegment`, which is the same
+core that `Track` and `Interpolate.SplineLerp` use. The timer runs only when the mode is not `None` and the form is
+not in design mode.
+
+```csharp
+form.StripeAnimation = StripeAnimationMode.WrapOffset;
+form.StripeAnimationSpeed = 0.5f;
+form.StripeStartTangent = TangentMode.Fast;
+form.StripeEndTangent = TangentMode.Slow;
+
+// your own colours, frame by frame
+form.StripeAnimation = StripeAnimationMode.Custom;
+form.StripeFrame += (s, e) => { e.Colors[0] = unchecked((int)0xFFFF8000); };   // e.Time and e.Frame tell the frame
+```
+
+## Designer and events (`cs/SpriteControls*.cs`, `cs/SpriteBox*.cs`)
+
+- **Double-click** a control in the designer to create the handler of its `[DefaultEvent]`. The mapping:
+  `Click` for SpriteButton, SpriteProgress, SpriteCurveEditor, SpriteLabel, SpriteSeparator, SpritePanel and
+  SpriteTextView; `CheckedChanged` for SpriteToggle, SpriteRadio and SpriteGroupBox; `ValueChanged` for
+  SpriteColorPicker, SpriteNumeric, SpriteScrollBar, SpriteWheel, SpriteKnob and SpriteSlider; `Committed` for
+  SpriteTextBox; `SelectedIndexChanged` for SpriteCombo, SpriteListBox and SpriteTabControl; `OnChanged` for SpriteLed;
+  `VoxelClick` for VoxelBox; `Render` for SpriteBox.
+- **`MouseClick`** fires on the SR2D buttons. Those controls switch WinForms' `StandardClick` off, so the base control
+  raises `MouseClick` itself when a press and its release both land inside the control with the same button.
+- **Viewer properties** (the render surface of `SpriteBox`, grouped under the category "Surface") are shown on
+  `SpriteBox` and hidden on the controls. `Render` stays visible on the controls on purpose.
 
 ## Showing a Sprite on a control (`SpriteBox`, `cs/SpriteBox.cs`)
 
@@ -4014,7 +4152,8 @@ The tangent modes are the 3ds Max key tangents: `Smooth` (ease in-out), `Linear`
 (holds the left value, jumps at the segment end), `Fast` (fast start), `Slow` (slow start),
 `Spline` (custom handle slopes on the key: `HandleIn` / `HandleOut`, 0 = flat) and `Auto`
 (the default: Catmull-Rom slopes from the neighbouring keys - the curve passes through the
-key without overshooting it, exactly what 3ds Max computes for an auto tangent). `Spline` is the
+key without overshooting it, exactly what 3ds Max computes for an auto tangent). `Bezier` (custom handle offsets `BezierOut` / `BezierIn`), `Flat` (a level handle, the same shape as `Smooth`) and
+`Curve` (`Keyframe.Shape`: a `Curve` shapes the segment that leaves the key) were added on 2026-10-17. `Spline` is the
 manual cousin: the key's `HandleIn` / `HandleOut` slopes are the track-view's line handles -
 slopes steeper than the segment overshoot the key's value and come back (what a drawn
 Bezier handle does). For full control there is `SpriteCurveEditor` + `Curve` (`cs/Curve.cs`):
@@ -4039,8 +4178,26 @@ frame. The plot stops above the caption band: a curve's endpoints sit at `y = 0`
 edge, so a plot that ran under `Text` drew the caption through the two endpoint nodes. The monotone-cubic curve evaluates as any
 transfer function (`curve.Evaluate(u)`): a motion speed profile (the demos' "Curve"
 tangent), a brightness ramp for future Levels, or whatever else needs a drawn curve.
-`Keyframe.In` governs a segment when the previous key's Out is Auto. `Tween` animates a
-property over time; `Track` shapes HOW the value travels.
+Each segment is shaped by the Out tangent of its left key and the In tangent of its right key, side by side as
+in 3ds Max; a Smooth Out with a Linear In is valid. `Tween` (`cs/Tween.cs`) animates a control property over
+wall-clock time; `Track` shapes HOW a value travels between keys.
+
+### 8c. One point from A to B with two tangents (`Interpolate.SplineLerp`, `cs/Animation.cs`)
+
+```csharp
+PointF A = new PointF(70, 70), B = new PointF(400, 300);
+PointF p = Interpolate.SplineLerp(A, B, TangentMode.Fast, TangentMode.Slow, weight);   // weight 0..1
+PointF q = Interpolate.SplineLerp(A, B, myCurve, weight);                              // a Curve from the curve editor
+```
+
+`startTangent` is the tangent that leaves A and `endTangent` the one that arrives at B. The path is the straight line
+from A to B; the tangents set the speed along it, so `Smooth, Smooth` eases in and out, `Linear, Linear` moves at a
+constant speed and `Fast, Slow` starts quickly and arrives slowly. `weight` is clamped to 0..1. Drive it with time:
+`double weight = Math.Min(1, elapsedSeconds / duration);`.
+
+Nothing is sampled at a fixed frame rate. The method builds the two-key segment in place and calls
+`Track.EaseSegment`, so each call returns the exact value for the weight it is given, and a timer only decides how
+often you call it. Use a `Track` when there are more than two keys, or when X and Y need separate timing.
 
 ### 9. Fill a shape with an image (pattern brush)
 
