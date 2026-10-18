@@ -34,6 +34,7 @@ namespace Sr2d64CSport
     /// (it grows with the text; turn it off for a fixed box), five styles (<see cref="LabelStyle"/>). It is not selectable.
     /// </summary>
     [ToolboxBitmap(typeof(SpriteLabel), "SpriteLabel.bmp")]
+    [DefaultEvent("Click")]
     public sealed class SpriteLabel : SpriteControlBase
     {
         protected override AccessibleRole DefaultAccessibleRole => AccessibleRole.StaticText;
@@ -132,6 +133,7 @@ namespace Sr2d64CSport
 
     /// <summary>A thin rule (horizontal or vertical) with an optional centred caption: "── or ──".</summary>
     [ToolboxBitmap(typeof(SpriteSeparator), "SpriteSeparator.bmp")]
+    [DefaultEvent("Click")]
     public sealed class SpriteSeparator : SpriteControlBase
     {
         Orientation _orient = Orientation.Horizontal;
@@ -169,6 +171,7 @@ namespace Sr2d64CSport
     /// <see cref="Clickable"/> - then it toggles and raises <see cref="OnChanged"/>, which makes it a very small toggle.
     /// </summary>
     [ToolboxBitmap(typeof(SpriteLed), "SpriteLed.bmp")]
+    [DefaultEvent("OnChanged")]
     public sealed class SpriteLed : SpriteControlBase
     {
         bool _on, _clickable, _phase = true; int _blink; Color _led = DefaultLed; LedShape _shape; Timer? _timer;
@@ -270,9 +273,22 @@ namespace Sr2d64CSport
     /// </summary>
     [Designer("System.Windows.Forms.Design.ParentControlDesigner, System.Design", typeof(IDesigner))]
     [ToolboxBitmap(typeof(SpritePanel), "SpritePanel.bmp")]
+    [DefaultEvent("Click")]
+    /// <summary>Native buttons placed on an SR2D container. WinForms' Standard style ignores BackColor (the OS paints the
+    /// face), so a Button that is still Standard when it is added becomes Popup: flat until the pointer is over it,
+    /// and it takes BackColor / ForeColor like the other SR2D controls. Changing it later in the designer still works.</summary>
+    internal static class ContainerButtons
+    {
+        internal static void MakePopup(Control? added)
+        {
+            if (added is Button b && b.FlatStyle == FlatStyle.Standard) b.FlatStyle = FlatStyle.Popup;
+        }
+    }
+
     public class SpritePanel : SpriteControlBase
     {
         protected override AccessibleRole DefaultAccessibleRole => AccessibleRole.Client;
+        protected override void OnControlAdded(ControlEventArgs e) { base.OnControlAdded(e); ContainerButtons.MakePopup(e.Control); }
         PanelStyle _style = PanelStyle.Sunken; int _radius = 6;
         public SpritePanel()
         {
@@ -337,6 +353,7 @@ namespace Sr2d64CSport
     /// </summary>
     [Designer("System.Windows.Forms.Design.ParentControlDesigner, System.Design", typeof(IDesigner))]
     [ToolboxBitmap(typeof(SpriteGroupBox), "SpriteGroupBox.bmp")]
+    [DefaultEvent("CheckedChanged")]
     public sealed class SpriteGroupBox : SpritePanel
     {
         protected override AccessibleRole DefaultAccessibleRole => AccessibleRole.Grouping;
@@ -429,6 +446,7 @@ namespace Sr2d64CSport
     /// strip has the focus; the wheel over the strip does too. The rest of the client area is the page (Dock = Fill inside it).
     /// </summary>
     [ToolboxBitmap(typeof(SpriteTabControl), "SpriteTabControl.bmp")]
+    [DefaultEvent("SelectedIndexChanged")]
     public sealed class SpriteTabControl : SpriteControlBase
     {
         protected override AccessibleRole DefaultAccessibleRole => AccessibleRole.PageTabList;
@@ -482,6 +500,7 @@ namespace Sr2d64CSport
         protected override void OnControlAdded(ControlEventArgs e)
         {
             base.OnControlAdded(e);
+            ContainerButtons.MakePopup(e.Control);
             if (e.Control is SpriteTabPage p && !_pages.Contains(p)) { _pages.Add(p); p.Visible = false; if (_sel < 0) SelectedIndex = 0; else { LayoutPages(); Redraw(); } }
         }
         protected override void OnControlRemoved(ControlEventArgs e)
@@ -711,7 +730,7 @@ namespace Sr2d64CSport
         {
             base.OnMouseWheel(e);
             if (!_bar.Visible) return;
-            _scroll = Math.Clamp(_scroll - Math.Sign(e.Delta) * 48, 0, (int)Math.Max(0, _bar.Maximum - _bar.PageSize));
+            _scroll = Math.Clamp(_scroll - Math.Sign(e.Delta) * 48, 0, (int)Math.Max(0, (double)_bar.Maximum - (double)_bar.PageSize));
             _barSync = true; try { _bar.Value = _scroll; } finally { _barSync = false; }
             PerformLayout();
             if (e is HandledMouseEventArgs h) h.Handled = true;

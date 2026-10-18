@@ -16,6 +16,85 @@ Conventions
   DOCS     README / comments only
 
 
+2026-10-18  Decimal values for the range controls; stripe wrap; Interpolate.SplineLerp
+--------------------------------------------------------------------------------------------------------
+CHANGED  Decimal values (breaking, option A): SpriteKnob, SpriteSlider, SpriteWheel, SpriteScrollBar and SpriteProgress
+         use decimal for Value, Minimum, Maximum, Step, ResetValue, ValuePerTurn (knob), PageSize (scroll) and
+         PendingValue; SpriteNumeric.Values and the range controls' Values are decimal[]. SpriteNumeric already had
+         decimal Value / Minimum / Maximum / Step. Compat: a double variable needs a cast ((decimal)x on the way in,
+         (double)c.Value on the way out); a literal like 1.5 needs 1.5M; an int literal still converts.
+FIXED    Stripe animation, WrapOffset: the bars slid past the right end of the strip and the last bar was cut off, or
+         flattened. The strip is now exactly one period of the palette (the bars are spread so the run holds a whole
+         number of palettes), so a bar that leaves one end re-enters at the other with its own colour and skew.
+ADDED    Interpolate.SplineLerp(A, B, startTangent, endTangent, weight): one PointF from A to B with a TangentMode
+         at each end (the same modes as a Track key). The path is the straight line; the tangents set the speed.
+         Overload SplineLerp(A, B, Curve, weight) takes a custom curve from the curve editor.
+ADDED    TangentGraph.DrawTrack labels: round value levels in the gutter left of the area and the key times under it.
+DEMO     Animation test page "Interpolate: one point from A to B with two tangents": the three-line usage, with the
+         curve editor for the custom-curve option. The keyframe lane shows the key values and times.
+DEMO     Animation test: the lane's objects are labelled with their key values and times.
+TESTS    ctlrun: Interpolate.SplineLerp (midpoint, exact ends, Fast/Slow speed, straight path, identity and custom
+         curve), decimal round-trips for knob, slider and progress.
+NOTE     Not checked on Windows: the stripe wrap (WinForms only). Check it in the downloaded workspace.
+
+2026-10-17  Animation: 3ds Max key tangents per side, Bezier / Flat, TangentGraph in the library
+--------------------------------------------------------------------------------------------------------
+CHANGED  cs/Animation.cs: a segment is a cubic Bezier whose two handles come from the Out tangent of the left key and the
+         In tangent of the right key, so each key side has its own tangent as in 3ds Max (a Smooth Out with a Linear In
+         is valid). Before, the left key's mode decided the whole segment and an Auto Out deferred to the In.
+FIXED    Track.Evaluate with Auto (the default) scaled the slopes wrongly when the value range was not 1: linear data 0..200
+         gave 953 at 0.25 instead of 25. Only value ranges of 1 were right, which is why the old checks passed.
+ADDED    TangentMode.Bezier (custom handles: Keyframe.BezierOut / BezierIn, offsets from the key) and TangentMode.Flat
+         (a level handle, the same shape as Smooth). Values 0..6 are unchanged, so the Move test's Op mapping holds.
+ADDED    cs/Animation.Graph.cs: TangentGraph.Draw (one shape, moved out of demo/MoveDemo.cs) and TangentGraph.DrawTrack
+         (a whole Track: curve, keys, playhead).
+ADDED    demo: "Keyframes: a Track with 3ds Max style key tangents" (group Animation keys): five keys, Op = one tangent
+         on every key, Mixed (per-side In and Out) or Bezier, with a code example in the description.
+CHANGED  ctlrun: the track check that expected 0.375 now expects 0.625 (1 - 2u^2 + u^3 at 0.5, the correct value; 0.375
+         was the scale bug). New checks: Auto on 0..200, and the graphs paint pixels.
+CHANGED  StripeStartTangent / StripeEndTangent are per side now (start = Out of the first key, end = In of the last key).
+
+2026-10-17  SpriteForm: colour bar animation, span access to the palette
+--------------------------------------------------------------------------------------------------------
+ADDED    cs/SpriteForm.cs: StripeAnimation (None, Custom, WrapOffset, HueShift, StepBars, BrightnessWave) with
+         StripeAnimationSpeed / StripeAnimationDirection (Left, Right) / StripeAnimationFps / StripeAnimationDepth.
+         StripeStartTangent / StripeEndTangent (TangentMode: start = Out, end = In; via Track.EaseSegment) shape each cycle; StripeCurve takes a custom curve as
+         text: the curve editor's Copy as code output, or point pairs. A timer repaints
+         the bars; None stops it. Custom raises StripeFrame each frame: set e.Colors and those colours are painted.
+ADDED    Curve.TryParse (reads the curve editor's Copy as code text, or point pairs).
+ADDED    StripeColorSpan (read-only ReadOnlySpan<int> over the palette, no copy) and SetStripeColors(ReadOnlySpan<int>),
+         which copies the span and repaints. StripeColorList and its designer editor are unchanged.
+CHANGED  DrawBars: every bar colour comes from one basis array. With StripeAnimation None the bars are the same as before.
+
+2026-10-15  MouseClick works on SR2D controls
+--------------------------------------------------------------------------------------------------------
+FIXED    cs/SpriteControls.cs (SpriteControlBase): MouseClick was never raised. The controls that switch WinForms'
+       StandardClick off (buttons, toggles, radios, text boxes, combo and list boxes) decide clicks themselves, and
+       WinForms raises MouseClick from its own click path. Now MouseClick is raised when the mouse is pressed and released
+       inside the control with the same button. Controls that keep StandardClick are unchanged, so nothing fires twice.
+       Keyboard activation (Space / Enter) does not raise MouseClick, as in WinForms. Click is unchanged.
+TESTS    tests/cs/ctlrun/Program.cs, Fake.cs: MouseClick on a button (with Click), a release outside, a text box.
+
+
+2026-10-15  native buttons on SR2D containers get FlatStyle.Popup
+--------------------------------------------------------------------------------------------------------
+CHANGED  cs/SpriteControls.Static.cs (SpritePanel, SpriteGroupBox, SpriteTabControl), cs/SpriteForm.cs: a System.Windows.Forms.Button
+       added to one of these containers with FlatStyle.Standard becomes FlatStyle.Popup. Standard ignores BackColor
+       (the OS paints the face); Popup is flat until hovered and takes BackColor / ForeColor. Other FlatStyle values are kept.
+       compat: buttons added in code or by the designer now show Popup; set FlatStyle back to Standard to restore the old face.
+TESTS    tests/cs/ctlrun/Program.cs: checks the Popup default on SpritePanel and SpriteGroupBox.
+
+
+2026-10-15  designer: double-click creates the expected event
+--------------------------------------------------------------------------------------------------------
+CHANGED  every control has a [DefaultEvent]: SpriteButton Click, SpriteToggle / SpriteRadio / SpriteGroupBox CheckedChanged,
+       SpriteSlider / SpriteKnob / SpriteWheel / SpriteScrollBar / SpriteNumeric / SpriteColorPicker ValueChanged,
+       SpriteTextBox Committed, SpriteCombo / SpriteListBox / SpriteTabControl SelectedIndexChanged, SpriteLed OnChanged,
+       VoxelBox VoxelClick. Controls without an event of their own (SpriteProgress, SpriteLabel, SpriteSeparator, SpritePanel,
+       SpriteCurveEditor, SpriteTextView) use the inherited Click. SpriteBox keeps Render.
+       compat: none (attribute only).
+
+
 2026-10-15  Hairline / Segmented rework; viewer members hidden on controls
 --------------------------------------------------------------------------------------------------------
 CHANGED  cs/SpriteControls.Buttons.cs, cs/SpriteControls.cs: the Hairline and Segmented looks of SpriteButton, SpriteSlider and

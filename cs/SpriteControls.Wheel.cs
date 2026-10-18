@@ -21,6 +21,7 @@ namespace Sr2d64CSport
     /// pop-up modes the double-click reset of the base class moves to Ctrl + double click.</para>
     /// </summary>
     [ToolboxBitmap(typeof(SpriteWheel), "SpriteWheel.bmp")]
+    [DefaultEvent("ValueChanged")]
     public sealed class SpriteWheel : SpriteRangeControl
     {
         protected override AccessibleRole DefaultAccessibleRole => AccessibleRole.Slider;
@@ -42,7 +43,7 @@ namespace Sr2d64CSport
         public bool WrapMouse { get => _wrapMouse; set => _wrapMouse = value; }
 
         [Category("Behavior"), DefaultValue(false), Description("Circular range: past Maximum comes Minimum again (Maximum itself is the same position as Minimum - use 0..360 for degrees, 0..24 for hours).")]
-        public bool WrapAround { get => _wrapAround; set { _wrapAround = value; SetValue(Value, false); Redraw();   /* re-clamp / re-wrap */ } }
+        public bool WrapAround { get => _wrapAround; set { _wrapAround = value; SetValue(DblValue, false); Redraw();   /* re-clamp / re-wrap */ } }
         protected override bool Wraps => _wrapAround;
 
         [Category("Appearance"), DefaultValue(true), Description("Print the values on the drum (one label per step, or per few steps when they would overlap).")]
@@ -133,15 +134,15 @@ namespace Sr2d64CSport
             // side) under the centre line - drag up / left = larger (Reversed flips it, together with the print direction)
             double dir = _reversed ? 1 : -1;
             double prev = _acc;
-            _acc += dir * d / px * Step * (fine ? 0.1 : 1.0);
-            if (!_wrapAround) _acc = Math.Clamp(_acc, Minimum, Maximum);      // no dead travel past an end
+            _acc += dir * d / px * DblStep * (fine ? 0.1 : 1.0);
+            if (!_wrapAround) _acc = Math.Clamp(_acc, DblMin, DblMax);      // no dead travel past an end
             if (_wrapMouse) { var np = WrapPointerOnScreen(p, !Hz); if (np != p) _last = np; }
             if (_acc != prev) RepaintRequested = true;   // the drum follows _acc even when the clamped value stopped changing (the base repaints on the flag)
             return _acc;
         }
         protected override void OnValueApplied(double oldValue)
         {
-            if (!IsDragging || IsCommittingDrag) _acc = Value;
+            if (!IsDragging || IsCommittingDrag) _acc = DblValue;
             RefreshField();
         }
         protected override void OnPendingChanged() => RefreshField();
@@ -156,7 +157,7 @@ namespace Sr2d64CSport
         {
             if (e.Button == MouseButtons.Left && (_edit == WheelEdit.DoubleClick || _edit == WheelEdit.Click))
             {
-                if ((ModifierKeys & Keys.Control) != 0) { CloseField(false); SetValue(ResetValue, true); }
+                if ((ModifierKeys & Keys.Control) != 0) { CloseField(false); SetValue((double)ResetValue, true); }
                 else OpenField();
                 return;
             }
@@ -235,10 +236,10 @@ namespace Sr2d64CSport
         /// <summary>Steps the value (Up / Down / wheel in the field); with a discrete <see cref="Values"/> list, one entry per step.</summary>
         public void Nudge(int steps, bool fine = false)
         {
-            var list = Values;
+            var list = DblValues;
             if (list is { Length: > 0 } && steps != 0)                                 // one list entry per step (never stuck between entries)
             {
-                int dir = Math.Sign(steps); double v = Value;
+                int dir = Math.Sign(steps); double v = DblValue;
                 for (int i = 0; i < Math.Abs(steps); i++)
                 {
                     double next = Discrete.Next(list, v, dir);
@@ -248,7 +249,7 @@ namespace Sr2d64CSport
                 SetValue(v, true);
                 return;
             }
-            SetValue(Value + steps * (fine ? Step / 10 : Step), true);
+            SetValue(DblValue + steps * (fine ? DblStep / 10 : DblStep), true);
         }
 
         // ------------------------------------------------------------------ paint
@@ -293,7 +294,7 @@ namespace Sr2d64CSport
                 else { s.FillRect(band.Left, drum.Top, 1, len, seam); s.FillRect(band.Right - 1, drum.Top, 1, len, seam); s.FillRect(drum.Left + 1, drum.Top, 1, len, Argb(metalHi, 120), SR2D.LineOp.AlphaBlend); }
             }
             // 2. ridges and labels: one per step index around the shown value; wrap-around shows the range continuing
-            double stepIdx = (Shown - Minimum) / Step;                                           // fractional index of the shown value
+            double stepIdx = (Shown - DblMin) / DblStep;                                           // fractional index of the shown value
             int textH = TextH(ts);
             string fmt = Fmt;
             int labelLen = LabelLen(ts);
@@ -301,7 +302,7 @@ namespace Sr2d64CSport
             int window = Math.Max(pitch, (hz ? T.Measure(ValueText, ts).Width : textH) + 4);   // the read-out window
             int span = (int)Math.Ceiling(Math.PI / 2 / angPerStep) + 1;
             int i0 = (int)Math.Floor(stepIdx) - span, i1 = (int)Math.Ceiling(stepIdx) + span;
-            double maxIdx = (Maximum - Minimum) / Step;
+            double maxIdx = (DblMax - DblMin) / DblStep;
             int dir = _reversed ? -1 : 1;                                                     // +1: larger values further down / right
             int grooveHi = Mix(BackColor, ThumbColor, 0.45f);
             float across0 = hz ? band.Top + 1 : band.Left + 1, across1 = hz ? band.Bottom - 1 : band.Right - 1;
@@ -309,8 +310,8 @@ namespace Sr2d64CSport
             {
                 double off = (i - stepIdx) * angPerStep;                                          // surface angle from the centre line
                 if (Math.Abs(off) >= Math.PI / 2 - 1e-3) continue;
-                int idx = i; double v = Minimum + i * Step;
-                if (_wrapAround) { double n = Math.Floor(i / maxIdx); idx = (int)Math.Round(i - n * maxIdx); v = Minimum + (i - n * maxIdx) * Step; if (idx >= (int)Math.Round(maxIdx)) idx = 0; }
+                int idx = i; double v = DblMin + i * DblStep;
+                if (_wrapAround) { double n = Math.Floor(i / maxIdx); idx = (int)Math.Round(i - n * maxIdx); v = DblMin + (i - n * maxIdx) * DblStep; if (idx >= (int)Math.Round(maxIdx)) idx = 0; }
                 else if (i < 0 || i > maxIdx + 1e-9) continue;
                 float cos = (float)Math.Cos(off), q = c0 + (float)Math.Sin(off) * R * dir;
                 if (_look == ControlLook.Segmented)

@@ -23,6 +23,7 @@ namespace Sr2d64CSport
     //     using var dlg = new SpriteColorDialog { Value = current };
     //     if (dlg.ShowDialog(this) == DialogResult.OK) current = dlg.Value;
     //
+    [DefaultEvent("ValueChanged")]
     public sealed class SpriteColorPicker : SpriteControlBase
     {
         float _h;                                   // 0..<360

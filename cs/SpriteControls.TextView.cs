@@ -29,6 +29,7 @@ namespace Sr2d64CSport
     /// pixel font (monospace) unless a TextFont / TextFontFamily is set.
     /// </summary>
     [ToolboxBitmap(typeof(SpriteTextView), "SpriteTextView.bmp")]
+    [DefaultEvent("Click")]
     public sealed class SpriteTextView : SpriteControlBase
     {
         protected override AccessibleRole DefaultAccessibleRole => AccessibleRole.Text;

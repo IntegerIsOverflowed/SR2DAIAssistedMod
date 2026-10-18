@@ -9,12 +9,14 @@
 // The mouse wheel zooms the VALUE axis anchored at the bottom (zero) line and the MIDDLE button pans
 // up / down, so a curve whose Clamp01 is off can be shaped above 1 and below 0 (overshoot) - while it is
 // on, the values stay inside 0..1 and the plot says so. Help lives in the menu (drawn over the plot).
+using System.ComponentModel;
 using System;
 using System.Drawing;
 using System.Windows.Forms;
 
 namespace Sr2d64CSport
 {
+    [DefaultEvent("Click")]
     public sealed class SpriteCurveEditor : SpriteControlBase
     {
         protected override AccessibleRole DefaultAccessibleRole => AccessibleRole.Graphic;

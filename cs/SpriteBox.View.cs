@@ -298,7 +298,7 @@ namespace Sr2d64CSport
         SpriteScrollBar MakeBar(Orientation o)
         {
             var b = new SpriteScrollBar { Orientation = o, Step = 32, BackColor = SpriteControlBase.DefaultBack, Visible = false };
-            b.ValueChanged += (_, _) => { if (_barSync || !Viewed) return; StopSlide(); _view.SetScroll(o == Orientation.Horizontal, b.Value); _composedValid = false; ViewChanged?.Invoke(this, EventArgs.Empty); Invalidate(); };
+            b.ValueChanged += (_, _) => { if (_barSync || !Viewed) return; StopSlide(); _view.SetScroll(o == Orientation.Horizontal, (double)b.Value); _composedValid = false; ViewChanged?.Invoke(this, EventArgs.Empty); Invalidate(); };
             Controls.Add(b);
             return b;
         }
@@ -315,8 +315,8 @@ namespace Sr2d64CSport
             _barSync = true;
             try
             {
-                if (HBarShown) { var i = _view.HorizontalScroll; _hbar!.Minimum = 0; _hbar.Maximum = i.Maximum; _hbar.PageSize = i.Page; _hbar.Value = i.Value; }
-                if (VBarShown) { var i = _view.VerticalScroll; _vbar!.Minimum = 0; _vbar.Maximum = i.Maximum; _vbar.PageSize = i.Page; _vbar.Value = i.Value; }
+                if (HBarShown) { var i = _view.HorizontalScroll; _hbar!.Minimum = 0; _hbar.Maximum = (decimal)i.Maximum; _hbar.PageSize = (decimal)i.Page; _hbar.Value = (decimal)i.Value; }
+                if (VBarShown) { var i = _view.VerticalScroll; _vbar!.Minimum = 0; _vbar.Maximum = (decimal)i.Maximum; _vbar.PageSize = (decimal)i.Page; _vbar.Value = (decimal)i.Value; }
             }
             finally { _barSync = false; }
         }

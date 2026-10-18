@@ -172,6 +172,22 @@ namespace Sr2d64CSport
             return best;
         }
 
+        /// <summary>Reads a curve from text: the <c>Copy as code</c> snippet of <see cref="SpriteCurveEditor"/> (points and
+        /// <c>SetMode</c> lines, with <c>Clamp01 = false</c> when it was off), or plain point pairs like <c>0,0 0.5,0.2 1,1</c>
+        /// (all points Auto). Returns false when fewer than two points are found; <paramref name="curve"/> is then the diagonal.</summary>
+        public static bool TryParse(string? text, out Curve curve)
+        {
+            curve = new Curve();
+            if (!SpriteCurveEditor.TryParsePoints(text, out var pts)) return false;
+            var modes = new CurvePointMode[pts.Length];
+            foreach (System.Text.RegularExpressions.Match m in System.Text.RegularExpressions.Regex.Matches(text!, @"SetMode\(\s*(\d+)\s*,\s*CurvePointMode\.(\w+)\s*\)"))
+                if (int.TryParse(m.Groups[1].Value, out int i) && i >= 0 && i < modes.Length && Enum.TryParse(m.Groups[2].Value, out CurvePointMode md))
+                    modes[i] = md;
+            curve.Clamp01 = !text!.Contains("Clamp01 = false");
+            curve.Set(pts, modes);
+            return true;
+        }
+
         /// <summary>The curve value at u (0..1): monotone cubic through the points; clamped to 0..1 only when <see cref="Clamp01"/> (a curve with overshoot goes past 1 and comes back).</summary>
         public double Evaluate(double u)
         {

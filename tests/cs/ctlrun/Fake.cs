@@ -11,6 +11,9 @@ namespace System.Windows.Forms {
   public class KeyPressEventArgs : EventArgs { public char KeyChar; public bool Handled; public KeyPressEventArgs(char c) { KeyChar = c; } }
   public class LayoutEventArgs : EventArgs { public Control? AffectedControl; public string? AffectedProperty; public LayoutEventArgs(Control? c, string? p) { AffectedControl = c; AffectedProperty = p; } }
   public class ControlEventArgs : EventArgs { public Control Control; public ControlEventArgs(Control c) { Control = c; } }
+  public delegate void MouseEventHandler(object? sender, MouseEventArgs e);
+  public enum FlatStyle { Flat, Popup, Standard, System }
+  public class Button : Control { public FlatStyle FlatStyle { get; set; } = FlatStyle.Standard; }
   public struct Padding { public int Left, Top, Right, Bottom; public Padding(int all) { Left = Top = Right = Bottom = all; } public Padding(int l, int t, int r, int b) { Left = l; Top = t; Right = r; Bottom = b; } public int Horizontal => Left + Right; public int Vertical => Top + Bottom; public static readonly Padding Empty = new Padding(0); }
   public static class Clipboard { static string _t = ""; public static void SetText(string t) => _t = t; public static bool ContainsText() => _t.Length > 0; public static string GetText() => _t; }
   [Flags] public enum ControlStyles { ContainerControl = 1, StandardClick = 0x100, StandardDoubleClick = 0x1000, Selectable = 0x200, UserPaint = 2, AllPaintingInWmPaint = 0x2000, Opaque = 4, ResizeRedraw = 0x40, OptimizedDoubleBuffer = 0x20000, DoubleBuffer = 0x10000 }
@@ -60,7 +63,10 @@ namespace System.Windows.Forms {
     int _suspend; public void SuspendLayout() { _suspend++; } public void ResumeLayout(bool perform) { if (_suspend > 0) _suspend--; if (perform) PerformLayout(); }
     protected virtual void OnLayout(LayoutEventArgs e) { }
     public int DeviceDpi => 96;
-    protected void SetStyle(ControlStyles s, bool v) { }
+    ControlStyles _styles = ControlStyles.StandardClick | ControlStyles.StandardDoubleClick;   // WinForms: both on by default
+    protected void SetStyle(ControlStyles s, bool v) { if (v) _styles |= s; else _styles &= ~s; }
+    protected bool GetStyle(ControlStyles s) => (_styles & s) == s;
+    public event MouseEventHandler? MouseClick; protected virtual void OnMouseClick(MouseEventArgs e) => MouseClick?.Invoke(this, e);
     public void Key(Keys k) { OnKeyDown(new KeyEventArgs(k)); OnKeyUp(new KeyEventArgs(k)); }
     public void DoubleClick(int x, int y) => OnMouseDoubleClick(new MouseEventArgs(MouseButtons.Left, 2, x, y, 0));
     public void Wheel(int x, int y, int delta) => OnMouseWheel(new MouseEventArgs(MouseButtons.None, 0, x, y, delta));

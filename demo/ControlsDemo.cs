@@ -35,11 +35,11 @@ namespace Sr2d64CSport
 
             // 1. angular knob: the pointer IS the value (270-degree arc)
             var angle = new SpriteKnob { Text = "Angle", Minimum = 0, Maximum = 360, Value = 0, Step = 1, Unit = "\u00b0", Size = new Size(104, 132), Margin = new Padding(4) };
-            angle.ValueChanged += (s, _) => { AngleDeg = angle.Value; Bump("Angle knob (Angular, Arc)"); };
+            angle.ValueChanged += (s, _) => { AngleDeg = (double)angle.Value; Bump("Angle knob (Angular, Arc)"); };
 
             // 2. the configurable knob: drag mode x gauge x handle x turns - every combination is one control
             var offset = new SpriteKnob { Text = "Offset", Minimum = -100, Maximum = 100, Value = 0, Step = 1, DragMode = KnobDragMode.Endless, Gauge = KnobGauge.Spiral, Turns = 4, Unit = " px", AccentColor = Color.FromArgb(0xFF, 0x90, 0x30), Size = new Size(136, 168), Margin = new Padding(4) };
-            offset.ValueChanged += (s, _) => { Offset = offset.Value; Bump($"Offset knob ({offset.DragMode}, {offset.Gauge}, {offset.Pointer} pointer, {offset.Turns} turns)"); };
+            offset.ValueChanged += (s, _) => { Offset = (double)offset.Value; Bump($"Offset knob ({offset.DragMode}, {offset.Gauge}, {offset.Pointer} pointer, {offset.Turns} turns)"); };
             var opts = new TableLayoutPanel { Width = 246, Height = 168, ColumnCount = 3, RowCount = 6, Margin = new Padding(0, 4, 4, 4), BackColor = Color.Transparent };
             opts.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 82)); opts.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 82)); opts.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 82));
             Label Head(string t) => new Label { Text = t, ForeColor = Color.Gainsboro, Font = new Font(SystemFonts.DefaultFont, FontStyle.Bold), AutoSize = true, Margin = new Padding(0, 2, 0, 0) };
@@ -68,14 +68,14 @@ namespace Sr2d64CSport
 
             // 3. a bigger-font knob: same control, TextScale 2 -> caption / value at 10x14 px; Circle gauge, Angular
             var blend = new SpriteKnob { Text = "Blend", Minimum = 0, Maximum = 255, Value = 128, Step = 5, ResetValue = 128, TextScale = 2, Gauge = KnobGauge.Circle, AccentColor = Color.FromArgb(0x60, 0xE0, 0x80), Size = new Size(124, 160), Margin = new Padding(4) };
-            blend.ValueChanged += (s, _) => { Blend = blend.Value; Bump("Blend knob (Angular, Circle gauge, TextScale 2)"); };
+            blend.ValueChanged += (s, _) => { Blend = (double)blend.Value; Bump("Blend knob (Angular, Circle gauge, TextScale 2)"); };
 
             // 4. small knobs: 52 px with value, 40 px bare endless jog wheel - the same control scaled down (TextScale auto -> 1)
             var small = new TableLayoutPanel { Width = 58, Height = 168, ColumnCount = 1, RowCount = 3, Margin = new Padding(4), BackColor = Color.Transparent };
             small.RowStyles.Add(new RowStyle(SizeType.Absolute, 68)); small.RowStyles.Add(new RowStyle(SizeType.Absolute, 48)); small.RowStyles.Add(new RowStyle(SizeType.Absolute, 52));
-            var tiny1 = new SpriteKnob { Minimum = 0, Maximum = 1, Value = 0.5, Step = 0.05, Decimals = 2, Size = new Size(52, 66), Margin = new Padding(0) };
-            var tiny2 = new SpriteKnob { Minimum = 0, Maximum = 1, Value = 0.5, Step = 0.05, ShowValue = false, DragMode = KnobDragMode.Endless, Pointer = KnobPointer.Infinite, Gauge = KnobGauge.Circle, Turns = 2, Size = new Size(40, 40), Margin = new Padding(6, 6, 0, 0) };
-            var tiny3 = new SpriteKnob { Minimum = 0, Maximum = 1, Value = 0.3, Step = 0.05, ShowValue = false, Gauge = KnobGauge.Spiral, Turns = 3, Size = new Size(48, 48), Margin = new Padding(2, 2, 0, 0) };
+            var tiny1 = new SpriteKnob { Minimum = 0, Maximum = 1, Value = 0.5M, Step = 0.05M, Decimals = 2, Size = new Size(52, 66), Margin = new Padding(0) };
+            var tiny2 = new SpriteKnob { Minimum = 0, Maximum = 1, Value = 0.5M, Step = 0.05M, ShowValue = false, DragMode = KnobDragMode.Endless, Pointer = KnobPointer.Infinite, Gauge = KnobGauge.Circle, Turns = 2, Size = new Size(40, 40), Margin = new Padding(6, 6, 0, 0) };
+            var tiny3 = new SpriteKnob { Minimum = 0, Maximum = 1, Value = 0.3M, Step = 0.05M, ShowValue = false, Gauge = KnobGauge.Spiral, Turns = 3, Size = new Size(48, 48), Margin = new Padding(2, 2, 0, 0) };
             tiny1.ValueChanged += (s, _) => Bump("small knob 52 px (Arc)");
             tiny2.ValueChanged += (s, _) => Bump("tiny jog wheel 40 px (Endless, Infinite pointer, Circle gauge, 2 turns)");
             tiny3.ValueChanged += (s, _) => Bump("tiny spiral knob 48 px (Angular, Spiral 3 coils)");
@@ -90,7 +90,7 @@ namespace Sr2d64CSport
             column.RowStyles.Add(new RowStyle(SizeType.Absolute, 30));
             column.RowStyles.Add(new RowStyle(SizeType.Absolute, 40));
             var scale = new SpriteSlider { Text = "Scale (SpriteSlider)", Minimum = 10, Maximum = 400, Value = 100, Step = 5, Unit = " %", Ticks = 8, ResetValue = 100, TextScale = 2, Dock = DockStyle.Fill, Margin = new Padding(0) };
-            scale.ValueChanged += (s, _) => { ScalePct = scale.Value; Bump("Scale slider"); };
+            scale.ValueChanged += (s, _) => { ScalePct = (double)scale.Value; Bump("Scale slider"); };
             var native = new TrackBar { Minimum = 10, Maximum = 400, Value = 100, TickFrequency = 50, Dock = DockStyle.Fill, Margin = new Padding(0), AutoSize = false, Height = 36 };
             var nativeLbl = new Label { Text = "same value on a native TrackBar (compare a quick drag):", Font = new Font(SystemFonts.DefaultFont.FontFamily, 7.5f), ForeColor = Color.Gainsboro, BackColor = Color.Transparent, AutoSize = false, Dock = DockStyle.Fill, TextAlign = ContentAlignment.BottomLeft, Margin = new Padding(0) };
             bool sync = false;
@@ -100,7 +100,7 @@ namespace Sr2d64CSport
 
             // 6. vertical slider
             var brite = new SpriteSlider { Text = "Brite", Orientation = Orientation.Vertical, Minimum = 0, Maximum = 200, Value = 100, Step = 5, Unit = "%", Ticks = 4, ResetValue = 100, AccentColor = Color.FromArgb(0xE0, 0x60, 0xC0), Size = new Size(56, 128), Margin = new Padding(4) };
-            brite.ValueChanged += (s, _) => { Brite = brite.Value; Bump("Brite slider (vertical)"); };
+            brite.ValueChanged += (s, _) => { Brite = (double)brite.Value; Bump("Brite slider (vertical)"); };
 
             // 7. a bipolar slider (fill from zero) and a disabled one, for the looks
             var bip = new SpriteSlider { Text = "Bipolar (fill from 0)", Minimum = -50, Maximum = 50, Value = 20, Step = 1, Bipolar = true, Ticks = 10, Size = new Size(210, 50), Margin = new Padding(4) };
@@ -111,14 +111,14 @@ namespace Sr2d64CSport
 
             // 8. wheels: a vertical drum (posterise level, SR2D numeric field beside it), a horizontal wrap-around one (hue,
             //    0..360, double-click pops the field up) and a third in the old flat look whose field opens on a plain click
-            var level = new SpriteWheel { Text = "Blur", Minimum = 1, Maximum = 8, Value = Level, Step = 1, Edit = WheelEdit.Beside, Size = new Size(112, 128), Margin = new Padding(4), AccentColor = Color.FromArgb(0x60, 0xE0, 0x80) };
-            level.ValueChanged += (s, _) => { Level = level.Value; Bump("Blur wheel (vertical, Edit = Beside)"); };
-            var hue = new SpriteWheel { Text = "Hue (wraps 0..360, mouse wraps, dbl-click edits)", Orientation = Orientation.Horizontal, Minimum = 0, Maximum = 360, Value = Hue, Step = 5, WrapAround = true, Edit = WheelEdit.DoubleClick, Unit = "\u00b0", Size = new Size(300, 50), Margin = new Padding(4, 4, 4, 0), AccentColor = Color.FromArgb(0xFF, 0x90, 0x30) };
-            hue.ValueChanged += (s, _) => { Hue = hue.Value; Bump("Hue wheel (horizontal, WrapAround, WrapMouse, Edit = DoubleClick)"); };
-            var hue2 = new SpriteWheel { Text = "same, Style = Flat, click edits, WrapMouse off", Orientation = Orientation.Horizontal, Minimum = 0, Maximum = 360, Value = Hue, Step = 5, WrapAround = true, WrapMouse = false, Style = WheelStyle.Flat, Edit = WheelEdit.Click, Unit = "\u00b0", Size = new Size(300, 50), Margin = new Padding(4, 2, 4, 0), AccentColor = Color.FromArgb(0xFF, 0x90, 0x30) };
+            var level = new SpriteWheel { Text = "Blur", Minimum = 1, Maximum = 8, Value = (decimal)Level, Step = 1, Edit = WheelEdit.Beside, Size = new Size(112, 128), Margin = new Padding(4), AccentColor = Color.FromArgb(0x60, 0xE0, 0x80) };
+            level.ValueChanged += (s, _) => { Level = (double)level.Value; Bump("Blur wheel (vertical, Edit = Beside)"); };
+            var hue = new SpriteWheel { Text = "Hue (wraps 0..360, mouse wraps, dbl-click edits)", Orientation = Orientation.Horizontal, Minimum = 0, Maximum = 360, Value = (decimal)Hue, Step = 5, WrapAround = true, Edit = WheelEdit.DoubleClick, Unit = "\u00b0", Size = new Size(300, 50), Margin = new Padding(4, 4, 4, 0), AccentColor = Color.FromArgb(0xFF, 0x90, 0x30) };
+            hue.ValueChanged += (s, _) => { Hue = (double)hue.Value; Bump("Hue wheel (horizontal, WrapAround, WrapMouse, Edit = DoubleClick)"); };
+            var hue2 = new SpriteWheel { Text = "same, Style = Flat, click edits, WrapMouse off", Orientation = Orientation.Horizontal, Minimum = 0, Maximum = 360, Value = (decimal)Hue, Step = 5, WrapAround = true, WrapMouse = false, Style = WheelStyle.Flat, Edit = WheelEdit.Click, Unit = "\u00b0", Size = new Size(300, 50), Margin = new Padding(4, 2, 4, 0), AccentColor = Color.FromArgb(0xFF, 0x90, 0x30) };
             bool hsync = false;
             hue.ValueChanged += (s, _) => { if (hsync) return; hsync = true; hue2.Value = hue.Value; hsync = false; };
-            hue2.ValueChanged += (s, _) => { if (hsync) return; hsync = true; hue.Value = hue2.Value; hsync = false; Hue = hue2.Value; Bump("Hue wheel 2 (Flat, Edit = Click)"); };
+            hue2.ValueChanged += (s, _) => { if (hsync) return; hsync = true; hue.Value = hue2.Value; hsync = false; Hue = (double)hue2.Value; Bump("Hue wheel 2 (Flat, Edit = Click)"); };
             var wheels = new FlowLayoutPanel { FlowDirection = FlowDirection.TopDown, AutoSize = true, Margin = new Padding(0), BackColor = Color.Transparent };
             wheels.Controls.Add(hue); wheels.Controls.Add(hue2);
 
@@ -190,7 +190,7 @@ namespace Sr2d64CSport
             var timer = new Timer { Interval = 20 };
             void Show()
             {
-                foreach (var b in bars) b.Value = Progress;
+                foreach (var b in bars) b.Value = (decimal)Progress;
                 pMq.Text = Running ? "working\u2026" : Progress >= 100 ? "done" : Progress > 0 ? "paused" : "idle";
                 if (!Running) { pMq.Redraw(); pRingMq.Redraw(); }
                 start.Text = Progress >= 100 ? "Again" : Running ? "Running" : Progress > 0 ? "Resume" : "Start";
@@ -429,10 +429,10 @@ namespace Sr2d64CSport
             var ledShadow = new SpriteLed { Text = "Drop shadow (click)", Clickable = true, On = Shadow, Shape = LedShape.Square, LedColor = Color.FromArgb(0xFF, 0x90, 0x30), Width = 220 };
             var ledBusy = new SpriteLed { Text = "Blinking bar LED (always on)", On = true, Blink = 600, Shape = LedShape.Bar, LedColor = Color.FromArgb(0xE0, 0x60, 0xC0), Width = 220 };
             var sep = new SpriteSeparator { Text = "tint", Width = 220 };
-            var tintSlider = new SpriteSlider { Text = "Hue", Minimum = 0, Maximum = 360, Value = Tint, Size = new Size(220, 44), ShowValue = true, Decimals = 0, Unit = "\u00b0" };
+            var tintSlider = new SpriteSlider { Text = "Hue", Minimum = 0, Maximum = 360, Value = (decimal)Tint, Size = new Size(220, 44), ShowValue = true, Decimals = 0, Unit = "\u00b0" };
             ledTint.OnChanged += (_, _) => { TintOn = ledTint.On; Bump("LED tint " + ledTint.On); };
             ledShadow.OnChanged += (_, _) => { Shadow = ledShadow.On; Bump("LED shadow " + ledShadow.On); };
-            tintSlider.ValueChanged += (_, _) => { Tint = tintSlider.Value; Bump("Hue slider"); };
+            tintSlider.ValueChanged += (_, _) => { Tint = (double)tintSlider.Value; Bump("Hue slider"); };
             flow.Controls.AddRange(new Control[] { ledTint, ledShadow, ledBusy, sep, tintSlider });
             panel.Controls.Add(flow);
             pLayout.Controls.Add(panel);
@@ -541,10 +541,10 @@ namespace Sr2d64CSport
                 box.RowStyles.Add(new RowStyle(SizeType.Absolute, 20)); box.RowStyles.Add(new RowStyle(SizeType.Absolute, 124)); box.RowStyles.Add(new RowStyle(SizeType.Absolute, 30));
                 var head = new Label { Text = names[i], ForeColor = Color.Gainsboro, Font = new Font(SystemFonts.DefaultFont, FontStyle.Bold), AutoSize = true, Margin = new Padding(4, 3, 0, 0) };
                 box.Controls.Add(head, 0, 0); box.SetColumnSpan(head, 2);
-                var hue = new SpriteKnob { Text = "Hue", Minimum = 0, Maximum = 360, Value = lamp.Hue, Step = 5, Unit = "\u00b0", Gauge = KnobGauge.Circle, Size = new Size(108, 122), Margin = new Padding(4, 0, 4, 0), AccentColor = Color.FromArgb(lamp.Color) };
+                var hue = new SpriteKnob { Text = "Hue", Minimum = 0, Maximum = 360, Value = (decimal)lamp.Hue, Step = 5, Unit = "\u00b0", Gauge = KnobGauge.Circle, Size = new Size(108, 122), Margin = new Padding(4, 0, 4, 0), AccentColor = Color.FromArgb(lamp.Color) };
                 var str = new SpriteKnob { Text = "Strength", Minimum = 0, Maximum = 15, Value = lamp.Strength, Step = 1, Unit = "", Size = new Size(108, 122), Margin = new Padding(4, 0, 4, 0), AccentColor = Color.FromArgb(0xFF, 0xD0, 0x70) };
                 var on = new SpriteToggle { Text = "Lamp on", Style = ToggleStyle.Switch, Checked = lamp.On, Size = new Size(200, 26), Margin = new Padding(4, 2, 4, 0), AccentColor = Color.FromArgb(0x60, 0xE0, 0x80) };
-                hue.ValueChanged += (_, _) => { lamp.Hue = hue.Value; hue.AccentColor = Color.FromArgb(lamp.Color); };
+                hue.ValueChanged += (_, _) => { lamp.Hue = (double)hue.Value; hue.AccentColor = Color.FromArgb(lamp.Color); };
                 str.ValueChanged += (_, _) => lamp.Strength = (int)str.Value;
                 on.CheckedChanged += (_, _) => { lamp.On = on.Checked; hue.Enabled = str.Enabled = on.Checked; };
                 box.Controls.Add(hue, 0, 1); box.Controls.Add(str, 1, 1); box.Controls.Add(on, 0, 2); box.SetColumnSpan(on, 2);
@@ -553,10 +553,10 @@ namespace Sr2d64CSport
             var global = new FlowLayoutPanel { FlowDirection = FlowDirection.TopDown, Width = 300, Height = 176, WrapContents = false, Margin = new Padding(4), BackColor = Color.Transparent };
             var reach = new SpriteSlider { Text = "Light reach (cells for a level-15 light)", Minimum = 15, Maximum = 120, Value = Reach, Step = 1, Ticks = 7, ResetValue = 15, Size = new Size(290, 50), Margin = new Padding(0, 0, 0, 4) };
             var sky = new SpriteSlider { Text = "Sky (ambient) level 0..15", Minimum = 0, Maximum = 15, Value = Sky, Step = 1, Ticks = 15, ResetValue = 2, Size = new Size(290, 50), Margin = new Padding(0, 0, 0, 4), AccentColor = Color.FromArgb(0x90, 0xC0, 0xFF) };
-            var energy = new SpriteSlider { Text = "Lamp energy (on-screen multiplier, lamps only)", Minimum = 0.1, Maximum = 4, Value = LampEnergy, Step = 0.1, Decimals = 1, Unit = "x", Ticks = 8, ResetValue = 1.5, Size = new Size(290, 50), Margin = new Padding(0), AccentColor = Color.FromArgb(0xFF, 0x90, 0x30) };
+            var energy = new SpriteSlider { Text = "Lamp energy (on-screen multiplier, lamps only)", Minimum = 0.1M, Maximum = 4, Value = (decimal)LampEnergy, Step = 0.1M, Decimals = 1, Unit = "x", Ticks = 8, ResetValue = 1.5M, Size = new Size(290, 50), Margin = new Padding(0), AccentColor = Color.FromArgb(0xFF, 0x90, 0x30) };
             reach.ValueChanged += (_, _) => Reach = (int)reach.Value;
             sky.ValueChanged += (_, _) => Sky = (int)sky.Value;
-            energy.ValueChanged += (_, _) => LampEnergy = energy.Value;
+            energy.ValueChanged += (_, _) => LampEnergy = (double)energy.Value;
             global.Controls.AddRange(new Control[] { reach, sky, energy });
             strip.Controls.Add(global);
             return strip;
@@ -603,10 +603,10 @@ namespace Sr2d64CSport
             }
             col.Controls.Add(modes);
             col.Controls.Add(Head("Zoom (multiplier on the mode; Ctrl + wheel / magnifier drag)"));
-            var zoom = new SpriteSlider { Text = "log2 zoom", Minimum = -6, Maximum = 6, Value = 0, Step = 0.25, Decimals = 2, Ticks = 12, ResetValue = 0, Size = new Size(316, 46), Margin = new Padding(0) };
+            var zoom = new SpriteSlider { Text = "log2 zoom", Minimum = -6, Maximum = 6, Value = 0, Step = 0.25M, Decimals = 2, Ticks = 12, ResetValue = 0, Size = new Size(316, 46), Margin = new Padding(0) };
             bool zsync = false;
-            zoom.ValueChanged += (_, _) => { if (zsync) return; zsync = true; box.Zoom = Math.Pow(2, zoom.Value); zsync = false; };
-            box.ViewChanged += (_, _) => { if (zsync) return; zsync = true; zoom.Value = Math.Log2(box.Zoom); zsync = false; };
+            zoom.ValueChanged += (_, _) => { if (zsync) return; zsync = true; box.Zoom = Math.Pow(2, (double)zoom.Value); zsync = false; };
+            box.ViewChanged += (_, _) => { if (zsync) return; zsync = true; zoom.Value = (decimal)Math.Log2(box.Zoom); zsync = false; };
             col.Controls.Add(zoom);
             var btns = new FlowLayoutPanel { AutoSize = true, Width = 320, Margin = new Padding(0, 2, 0, 0), BackColor = Color.Transparent };
             void Btn(string t, Action a) { var b = new SpriteButton { Text = t, Size = new Size(76, 26), Margin = new Padding(0, 0, 3, 3) }; b.Click += (_, _) => a(); btns.Controls.Add(b); }
@@ -632,7 +632,7 @@ namespace Sr2d64CSport
             var sens = new SpriteSlider { Text = "Inertia sensitivity: slowest flick that slides", Minimum = 0, Maximum = 300, Value = 30, Step = 10, Unit = " px/s", Ticks = 6, ResetValue = 30, Size = new Size(316, 46), Margin = new Padding(0), AccentColor = Color.FromArgb(0xE0, 0x60, 0xC0) };
             sens.ValueChanged += (_, _) => box.InertiaThreshold = (float)sens.Value;
             col.Controls.Add(sens);
-            var gain = new SpriteSlider { Text = "Inertia gain (release speed x)", Minimum = 0.5, Maximum = 3, Value = 1.3, Step = 0.1, Decimals = 1, Ticks = 5, ResetValue = 1.3, Size = new Size(316, 46), Margin = new Padding(0), AccentColor = Color.FromArgb(0xE0, 0x60, 0xC0) };
+            var gain = new SpriteSlider { Text = "Inertia gain (release speed x)", Minimum = 0.5M, Maximum = 3, Value = 1.3M, Step = 0.1M, Decimals = 1, Ticks = 5, ResetValue = 1.3M, Size = new Size(316, 46), Margin = new Padding(0), AccentColor = Color.FromArgb(0xE0, 0x60, 0xC0) };
             gain.ValueChanged += (_, _) => box.InertiaGain = (float)gain.Value;
             col.Controls.Add(gain);
             var flags = new FlowLayoutPanel { AutoSize = true, Width = 320, Margin = new Padding(0, 4, 0, 0), BackColor = Color.Transparent };
@@ -1108,8 +1108,8 @@ namespace Sr2d64CSport
             strip.Controls.Add(famCol, 0, 0); strip.SetRowSpan(famCol, 2);
 
             // fake bold in em: a slider with fine steps (the bench's Blend slider was far too coarse for this)
-            var bold = new SpriteSlider { Text = "Fake bold (em)", Minimum = 0, Maximum = 0.12, Step = 0.005, Decimals = 3, Value = Bold, ResetValue = 0, Ticks = 6, Size = new Size(290, 46), Margin = new Padding(0) };
-            bold.ValueChanged += (_, _) => Bold = bold.Value;
+            var bold = new SpriteSlider { Text = "Fake bold (em)", Minimum = 0, Maximum = 0.12M, Step = 0.005M, Decimals = 3, Value = (decimal)Bold, ResetValue = 0, Ticks = 6, Size = new Size(290, 46), Margin = new Padding(0) };
+            bold.ValueChanged += (_, _) => Bold = (double)bold.Value;
             strip.Controls.Add(bold, 1, 0);
             var hint = new Label { Text = "0 = the face as designed. Bold face / Italic face pick real\nstyles when the family has them; fake bold / italic are\nsynthetic. TextCache: the paragraph is rasterised once and\nblitted (SpriteFont.Render + TextCache) instead of laid out\nper frame - compare the fps.", ForeColor = Color.Gainsboro, AutoSize = true, Margin = new Padding(0, 2, 0, 0), Font = new Font(SystemFonts.DefaultFont.FontFamily, 7.5f) };
             strip.Controls.Add(hint, 1, 1);
@@ -1193,7 +1193,7 @@ namespace Sr2d64CSport
             }
             void Bind(SpriteRangeControl ctl, string name, Action<double> set)
             {
-                ctl.ValueChanged += (_, _) => { set(ctl.Value); Last = $"{name} -> {ctl.Value:0.###}"; ControlsDemo.Events++; };
+                ctl.ValueChanged += (_, _) => { set((double)ctl.Value); Last = $"{name} -> {(double)ctl.Value:0.###}"; ControlsDemo.Events++; };
             }
             Lbl("Snap 2");
             var steps = new SpriteSlider { Text = "Snap+Step 2", Minimum = 0, Maximum = 12, Snap = true, Step = 2, Value = 6, ShowNotches = true, NotchLabels = true, Size = new Size(210, 56), Margin = new Padding(4) };
@@ -1204,11 +1204,11 @@ namespace Sr2d64CSport
             Bind(pow2, "pow2", v => Pow2 = v);
             row.Controls.Add(pow2);
             Lbl("List");
-            var list = new SpriteSlider { Text = "Predetermined", Minimum = 0, Maximum = 4, Values = new double[] { 0, 0.5, 1.5, 3, 4 }, Value = 1.5, ShowNotches = true, NotchLabels = true, CommitOnRelease = true, Size = new Size(210, 56), Margin = new Padding(4) };
+            var list = new SpriteSlider { Text = "Predetermined", Minimum = 0, Maximum = 4, Values = new decimal[] { 0, 0.5M, 1.5M, 3, 4 }, Value = 1.5M, ShowNotches = true, NotchLabels = true, CommitOnRelease = true, Size = new Size(210, 56), Margin = new Padding(4) };
             Bind(list, "list", v => List = v);
             row.Controls.Add(list);
             Lbl("Knob");
-            var knob = new SpriteKnob { Text = "Gear", Minimum = 0, Maximum = 100, Values = new double[] { 0, 10, 25, 50, 75, 100 }, Value = 25, ShowNotches = true, NotchLabels = true, Size = new Size(130, 128), Margin = new Padding(4) };
+            var knob = new SpriteKnob { Text = "Gear", Minimum = 0, Maximum = 100, Values = new decimal[] { 0, 10, 25, 50, 75, 100 }, Value = 25, ShowNotches = true, NotchLabels = true, Size = new Size(130, 128), Margin = new Padding(4) };
             Bind(knob, "gear", v => Num = v);
             row.Controls.Add(knob);
             Lbl("Numeric");

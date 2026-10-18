@@ -38,6 +38,7 @@
     <Compile Include="..\cs\LayeredSprite.cs" Link="cs\LayeredSprite.cs" />
     <Compile Include="..\cs\Selection.cs" Link="cs\Selection.cs" />
     <Compile Include="..\cs\Animation.cs" Link="cs\Animation.cs" />
+    <Compile Include="..\cs\Animation.Graph.cs" Link="cs\Animation.Graph.cs" />
     <Compile Include="..\cs\Curve.cs" Link="cs\Curve.cs" />
     <Compile Include="..\cs\SpriteControls.Curve.cs" Link="cs\SpriteControls.Curve.cs" />
     <Compile Include="..\cs\Sprite.Move.cs" Link="cs\Sprite.Move.cs" />
