@@ -16,6 +16,15 @@ Conventions
   DOCS     README / comments only
 
 
+2026-10-19  Designer fix: SpritePanel attributes
+------------------------------------------------------------------------------------------------
+FIXED    SpritePanel had lost its own class attributes. The ContainerButtons helper (2026-10-15) was inserted between
+         SpritePanel's attributes and its class, so [Designer(ParentControlDesigner)], [ToolboxBitmap] and
+         [DefaultEvent("Click")] attached to the helper. The default event was then inherited from SpriteBox, so
+         double-clicking a panel created a Render handler. The attributes are back on SpritePanel and the helper
+         sits above it. SpriteTabPage and SpriteStackPanel inherit SpritePanel's Click default.
+         To check in VS: a panel takes child controls dropped on it, and double-click creates Click.
+
 2026-10-18  Decimal values for the range controls; stripe wrap; Interpolate.SplineLerp
 --------------------------------------------------------------------------------------------------------
 CHANGED  Decimal values (breaking, option A): SpriteKnob, SpriteSlider, SpriteWheel, SpriteScrollBar and SpriteProgress
