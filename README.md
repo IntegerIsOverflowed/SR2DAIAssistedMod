@@ -3168,7 +3168,8 @@ form.StripeFrame += (s, e) => { e.Colors[0] = unchecked((int)0xFFFF8000); };   /
   SpriteTextView; `CheckedChanged` for SpriteToggle, SpriteRadio and SpriteGroupBox; `ValueChanged` for
   SpriteColorPicker, SpriteNumeric, SpriteScrollBar, SpriteWheel, SpriteKnob and SpriteSlider; `Committed` for
   SpriteTextBox; `SelectedIndexChanged` for SpriteCombo, SpriteListBox and SpriteTabControl; `OnChanged` for SpriteLed;
-  `VoxelClick` for VoxelBox; `Render` for SpriteBox.
+  `VoxelClick` for VoxelBox; `Render` for SpriteBox. SpriteTabPage and SpriteStackPanel inherit SpritePanel's
+  `Click`; SpriteMenuPanel (the menu popup window) inherits `Render`.
 - **`MouseClick`** fires on the SR2D buttons. Those controls switch WinForms' `StandardClick` off, so the base control
   raises `MouseClick` itself when a press and its release both land inside the control with the same button.
 - **Viewer properties** (the render surface of `SpriteBox`, grouped under the category "Surface") are shown on

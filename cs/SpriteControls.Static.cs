@@ -266,14 +266,6 @@ namespace Sr2d64CSport
         Outline,
     }
 
-    /// <summary>
-    /// A container with an SR2D frame. Drop controls into it (in code: <c>panel.Controls.Add(x)</c>; the designer handles it
-    /// as a parent). <see cref="Control.Padding"/> keeps children off the rim (default 8). SpriteControls inside inherit the
-    /// face colour unless their BackColor was set explicitly.
-    /// </summary>
-    [Designer("System.Windows.Forms.Design.ParentControlDesigner, System.Design", typeof(IDesigner))]
-    [ToolboxBitmap(typeof(SpritePanel), "SpritePanel.bmp")]
-    [DefaultEvent("Click")]
     /// <summary>Native buttons placed on an SR2D container. WinForms' Standard style ignores BackColor (the OS paints the
     /// face), so a Button that is still Standard when it is added becomes Popup: flat until the pointer is over it,
     /// and it takes BackColor / ForeColor like the other SR2D controls. Changing it later in the designer still works.</summary>
@@ -285,6 +277,14 @@ namespace Sr2d64CSport
         }
     }
 
+    /// <summary>
+    /// A container with an SR2D frame. Drop controls into it (in code: <c>panel.Controls.Add(x)</c>; the designer handles it
+    /// as a parent). <see cref="Control.Padding"/> keeps children off the rim (default 8). SpriteControls inside inherit the
+    /// face colour unless their BackColor was set explicitly.
+    /// </summary>
+    [Designer("System.Windows.Forms.Design.ParentControlDesigner, System.Design", typeof(IDesigner))]
+    [ToolboxBitmap(typeof(SpritePanel), "SpritePanel.bmp")]
+    [DefaultEvent("Click")]
     public class SpritePanel : SpriteControlBase
     {
         protected override AccessibleRole DefaultAccessibleRole => AccessibleRole.Client;
