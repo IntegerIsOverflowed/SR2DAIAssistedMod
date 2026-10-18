@@ -262,6 +262,9 @@ namespace Sr2d64CSport
         public const string GBlend = "Blend modes (Sprite.Blend.cs)";
         public const string GFiles = "Files (Png.cs, WebP.cs, Vector.*.cs)";
         public const string GVoxel = "Voxels (VoxelGrid.cs)";
+        public const string GAnim = "Animation keys (Animation.cs)";
+        static readonly TangentMode[] starts = { TangentMode.Smooth, TangentMode.Fast, TangentMode.Slow, TangentMode.Linear };
+        static readonly TangentMode[] ends = { TangentMode.Smooth, TangentMode.Slow, TangentMode.Fast, TangentMode.Linear };
         public const string GControls = "Controls (SpriteControls*.cs)";
         public const string GCompare = "Old vs new";
 
@@ -1447,6 +1450,87 @@ T(GControls, "SpriteLabel / GroupBox / Tabs / TextBox / Numeric / Combo / ListBo
                 }
                 c.Note = $"filled {n} px, tolerance {tol}{(c.Xor ? ", 8-connected" : "")}, bounds {b.Width}x{b.Height} at {b.X},{b.Y}, edge {sel.EdgeCount} px";
             }, needsPoly: true, needsFx: true, needsFlood: true, clears: true);
+            Track? animTrack = null; int animOp = 0;                            // the page's track, rebuilt when the Op box changes
+            T(GAnim, "Interpolate: one point from A to B with two tangents (SplineLerp)",
+                "The simplest use of the key system. Interpolate.SplineLerp(A, B, start, end, weight) returns the point at weight 0..1 (0 = A, 1 = B). start is the tangent that leaves A, end the tangent that arrives at B; the path is the straight line A-B and the tangents set the speed along it. The last option uses a custom curve from the curve editor (Interpolate.SplineLerp(A, B, curve, weight)). Code: var p = Interpolate.SplineLerp(A, B, TangentMode.Fast, TangentMode.Slow, weight);",
+                c =>
+                {
+                    double w = Math.Abs(1 - (c.Time * Math.Max(1, c.Speed) * 0.1) % 2);   // 0 -> 1 -> 0 ... (ping-pong)
+                    var a = new PointF(70, 70);
+                    var b = new PointF(c.W - 70, c.H - 70);
+                    int op = Math.Clamp((int)c.Op, 1, 5) - 1;
+                    PointF p = op == 4
+                        ? Interpolate.SplineLerp(a, b, TangentTools.Motion, w)
+                        : Interpolate.SplineLerp(a, b, starts[op], ends[op], w);
+                    c.Canvas.FillRect(0, 0, c.W, c.H, unchecked((int)0xFF101418), SR2D.LineOp.Set);
+                    c.Canvas.DrawLine((int)a.X, (int)a.Y, (int)b.X, (int)b.Y, unchecked((int)0x60FFFFFF));
+                    c.Canvas.FillCircle(a.X, a.Y, 6, unchecked((int)0xFF40C0FF));
+                    c.Canvas.FillCircle(b.X, b.Y, 6, unchecked((int)0xFFFF60C0));
+                    c.Canvas.FillCircle(p.X, p.Y, 12, unchecked((int)0xFFFFC040));
+                    c.Info($"weight {w:0.00}   point ({p.X:0.0}, {p.Y:0.0})   A cyan, B pink");
+                }, clears: true)
+                .Also(m => m.SettingsControl = () => TangentTools.BuildEditor()).Also(m => m.SettingsVisible = c => (int)c.Op == 5)
+                .Ui(Param.Op, "Tangents (start, end)", Param.Speed, "Speed")
+                .Ops("Smooth, Smooth", "Fast, Slow", "Slow, Fast", "Linear, Linear", "Curve (editor)")
+                .With(Param.Op, 2).With(Param.Speed, 6)
+                .Range(Param.Speed, 1, 100);
+            T(GAnim, "Keyframes: a Track with 3ds Max style key tangents (Out leaves a key, In arrives at it)",
+                "A Track is a list of keys (time, value). Every segment between two keys is a cubic Bezier whose handles come from the tangent of each side of its keys: Out of the left key, In of the right key, as in 3ds Max. Five keys drive the ball on the lane and the graph below; the playhead marks the time. Op = one tangent on every key, Mixed (a different In and Out per key), Bezier (custom handles on each key) or Curve (the curve editor under the page shapes every segment; its nodes are read as a spline). Code: var track = new Track(); track.Add(0, 20, TangentMode.Linear); track.Add(1, 200, TangentMode.Fast); track.Add(2, 70, TangentMode.Auto); double x = track.Evaluate(time); Per side: track.Keys[1].In = TangentMode.Smooth; track.Keys[1].Out = TangentMode.Slow; Custom handles: track.Keys[1].BezierOut = (0.5, 80); track.Keys[1].BezierIn = (-0.5, 0); Spline: HandleIn / HandleOut are slopes.",
+                c =>
+                {
+                    int op = Math.Clamp((int)c.Op, 1, 10);
+                    if (animTrack == null || op != animOp)
+                    {
+                        animOp = op;
+                        animTrack = new Track();
+                        double[] values = { 20, 200, 70, 230, 110 };
+                        TangentMode[] mixOut = { TangentMode.Linear, TangentMode.Fast, TangentMode.Auto, TangentMode.Slow, TangentMode.Bezier };
+                        TangentMode[] mixIn = { TangentMode.Auto, TangentMode.Smooth, TangentMode.Linear, TangentMode.Fast, TangentMode.Spline };
+                        for (int i = 0; i < values.Length; i++)
+                        {
+                            var key = animTrack.Add(i, values[i], op == 9 ? mixOut[i] : (TangentMode)(op - 1));
+                            key.In = op == 9 ? mixIn[i] : key.Out;
+                            double slope = (values[Math.Min(i + 1, 4)] - values[Math.Max(i - 1, 0)]) / 2;   // Catmull slope (value per time, step 1)
+                            double dvOut = values[Math.Min(i + 1, 4)] - values[i], dvIn = values[i] - values[Math.Max(i - 1, 0)];
+                            key.HandleOut = dvOut != 0 ? slope / dvOut : 0;    // Spline slopes = progress per unit of each segment
+                            key.HandleIn = dvIn != 0 ? slope / dvIn : 0;
+                            key.BezierOut = (0.5, slope * 0.5);                // custom handles, used by Bezier
+                            key.BezierIn = (-0.5, -slope * 0.5);
+                        }
+                    }
+                    if (op == 10) foreach (var k in animTrack.Keys) k.Shape = TangentTools.Motion;   // the curve editor's curve, read live
+                    double t = (c.Time * Math.Max(1, c.Speed) * 0.25) % animTrack.Duration;
+                    double x = animTrack.Evaluate(t);                          // the value at time t
+                    int W = c.W, H = c.H;
+                    c.Canvas.FillRect(40, 80, W - 80, 2, unchecked((int)0x60FFFFFF), SR2D.LineOp.AlphaOver);
+                    foreach (var k in animTrack.Keys)                          // a tick per key (the lane maps value 0..240 across)
+                    {
+                        int kx = 40 + (int)(k.Value / 240.0 * (W - 80));
+                        c.Canvas.FillRect(kx - 1, 72, 2, 18, unchecked((int)0xA0FFFFFF), SR2D.LineOp.AlphaOver);
+                        string vt = k.Value.ToString("0", System.Globalization.CultureInfo.CurrentCulture);   // the value above the tick
+                        c.Canvas.DrawText(kx - Sprite.MeasureText(vt).Width / 2, 50, vt, unchecked((int)0xFFB0B8C0), 0, 1);
+                        string tt = "t " + k.Time.ToString("0.##", System.Globalization.CultureInfo.CurrentCulture);   // the key time below it
+                        c.Canvas.DrawText(kx - Sprite.MeasureText(tt).Width / 2, 98, tt, unchecked((int)0xFF9AA4AE), 0, 1);
+                    }
+                    // three objects on the same track, a third of the duration apart: the tangents shape where each one is
+                    int[] objColour = { unchecked((int)0xFF40C0FF), unchecked((int)0xFFFFC040), unchecked((int)0xFFFF60C0) };
+                    for (int o = 0; o < 3; o++)
+                    {
+                        double to = (t + o * animTrack.Duration / 3) % animTrack.Duration;
+                        float ox = 40 + (float)(animTrack.Evaluate(to) / 240.0 * (W - 80));
+                        c.Canvas.FillCircle(ox, 81, 15, unchecked((int)0xFF101418), SR2D.LineOp.AlphaOver);   // dark rim
+                        c.Canvas.FillCircle(ox, 81, 12, objColour[o], SR2D.LineOp.AlphaOver);
+                    }
+                    TangentGraph.DrawTrack(c.Canvas, animTrack, new Rectangle(40, H / 2, W - 80, H / 2 - 60), t);
+                    int seg = Math.Min((int)t, animTrack.Count - 2);
+                    var a = animTrack.Keys[seg]; var b = animTrack.Keys[seg + 1];
+                    c.Info($"time {t:0.00}   value {x:0.0}   segment {seg}: out of key {seg} = {a.Out}, in to key {seg + 1} = {b.In}");
+                }, clears: true)
+                .Also(m => m.SettingsControl = () => TangentTools.BuildEditor()).Also(m => m.SettingsVisible = c => (int)c.Op == 10)
+                .Ui(Param.Op, "Tangent (Mixed = per key)", Param.Speed, "Speed")
+                .Ops("Smooth", "Linear", "Step", "Fast", "Slow", "Spline", "Auto", "Bezier", "Mixed", "Curve")
+                .With(Param.Op, 1).With(Param.Speed, 6)
+                .Range(Param.Speed, 1, 100);
             T(GEdit, "Move: grid shuffle + pen paint (Sprite.Move)", "Lenna (512, centred) is cut into a Grid x Grid block puzzle and ONE block is erased. Every step: a RANDOM block adjacent to the hole is selected (never the block that just moved in) and ANIMATED into the hole with Sprite.Move - the Photoshop move tool inside one sprite: the selected pixels travel, the vacated area turns transparent, anything pushed off the board is clipped. Move again moves the fresh paint: PAINT OVER THE PICTURE with the LEFT button (pen cursor) - the paint sticks to the board and every block carries what it picks up; paint landing in the hole is erased by the next move-in. The OP BOX picks the motion TANGENT of the move (the 3ds Max tangent model of cs/Animation.cs; CURVE = the curve editor on the strip above - drag its points, the curve shapes the speed). The little graph in the canvas's top-right draws the shaping with a dot at the current time. Grid slider = block size (8 16 32 64 128 256 px, powers of two only), 'Grid lines' toggles the grid, Speed slider = the move SPEED in px/s (x8 - a block of 64 px crosses at Speed 8 in about one second), Animate ticked = blocks move.", c => MoveDemo.Puzzle(c), clears: true)
                 .Also(m => m.PaintByMouse = true).Also(m => m.SpriteSize = 512).Also(m => m.SettingsControl = () => TangentTools.BuildEditor()).Also(m => m.SettingsVisible = c => Math.Clamp((int)c.Op - 1, 0, 7) == 7)
                 .Ui(Param.Grid, "Block size (px)", Param.Speed, "Speed (x8 px/s)", Param.Op, "Tangent", Param.GridOn, "Grid lines")
@@ -1771,6 +1855,19 @@ T(GControls, "SpriteLabel / GroupBox / Tabs / TextBox / Numeric / Combo / ListBo
 
             // ---- projections: default shapes, own sprites, per-view check boxes
             string[] projViews = { "Front", "Back", "Left", "Right", "Top", "Bottom" };
+            VoxTest(T(GVoxel, "Translucent voxels: glass over a checker wall, KeepAlpha off (left) vs on (right)", "Four glass blocks with alpha 48, 96, 160 and 224 stand in front of an opaque checker wall. An alpha of 1..254 is translucent: the glass composites over what is behind it, so the checks show through the low-alpha blocks more than the high-alpha ones. The left half draws normally. The right half sets Camera.KeepAlpha, which stamps each voxel colour and alpha verbatim with no compositing (the alpha-tag use). Compare the two halves; they differ only in that setting.", (c) =>
+            {
+                var g = EnsureVoxelGlass();
+                var L = VoxLight(c);
+                var cam = VoxCam(c, MathF.Max(0.5f, c.Scale * 4f), out string camName);
+                VoxBackground(c);
+                int half = c.W / 2;
+                cam.KeepAlpha = false;
+                int d1 = c.Canvas.DrawVoxels(g, cam, half / 2 + c.PanX, c.H / 2 + c.PanY, L);
+                cam.KeepAlpha = true;
+                int d2 = c.Canvas.DrawVoxels(g, cam, half + half / 2 + c.PanX, c.H / 2 + c.PanY, L);
+                c.Note = $"{camName} | {L} | left: KeepAlpha off ({d1} voxels), right: on ({d2} voxels)";
+            }, needsVoxel: true, clears: true)).With(Param.Scale, 150);
             VoxTest(T(GVoxel, "Voxels from projections: 2-D sprites for the sides -> model (views by check box, 'Open file...' for your own sprites)", "Builds a voxel model from 2-D sprites used as projections (VoxelGrid.FromProjections, cs/VoxelGrid.Projections.cs): a cell is solid where EVERY enabled view is opaque at its projection, and its colour comes from the nearest view; where two opposite views both reach a cell they are blended (Blend selector). The six check boxes enable the six views; the SHAPE selector picks the built-in sprite set: Ball (a disc on every side -> the intersection of three cylinders, a 'Steinmetz solid' with rounded edges: silhouettes alone cannot make a true sphere), Box (squares, differently coloured per side), Cylinder (circle top + bottom, rectangles around -> a can), 'Square top, round bottom' (the front / side are trapezoids and the top is a square while the bottom is a circle - the model morphs from one to the other because the silhouettes are intersected and the colours blend between the two ends), and the rocket from before. 'Open file...' lets you pick up to six PNGs of your own: they are assigned to Front, Back, Left, Right, Top, Bottom in the order chosen (fewer files -> fewer views, name a file front/back/left/right/top/bottom to pin it to a side). Every source sprite is shown at the top of the canvas with the side it is mapped to. Fit: proportional (letterboxed) or stretched to the face. A typical model needs only three views - two adjacent sides and the top: with only Front + Left + Top the back / right / bottom take the colour of the nearer visible view.", c =>
             {
                 int n = Math.Clamp(c.Count * 8, 8, 256);
@@ -1992,7 +2089,7 @@ T(GControls, "SpriteLabel / GroupBox / Tabs / TextBox / Numeric / Combo / ListBo
             }, warp: true).Ui(Param.Scale, "Output size (x0.01 of the sprite; 100 = no resize at all)", Param.Smooth, "Right: Bilinear (off = Nearest)", Param.Count, "Copies per frame (the left allocates one sprite each)").With(Param.Scale, 150).With(Param.Smooth, true);
 
             // the list shows one header per group: order by group (stable, so the order inside a group is the order above)
-            var order = new[] { GOriginal, GMask, GBump, GXform, GScene, GNew, GShapes, GText, GEdit, GLayers, GEffects, GBlend, GFiles, GVoxel, GControls, GCompare };
+            var order = new[] { GOriginal, GMask, GBump, GXform, GScene, GNew, GShapes, GText, GEdit, GLayers, GEffects, GBlend, GFiles, GVoxel, GAnim, GControls, GCompare };
             return L.OrderBy(t => { int i = Array.IndexOf(order, t.Group); return i < 0 ? order.Length : i; }).ToList();
         }
 
@@ -2088,6 +2185,29 @@ T(GControls, "SpriteLabel / GroupBox / Tabs / TextBox / Numeric / Combo / ListBo
             tvoxRooms = g; tvoxRoomsKey = key;
             return (g, tvoxRoomsUpd);
         }
+        static VoxelGrid? tvoxGlass;
+
+        /// <summary>The translucency demo: an opaque two-colour checker wall with four glass blocks in front of it, alpha 48 / 96 / 160 / 224 (built once).</summary>
+        static VoxelGrid EnsureVoxelGlass()
+        {
+            if (tvoxGlass != null) return tvoxGlass;
+            const int W = 40, H = 12, D = 12;
+            var g = new VoxelGrid(W, H, D);
+            g.FillBox(0, 0, 0, W, H, 1, new Voxel(0xFF707070));                          // floor slab z = 0
+            for (int x = 0; x < W; x++)                                                  // checker wall at the back (y = H-1)
+                for (int z = 1; z < D - 1; z++)
+                    g.Set(x, H - 1, z, new Voxel(((x / 3 + z / 3) & 1) == 0 ? 0xFFD04030u : 0xFF3050C0u));
+            uint[] alphas = { 48, 96, 160, 224 };
+            for (int i = 0; i < alphas.Length; i++)                                      // glass blocks, in front of the wall
+            {
+                int x0 = 2 + i * 10;
+                g.FillBox(x0, 2, 2, x0 + 6, 8, 8, new Voxel((alphas[i] << 24) | 0x00A0D0FFu));
+            }
+            g.Update();
+            tvoxGlass = g;
+            return g;
+        }
+
         internal static VoxelGrid EnsureVoxels(int side, int seed, out double lastUpdateMs)
         {
             if (tvox != null && tvoxSide == side && tvoxSeed == seed) { lastUpdateMs = tvoxUpdate; return tvox; }

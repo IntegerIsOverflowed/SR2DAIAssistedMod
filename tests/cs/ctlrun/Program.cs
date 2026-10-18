@@ -48,7 +48,7 @@ static class P {
       }
       var rd = new SpriteRadio { Text = "anim", Size = new Size(120, 30) }; rd.CreateHandle(); rd.Checked = true;
       for (int f = 0; f < 5; f++) { anim.Draw(rd.RenderOnce(), 780, 10 + f * 38, SR2D.Op.Paint); Sr2d64CSport.SpriteControlBase.StepAnimations(50); }
-      Save(anim, "/home/user/.cache/ctlrun/anim.rgba");
+      Save(anim, "anim.rgba");
       var snap = new SpriteToggle { Style = ToggleStyle.Switch, Animated = false, Size = new Size(110, 40) }; snap.CreateHandle(); snap.Checked = true;
       Console.WriteLine($"Animated=false snaps: rendered on-state immediately = {snap.Checked}");
     }
@@ -75,14 +75,14 @@ static class P {
     var pr = new SpriteProgress { Value = 62, Style = ProgressStyle.Ring, Size = new Size(100, 100) }; c.Draw(pr.RenderOnce(), x + 340, y, SR2D.Op.Paint);
     var pr2 = new SpriteProgress { Value = 62, Style = ProgressStyle.Ring, Segments = 12, Size = new Size(100, 100), AccentColor = Color.FromArgb(0x60,0xE0,0x80) }; c.Draw(pr2.RenderOnce(), x + 450, y, SR2D.Op.Paint);
     var pr3 = new SpriteProgress { Marquee = true, Phase = 0.85f, Style = ProgressStyle.Ring, Size = new Size(60, 60) }; c.Draw(pr3.RenderOnce(), x + 560, y, SR2D.Op.Paint);
-    Save(c, "/home/user/.cache/ctlrun/buttons.rgba");
+    Save(c, "buttons.rgba");
   }
   static void Wheels() {
     var c = new Sprite(1000, 420); c.ClearBuffer(unchecked((int)0xFF202428));
     // vertical wheels: plain, wrap-around degrees, editable, horizontal, reversed, disabled
     var w1 = new SpriteWheel { Text = "Level", Minimum = 0, Maximum = 20, Value = 7, Size = new Size(64, 150) }; c.Draw(w1.RenderOnce(), 10, 10, SR2D.Op.Paint);
     var w2 = new SpriteWheel { Text = "Angle", Minimum = 0, Maximum = 360, Value = 355, Step = 5, WrapAround = true, Unit = "\u00b0", Size = new Size(72, 150), AccentColor = Color.FromArgb(0xFF,0x90,0x30) }; c.Draw(w2.RenderOnce(), 84, 10, SR2D.Op.Paint);
-    var w3 = new SpriteWheel { Text = "Editable", Minimum = -10, Maximum = 10, Value = 2.5, Step = 0.5, Decimals = 1, Editable = true, Size = new Size(120, 150), AccentColor = Color.FromArgb(0x60,0xE0,0x80) }; c.Draw(w3.RenderOnce(), 166, 10, SR2D.Op.Paint);
+    var w3 = new SpriteWheel { Text = "Editable", Minimum = -10, Maximum = 10, Value = 2.5m, Step = 0.5m, Decimals = 1, Editable = true, Size = new Size(120, 150), AccentColor = Color.FromArgb(0x60,0xE0,0x80) }; c.Draw(w3.RenderOnce(), 166, 10, SR2D.Op.Paint);
     var w4 = new SpriteWheel { Text = "Horizontal", Orientation = Orientation.Horizontal, Minimum = 0, Maximum = 100, Value = 42, Size = new Size(300, 56) }; c.Draw(w4.RenderOnce(), 296, 10, SR2D.Op.Paint);
     var w5 = new SpriteWheel { Text = "Horizontal editable, wrap 0..24", Orientation = Orientation.Horizontal, Minimum = 0, Maximum = 24, Value = 23, WrapAround = true, Editable = true, Size = new Size(300, 56), AccentColor = Color.FromArgb(0xE0,0x60,0xC0) }; c.Draw(w5.RenderOnce(), 296, 76, SR2D.Op.Paint);
     var w6 = new SpriteWheel { Text = "Reversed", Minimum = 0, Maximum = 20, Value = 7, Reversed = true, Size = new Size(64, 150) }; c.Draw(w6.RenderOnce(), 606, 10, SR2D.Op.Paint);
@@ -93,11 +93,11 @@ static class P {
     var d = new SpriteWheel { Minimum = 0, Maximum = 100, Value = 50, Size = new Size(64, 128) }; d.CreateHandle();
     int pitch = 0; { var probe = new SpriteWheel { Minimum = 0, Maximum = 100, Value = 50, Size = new Size(64, 128) }; probe.Down(32, 64); probe.Move(32, 54); pitch = (int)Math.Round(10 / (probe.Value - 50)); probe.Up(32, 54); }
     int ev = 0; d.ValueChanged += (_, _) => ev++;
-    d.Down(32, 64); d.Move(32, 64 - 3 * pitch); double vUp = d.Value; d.Up(32, 64 - 3 * pitch);
+    d.Down(32, 64); d.Move(32, 64 - 3 * pitch); double vUp = (double)d.Value; d.Up(32, 64 - 3 * pitch);
     Console.WriteLine($"wheel: pitch {pitch} px/step, drag up 3 pitches: 50 -> {vUp} (expect 53), events {ev}");
     if (Math.Abs(vUp - 53) > 0.01) Environment.Exit(1);
     // wrap mouse: drag downwards past the bottom edge; the fake Cursor.Position records the teleport
-    d.Down(32, 100); d.Move(32, 140); d.Move(32, 1085); var cur = Cursor.Position; double vWrap = d.Value; d.Move(32, cur.Y - 20); double vWrap2 = d.Value; d.Up(32, cur.Y - 20);
+    d.Down(32, 100); d.Move(32, 140); d.Move(32, 1085); var cur = Cursor.Position; double vWrap = (double)d.Value; d.Move(32, cur.Y - 20); double vWrap2 = (double)d.Value; d.Up(32, cur.Y - 20);
     Console.WriteLine($"wheel wrap-mouse: after crossing the screen bottom (1080) the cursor was put at y={cur.Y} (expect 2, the top edge), value {vWrap:0.##}, continuing upward from there -> {vWrap2:0.##} (expect {vWrap:0.##} + {20.0 / pitch:0.##})");
     if (cur.Y != 2 || Math.Abs(vWrap2 - (vWrap + 20.0 / pitch)) > 0.01) Environment.Exit(1);
     var nw = new SpriteWheel { Minimum = 0, Maximum = 100, Value = 50, WrapMouse = false, Size = new Size(64, 128) }; nw.CreateHandle(); Cursor.Position = new Point(-1, -1);
@@ -105,23 +105,23 @@ static class P {
     Console.WriteLine($"wheel WrapMouse=false: cursor untouched = {Cursor.Position == new Point(-1, -1)}");
     if (Cursor.Position != new Point(-1, -1)) Environment.Exit(1);
     // wrap-around range: 355 + 2 steps of 5 -> 5 (360 folds onto 0); keys too
-    w2.Key(Keys.Up); w2.Key(Keys.Up); double wa = w2.Value; w2.Key(Keys.Down); w2.Key(Keys.Down); w2.Key(Keys.Down); double wb = w2.Value;
+    w2.Key(Keys.Up); w2.Key(Keys.Up); double wa = (double)w2.Value; w2.Key(Keys.Down); w2.Key(Keys.Down); w2.Key(Keys.Down); double wb = (double)w2.Value;
     Console.WriteLine($"wrap-around: 355 +5 +5 -> {wa} (expect 5), then -5 x3 -> {wb} (expect 350)");
     if (wa != 5 || wb != 350) Environment.Exit(1);
     // editable: text box round trip
     var fld = w3.EditField!; if (!(fld is SpriteNumeric) || fld.Parent != w3 || w3.Edit != WheelEdit.Beside) Environment.Exit(1);
-    fld.Key(Keys.A | Keys.Control); fld.Type("7,5"); fld.Key(Keys.Enter); double e1 = w3.Value; fld.Key(Keys.A | Keys.Control); fld.Type("abc"); fld.Key(Keys.Enter); double e2 = w3.Value; fld.Key(Keys.A | Keys.Control); fld.Type("99"); fld.Key(Keys.Enter); double e3 = w3.Value;
+    fld.Key(Keys.A | Keys.Control); fld.Type("7,5"); fld.Key(Keys.Enter); double e1 = (double)w3.Value; fld.Key(Keys.A | Keys.Control); fld.Type("abc"); fld.Key(Keys.Enter); double e2 = (double)w3.Value; fld.Key(Keys.A | Keys.Control); fld.Type("99"); fld.Key(Keys.Enter); double e3 = (double)w3.Value;
     Console.WriteLine($"editable (SR2D field beside the drum): typed 7,5 -> {e1} (expect 7.5 if the culture uses a comma, else unchanged 2.5), abc -> {e2} (unchanged), 99 -> {e3} (expect 10, clamped); field shows '{fld.Text}'");
     if (e3 != 10 || fld.Value != 10) Environment.Exit(1);
-    w3.Nudge(-2); if ((double)fld.Value != w3.Value || w3.Value != 9) Environment.Exit(1);   // the field follows the wheel
+    w3.Nudge(-2); if ((double)(double)fld.Value != (double)w3.Value || (double)w3.Value != 9) Environment.Exit(1);   // the field follows the wheel
     // pop-up field: DoubleClick mode opens it over the read-out, Enter applies and closes, Escape closes without applying; Click mode opens on a plain click, a drag does not
     var wdc = new SpriteWheel { Minimum = 0, Maximum = 100, Value = 50, Edit = WheelEdit.DoubleClick, Size = new Size(64, 128) }; wdc.CreateHandle();
-    wdc.DoubleClick(32, 64); bool open1 = wdc.IsEditing; var f2 = wdc.EditField!; f2.Key(Keys.A | Keys.Control); f2.Type("70"); f2.Key(Keys.Enter); bool open2 = wdc.IsEditing; double v1 = wdc.Value;
-    wdc.DoubleClick(32, 64); f2.Key(Keys.A | Keys.Control); f2.Type("80"); f2.Key(Keys.Escape); bool open3 = wdc.IsEditing; double v2 = wdc.Value;
+    wdc.DoubleClick(32, 64); bool open1 = wdc.IsEditing; var f2 = wdc.EditField!; f2.Key(Keys.A | Keys.Control); f2.Type("70"); f2.Key(Keys.Enter); bool open2 = wdc.IsEditing; double v1 = (double)wdc.Value;
+    wdc.DoubleClick(32, 64); f2.Key(Keys.A | Keys.Control); f2.Type("80"); f2.Key(Keys.Escape); bool open3 = wdc.IsEditing; double v2 = (double)wdc.Value;
     Console.WriteLine($"wheel Edit=DoubleClick: dbl-click opens {open1} (True), Enter applies 70 -> {v1} and closes ({!open2}), Escape leaves {v2} (70) and closes ({!open3})");
     if (!open1 || open2 || v1 != 70 || open3 || v2 != 70) Environment.Exit(1);
     var wc = new SpriteWheel { Minimum = 0, Maximum = 100, Value = 50, Edit = WheelEdit.Click, Style = WheelStyle.Flat, Size = new Size(64, 128) }; wc.CreateHandle();
-    wc.Down(32, 64); wc.Move(32, 40); wc.Up(32, 40); bool openAfterDrag = wc.IsEditing; double vDrag = wc.Value;
+    wc.Down(32, 64); wc.Move(32, 40); wc.Up(32, 40); bool openAfterDrag = wc.IsEditing; double vDrag = (double)wc.Value;
     wc.Tap(32, 64); bool openAfterClick = wc.IsEditing; wc.EditField!.Key(Keys.Escape);
     Console.WriteLine($"wheel Edit=Click: a drag changes the value (50 -> {vDrag}) without opening ({openAfterDrag} = False), a click opens ({openAfterClick} = True)");
     if (openAfterDrag || vDrag == 50 || !openAfterClick) Environment.Exit(1);
@@ -135,36 +135,36 @@ static class P {
     sl.Down(60, 36); sl.Move(120, 36); sl.Move(180, 36);
     Sr2d64CSport.SpriteControlBase.StepAnimations(200);                 // the lift animation has finished
     c.Draw(sl.RenderOnce(), 10, y, SR2D.Op.Paint);
-    double during = sl.Value, pend = sl.PendingValue; int evDuring = slEv;
-    sl.Up(180, 36); double after = sl.Value; int evAfter = slEv;
+    double during = (double)sl.Value, pend = (double)sl.PendingValue; int evDuring = slEv;
+    sl.Up(180, 36); double after = (double)sl.Value; int evAfter = slEv;
     Console.WriteLine($"slider CommitOnRelease: during drag value {during} (expect 20) pending {pend:0} events {evDuring} (expect 0) previews {slPrev} (expect 3); after release {after:0} (= pending) events {evAfter} (expect 1)");
-    if (during != 20 || evDuring != 0 || slPrev != 3 || after != pend || evAfter != 1) Environment.Exit(1);
+    if (during != 20 || evDuring != 0 || slPrev != 3 || Math.Abs(after - pend) > 1e-9 || evAfter != 1) Environment.Exit(1);   // decimal Value: compare within 1e-9
     for (int f = 0; f < 4; f++) { Sr2d64CSport.SpriteControlBase.StepAnimations(45); c.Draw(sl.RenderOnce(), 280 + f * 0, y + 60 + f * 0, SR2D.Op.Paint); }   // dropped back
     // cancel with Escape
-    sl.Down(180, 36); sl.Move(60, 36); sl.Key(Keys.Escape); double canc = sl.Value; bool dragging = sl.IsDragging; sl.Up(60, 36);
+    sl.Down(180, 36); sl.Move(60, 36); sl.Key(Keys.Escape); double canc = (double)sl.Value; bool dragging = sl.IsDragging; sl.Up(60, 36);
     Console.WriteLine($"slider CommitOnRelease + Escape: value {canc:0} (expect {after:0}, unchanged), dragging after Escape = {dragging} (expect False), events {slEv} (expect 1)");
     if (canc != after || dragging || slEv != 1) Environment.Exit(1);
     var kn = new SpriteKnob { Text = "Deferred", Minimum = 0, Maximum = 100, Value = 30, CommitOnRelease = true, Size = new Size(120, 150) }; kn.CreateHandle();
     int knEv = 0; kn.ValueChanged += (_, _) => knEv++;
     kn.Down(60, 20); kn.Move(100, 60); Sr2d64CSport.SpriteControlBase.StepAnimations(200); c.Draw(kn.RenderOnce(), 560, y, SR2D.Op.Paint);
-    double kDuring = kn.Value; kn.Up(100, 60); double kAfter = kn.Value;
+    double kDuring = (double)kn.Value; kn.Up(100, 60); double kAfter = (double)kn.Value;
     var knRef = new SpriteKnob { Text = "Deferred", Minimum = 0, Maximum = 100, Value = 30, Size = new Size(120, 150) }; knRef.Down(60, 20); knRef.Move(100, 60); knRef.Up(100, 60);
     Console.WriteLine($"knob CommitOnRelease: during {kDuring} (expect 30) events {knEv} (expect 1 after release), after {kAfter:0} (same drag on an immediate knob: {knRef.Value:0})");
-    if (kDuring != 30 || knEv != 1 || kAfter != knRef.Value) Environment.Exit(1);
+    if (kDuring != 30 || knEv != 1 || kAfter != (double)knRef.Value) Environment.Exit(1);
     var wd = new SpriteWheel { Text = "Deferred", Minimum = 0, Maximum = 100, Value = 50, CommitOnRelease = true, Size = new Size(64, 150) }; wd.CreateHandle();
     int wdEv = 0; wd.ValueChanged += (_, _) => wdEv++;
     wd.Down(32, 80); wd.Move(32, 80 - 4 * pitch); Sr2d64CSport.SpriteControlBase.StepAnimations(200); c.Draw(wd.RenderOnce(), 700, y, SR2D.Op.Paint);
-    double wDuring = wd.Value; wd.Up(32, 80 - 4 * pitch); double wAfter = wd.Value;
+    double wDuring = (double)wd.Value; wd.Up(32, 80 - 4 * pitch); double wAfter = (double)wd.Value;
     Console.WriteLine($"wheel CommitOnRelease: during {wDuring} (expect 50) after {wAfter} (expect 54) events {wdEv} (expect 1)");
     if (wDuring != 50 || Math.Abs(wAfter - 54) > 0.01 || wdEv != 1) Environment.Exit(1);
     // infinite knob keeps its free pointer through a deferred drag
     var ki = new SpriteKnob { Text = "Inf deferred", Minimum = 0, Maximum = 100, Value = 50, Pointer = KnobPointer.Infinite, Gauge = KnobGauge.Circle, CommitOnRelease = true, Size = new Size(120, 150) }; ki.CreateHandle();
     ki.Down(60 + 40, 80); for (int i = 1; i <= 10; i++) { double a = i * Math.PI * 2 / 20; ki.Move((int)(60 + 40 * Math.Cos(a)), (int)(80 + 40 * Math.Sin(a))); }
     Sr2d64CSport.SpriteControlBase.StepAnimations(200); c.Draw(ki.RenderOnce(), 830, y, SR2D.Op.Paint);
-    double kiDuring = ki.Value, kiPend = ki.PendingValue, degBefore = ki.PointerDegrees; ki.Up(60, 120); double kiAfter = ki.Value, degAfter = ki.PointerDegrees;
+    double kiDuring = (double)ki.Value, kiPend = (double)ki.PendingValue, degBefore = ki.PointerDegrees; ki.Up(60, 120); double kiAfter = (double)ki.Value, degAfter = ki.PointerDegrees;
     Console.WriteLine($"infinite knob CommitOnRelease: during {kiDuring} pending {kiPend:0} (expect 100, half turn = 50), after {kiAfter:0}, pointer {degBefore:0} -> {degAfter:0} deg (must not jump)");
     if (kiDuring != 50 || Math.Abs(kiAfter - kiPend) > 1e-9 || Math.Abs(degBefore - degAfter) > 0.01) Environment.Exit(1);
-    Save(c, "/home/user/.cache/ctlrun/wheels.rgba");
+    Save(c, "wheels.rgba");
   }
   static unsafe void EdgeStrips() {
     // the "black line at the edge of a Zoom-mode picture" regression: the Compose() strip arithmetic, replayed for every
@@ -243,9 +243,9 @@ static class P {
     // scroll bar control: Value range 0..Max-Page, thumb drag, track click pages, arrows step
     var sb = new SpriteScrollBar { Orientation = Orientation.Vertical, Minimum = 0, Maximum = 1000, PageSize = 250, Step = 10, Size = new Size(16, 300) };
     sb.Value = 5000; Console.WriteLine($"scroll bar: Value 5000 clamps to {sb.Value} (expect 750)"); if (sb.Value != 750) Environment.Exit(1);
-    sb.Value = 0; sb.Tap(8, 290); double afterArrow = sb.Value; sb.Tap(8, 200); double afterTrack = sb.Value;
+    sb.Value = 0; sb.Tap(8, 290); double afterArrow = (double)sb.Value; sb.Tap(8, 200); double afterTrack = (double)sb.Value;
     Console.WriteLine($"arrow click -> {afterArrow} (expect 10), track click below the thumb -> {afterTrack} (expect 260)"); if (afterArrow != 10 || afterTrack != 260) Environment.Exit(1);
-    sb.Value = 0; sb.Down(8, 30); sb.Move(8, 130); double dragged = sb.Value; sb.Up(8, 130);
+    sb.Value = 0; sb.Down(8, 30); sb.Move(8, 130); double dragged = (double)sb.Value; sb.Up(8, 130);
     Console.WriteLine($"thumb drag 100 px on a 300 px bar (track ~266, thumb 25 %): -> {dragged:0} (expect ~375)"); if (Math.Abs(dragged - 375) > 40) Environment.Exit(1);
     var c = new Sprite(420, 320); c.ClearBuffer(unchecked((int)0xFF303840));
     sb.Value = 300; c.Draw(sb.RenderOnce(), 10, 10, SR2D.Op.Paint);
@@ -253,7 +253,7 @@ static class P {
     var sbn = new SpriteScrollBar { Orientation = Orientation.Horizontal, Minimum = 0, Maximum = 1000, PageSize = 100, Value = 600, Arrows = false, Size = new Size(300, 10) }; c.Draw(sbn.RenderOnce(), 40, 36, SR2D.Op.Paint);
     var sbi = new SpriteScrollBar { Orientation = Orientation.Horizontal, Minimum = 0, Maximum = 100, PageSize = 100, Size = new Size(300, 16) }; c.Draw(sbi.RenderOnce(), 40, 56, SR2D.Op.Paint);
     var sbd = new SpriteScrollBar { Orientation = Orientation.Vertical, Minimum = 0, Maximum = 1000, PageSize = 250, Value = 750, Size = new Size(16, 200) }; sbd.Down(8, 100); c.Draw(sbd.RenderOnce(), 380, 10, SR2D.Op.Paint); sbd.Up(8, 100);
-    Save(c, "/home/user/.cache/ctlrun/scroll.rgba");
+    Save(c, "scroll.rgba");
     // scroll-bar decision must be a fixed point: applying it and asking again gives the same answer (this ping-pong froze the app)
     int flips = 0, cases = 0;
     foreach (var pm in new[] { SpritePanMode.Scroll, SpritePanMode.Free })
@@ -341,7 +341,7 @@ static class P {
     var own = SpriteFont.Installed("DejaVu Serif"); var d2 = new SpriteLabel { Text = "own font object", TextFont = own }; Chk(own == null || d2.UsesSpriteFont, "TextFont object override");
     SpriteControlBase.DefaultFontFamily = "";
     Chk(!d1.UsesSpriteFont, "clearing DefaultFontFamily restores the pixel font");
-    Save(c, "/home/user/.cache/ctlrun/fonts.rgba");
+    Save(c, "fonts.rgba");
   }
   static void Furniture() {
     var c = new Sprite(1000, 600); c.ClearBuffer(unchecked((int)0xFF202428));
@@ -691,7 +691,7 @@ static class P {
     // WrapText (via the label) and the ambient BackColor rule
     var explicitBack = new SpriteLabel { Text = "explicit", BackColor = Color.Red }; var pnl = new SpritePanel(); pnl.Controls.Add(explicitBack);
     if (explicitBack.BackColor != Color.Red) Fail("explicit BackColor must survive a container");
-    Save(c, "/home/user/.cache/ctlrun/furniture.rgba");
+    Save(c, "furniture.rgba");
     Console.WriteLine("furniture: all checks passed");
   }
   static Sprite BoxRender(SpriteBox b) => b.RenderOnce();
@@ -762,7 +762,7 @@ static class P {
       var w3 = new SpriteWheel { Look = L, Orientation = Orientation.Horizontal, Minimum = 0, Maximum = 100, Value = 42, Size = new Size(180, 56) }; c.Draw(w3.RenderOnce(), x0 + 160, 470, SR2D.Op.Paint);
       var w4 = new SpriteWheel { Look = L, Orientation = Orientation.Horizontal, Minimum = 0, Maximum = 24, Value = 23, WrapAround = true, Editable = true, Size = new Size(180, 56) }; c.Draw(w4.RenderOnce(), x0 + 160, 540, SR2D.Op.Paint);
     }
-    Save(c, "/home/user/.cache/ctlrun/looks.rgba");
+    Save(c, "looks.rgba");
 
     int acc = new SpriteButton().AccentColor.ToArgb();
     // buttons: only the flat looks paint accent pixels on an idle face; Segmented lights its LED strip while hot
@@ -818,7 +818,9 @@ static class P {
     Console.WriteLine("looks: wrote looks.rgba 1040x640 (Classic | Hairline | Segmented columns)");
   }
 
-  static void Save(Sprite s, string name){ var px = s.Pixels; var buf = new byte[px.Length*4]; for (int i=0;i<px.Length;i++){int c=px[i]; buf[i*4]=(byte)(c>>16); buf[i*4+1]=(byte)(c>>8); buf[i*4+2]=(byte)c; buf[i*4+3]=255;} File.WriteAllBytes(name, buf); Console.WriteLine($"wrote {name} {s.Width}x{s.Height}"); }
+  // every render goes here: CTLRUN_OUT if set, else <temp>/ctlrun (created when missing)
+  static readonly string CtlOut = Environment.GetEnvironmentVariable("CTLRUN_OUT") ?? Path.Combine(Path.GetTempPath(), "ctlrun");
+  static void Save(Sprite s, string name){ name = Path.Combine(CtlOut, name); Directory.CreateDirectory(CtlOut); var px = s.Pixels; var buf = new byte[px.Length*4]; for (int i=0;i<px.Length;i++){int c=px[i]; buf[i*4]=(byte)(c>>16); buf[i*4+1]=(byte)(c>>8); buf[i*4+2]=(byte)c; buf[i*4+3]=255;} File.WriteAllBytes(name, buf); Console.WriteLine($"wrote {name} {s.Width}x{s.Height}"); }
   static void TextViews() {
     var c = new Sprite(1000, 560); c.ClearBuffer(unchecked((int)0xFF202428));
     void Put(Control k, int x, int y) { if (k is SpriteBox b) c.Draw(BoxRender(b), x, y, SR2D.Op.Paint); }
@@ -956,7 +958,7 @@ static class P {
     lb.Key(Keys.Up); Chk(lb.SelectedIndex == 2, $"Up skips the header ({lb.SelectedIndex})");
     lb.Key(Keys.Home); Chk(lb.SelectedIndex == 1, $"Home lands on the first item, not the header ({lb.SelectedIndex})");
     Put(lb, 480, 130);
-    Save(c, "/home/user/.cache/ctlrun/textviews.rgba");
+    Save(c, "textviews.rgba");
     Console.WriteLine("text views: all checks passed");
 
     // ---------------------------------------------------------------- review round 2 pins
@@ -1415,7 +1417,7 @@ static class P {
     var lmsg = new Message { Msg = 0x0201 }; bool lsw = false;
     foreach (var f in Application.Filters.ToArray()) lsw |= f.PreFilterMessage(ref lmsg);
     Chk(lsw && !m.IsOpen, $"a left-click menu swallows the click on its opener (swallowed {lsw}, open {m.IsOpen})");
-    Save(c, "/home/user/.cache/ctlrun/voxelbox.rgba");
+    Save(c, "voxelbox.rgba");
   }
   // ---- Sprite.Move / Sprite.Offset (selection-scoped move tool and Photoshop-style offset) ----------------
   // Every case is checked against an independent slow managed reference of the documented formula:
@@ -1593,10 +1595,10 @@ static class P {
     s.Value = 9; Chk(s.Value == 8, $"pow2 slider: 9 snaps back to 8 ({s.Value})");
     s.Value = 255; Chk(s.Value == 256, $"pow2 slider: 255 snaps up to 256 ({s.Value})");
     s.Minimum = 0;
-    Chk(s.Values is double[] list && list[0] == 1 && list[^1] == 256 && list.Length == 9, $"pow2 slider: the list follows a range change (now {string.Join(" ", s.Values!)})");
-    var k = new SpriteKnob { Minimum = 0, Maximum = 3, Values = new double[] { 3, 0, 1.5, 0, 3 } };
-    Chk(k.Values!.Length == 3 && Math.Abs(k.Values[1] - 1.5) < 1e-9, "knob: a value list is sorted and de-duplicated (0 1.5 3)");
-    k.Value = 2; Chk(Math.Abs(k.Value - 1.5) < 1e-9, $"knob: 2 snaps to 1.5 ({k.Value})");
+    Chk(s.Values is decimal[] list && list[0] == 1 && list[^1] == 256 && list.Length == 9, $"pow2 slider: the list follows a range change (now {string.Join(" ", s.Values!)})");
+    var k = new SpriteKnob { Minimum = 0, Maximum = 3, Values = new decimal[] { 3, 0, 1.5m, 0, 3 } };
+    Chk(k.Values!.Length == 3 && k.Values[1] == 1.5m, "knob: a value list is sorted and de-duplicated (0 1.5 3)");
+    k.Value = 2; Chk(k.Value == 1.5m, $"knob: 2 snaps to 1.5 ({k.Value})");
     var n = new SpriteNumeric { Minimum = 8, Maximum = 256, PowersOfTwo = true, Value = 64 };
     n.Nudge(1); Chk(n.Value == 128, $"numeric: Nudge goes to the NEXT entry (64 -> 128, never stuck at 65) ({n.Value})");
     n.Nudge(1); Chk(n.Value == 256, $"numeric: Nudge again -> 256 ({n.Value})");
@@ -1626,18 +1628,61 @@ static class P {
       t3.Add(new Keyframe(2, 0) { Out = TangentMode.Auto });
       Chk(Math.Abs(t3.Evaluate(-1) - 0) < 1e-12 && Math.Abs(t3.Evaluate(5) - 0) < 1e-12, "track: holds the end keys outside the range");
       Chk(Math.Abs(t3.Evaluate(0.5) - 0.625) < 1e-12, $"track: auto slopes, segment 1 at 0.5 -> {t3.Evaluate(0.5):0.###} (Catmull-Rom, slopes 1 and 0)");
-      Chk(Math.Abs(t3.Evaluate(1.5) - 0.375) < 1e-12, $"track: auto slopes, segment 2 at 1.5 -> {t3.Evaluate(1.5):0.###} (slopes 0 and -1)");
+      Chk(Math.Abs(t3.Evaluate(1.5) - 0.625) < 1e-12, $"track: auto slopes, segment 2 at 1.5 -> {t3.Evaluate(1.5):0.###} (slopes 0 and -1: p = 1 - 2u^2 + u^3)");
       Chk(Math.Abs(t3.Evaluate(1.0) - 1.0) < 1e-12, "track: passes exactly through the keys"); }
     { var ts = new Track(); var mid = ts.Add(1, 10, TangentMode.Step); ts.Add(0, 0); ts.Add(2, 20); ts.Sort();
       Chk(ts.Count == 3 && Math.Abs(ts.Evaluate(1.5) - 10) < 1e-12, $"track: unsorted Add + Sort, a Step key holds its value ({ts.Evaluate(1.5)})");
       mid.Out = TangentMode.Linear; ts.Evaluate(0.5);
       Chk(Math.Abs(ts.Evaluate(0.5) - 5) < 1e-12, $"track: retangenting a key applies at once ({ts.Evaluate(0.5)})"); }
-    { var sl = new SpriteSlider { Minimum = 0, Maximum = 100, Values = new double[] { 0, 25, 50, 75, 100 }, ShowNotches = true, NotchLabels = true, Size = new Size(220, 40) };
+    { var big = new Track(); big.Add(0, 0, TangentMode.Linear); big.Add(1, 100, TangentMode.Auto); big.Add(2, 200, TangentMode.Auto);
+      Chk(Math.Abs(big.Evaluate(0.25) - 25) < 1e-9, $"track: auto on linear data 0..200 at 0.25 -> {big.Evaluate(0.25)} (value range is not 1)");
+      var tg = new Track(); tg.Add(0, 20, TangentMode.Linear); tg.Add(1, 200, TangentMode.Fast); tg.Add(2, 70, TangentMode.Auto); tg.Add(3, 230, TangentMode.Slow); tg.Add(4, 110, TangentMode.Smooth);
+      var gp = new Sprite(200, 120); gp.ClearBuffer(unchecked((int)0xFF000000));
+      TangentGraph.DrawTrack(gp, tg, new Rectangle(4, 4, 192, 112), 1.5);
+      TangentGraph.Draw(gp, t => Track.EaseAt(TangentMode.Smooth, t), 0.5f, 0, 0);
+      int lit = 0; foreach (var v in gp.Pixels) if ((v & 0xFFFFFF) != 0) lit++;
+      Chk(lit > 300, $"tangent graphs paint the track, keys, playhead and the shape box ({lit} px)"); }
+    { var cc = new Curve();                                              // a straight custom curve is linear
+      var ka = new Keyframe(0, 0, TangentMode.Curve) { Shape = cc }; var kb = new Keyframe(1, 100);
+      Chk(Math.Abs(Track.EaseSegment(ka, kb, 0.25) - 0.25) < 1e-6, $"curve: default straight curve at 0.25 -> {Track.EaseSegment(ka, kb, 0.25)}");
+      cc.Set(new[] { new PointF(0, 0), new PointF(0.5f, 0.9f), new PointF(1, 1) });  // nodes are passed through
+      Chk(Math.Abs(Track.EaseSegment(ka, kb, 0.5) - 0.9) < 1e-3, $"curve: node (0.5, 0.9) passed -> {Track.EaseSegment(ka, kb, 0.5)}");
+      Chk(Math.Abs(new Track().Evaluate(0)) < 1e-12, "curve: empty track evaluates to 0"); }
+    { // Interpolate.SplineLerp: one point from A to B with two tangents (the straight line, the tangents set the speed)
+      var A = new PointF(10, 20); var B = new PointF(110, 220);
+      PointF mid = Interpolate.SplineLerp(A, B, TangentMode.Smooth, TangentMode.Smooth, 0.5);
+      Chk(Math.Abs(mid.X - 60) < 1e-3 && Math.Abs(mid.Y - 120) < 1e-3, $"tween: Smooth/Smooth is the midpoint at 0.5 ({mid.X:0.###}, {mid.Y:0.###})");
+      Chk(Interpolate.SplineLerp(A, B, TangentMode.Fast, TangentMode.Slow, 0) == A && Interpolate.SplineLerp(A, B, TangentMode.Fast, TangentMode.Slow, 1) == B,
+          "tween: weight 0 gives A and weight 1 gives B exactly");
+      double fastSlow = Interpolate.SplineLerp(A, B, TangentMode.Fast, TangentMode.Slow, 0.5).X;
+      double slowFast = Interpolate.SplineLerp(A, B, TangentMode.Slow, TangentMode.Fast, 0.5).X;
+      Chk(fastSlow > 60 && slowFast < 60, $"tween: Fast start / Slow end is ahead of the middle, Slow / Fast behind it ({fastSlow:0.##} / {slowFast:0.##})");
+      Chk(Math.Abs(Interpolate.SplineLerp(A, B, TangentMode.Linear, TangentMode.Linear, 0.25).X - 35) < 1e-3, "tween: Linear/Linear is constant speed (0.25 -> 35)");
+      bool straight = true;
+      for (int i = 0; i <= 10; i++)
+      {
+        var q = Interpolate.SplineLerp(A, B, TangentMode.Fast, TangentMode.Slow, i / 10.0);
+        if (Math.Abs((q.X - A.X) * (B.Y - A.Y) - (q.Y - A.Y) * (B.X - A.X)) > 1e-2) straight = false;
+      }
+      Chk(straight, "tween: the path is the straight line A-B");
+      Chk(Math.Abs(Interpolate.SplineLerp(A, B, new Curve(), 0.25).X - 35) < 1e-3, "tween: the default curve (identity) at 0.25 -> 35");
+      var bent = new Curve(); bent.Set(new[] { new PointF(0, 0), new PointF(0.5f, 0.9f), new PointF(1, 1) });
+      Chk(Math.Abs(Interpolate.SplineLerp(A, B, bent, 0.5).X - 100) < 0.5, $"tween: a custom curve through (0.5, 0.9) gives 0.9 of the way at 0.5 ({Interpolate.SplineLerp(A, B, bent, 0.5).X:0.##})");
+    }
+    { // decimal values round-trip, and a decimal discrete list snaps like a double one
+      var kd = new SpriteKnob { Minimum = 0, Maximum = 1, Step = 0.05m, Value = 0.333m };
+      Chk(kd.Value == 0.333m && kd.Step == 0.05m && kd.Minimum == 0m && kd.Maximum == 1m, $"decimal: Value/Step/Minimum/Maximum keep their decimal values ({kd.Value}, {kd.Step})");
+      var sd = new SpriteSlider { Minimum = 0, Maximum = 4, Values = new[] { 0m, 0.5m, 1.5m, 3m, 4m }, Value = 1.2m };
+      Chk(sd.Value == 1.5m && sd.Values != null && sd.Values.Length == 5 && sd.Values[2] == 1.5m, $"decimal: a Values list snaps 1.2 to 1.5 ({sd.Value})");
+      var pd = new SpriteProgress { Minimum = 0m, Maximum = 200m, Value = 50.5m };
+      Chk(pd.Value == 50.5m && pd.Maximum == 200m, $"decimal: SpriteProgress Value/Maximum ({pd.Value}/{pd.Maximum})");
+    }
+    { var sl = new SpriteSlider { Minimum = 0, Maximum = 100, Values = new decimal[] { 0, 25, 50, 75, 100 }, ShowNotches = true, NotchLabels = true, Size = new Size(220, 40) };
       sl.Value = 61; Chk(sl.Value == 50, $"discrete slider renders + snaps: 61 -> {sl.Value} (even spacing: index of 50 is drawn at the middle)");
       var pic = sl.RenderOnce();
       int ink = 0; foreach (var v in pic.Pixels) if ((v >> 24 & 255) > 100) ink++;
       Chk(ink > 500, $"discrete slider: notches + labels painted ({ink} px)");
-      var kn = new SpriteKnob { Minimum = 0, Maximum = 100, Values = new double[] { 0, 10, 25, 50, 75, 100 }, ShowNotches = true, NotchLabels = true, Size = new Size(130, 128) };
+      var kn = new SpriteKnob { Minimum = 0, Maximum = 100, Values = new decimal[] { 0, 10, 25, 50, 75, 100 }, ShowNotches = true, NotchLabels = true, Size = new Size(130, 128) };
       kn.Value = 61; Chk(kn.Value == 50, $"discrete knob snaps the same way ({kn.Value})");
       var kp = kn.RenderOnce();
       int ink2 = 0; foreach (var v in kp.Pixels) if ((v >> 24 & 255) > 100) ink2++;
@@ -2033,16 +2078,16 @@ static class P {
     // infinite pointer: relative drag, no jump on press, pointer keeps going past the end, value moves back at once
     {
       var k = new SpriteKnob { Minimum = 0, Maximum = 100, Value = 50, Pointer = KnobPointer.Infinite, Gauge = KnobGauge.Circle, Size = new Size(150, 184) };
-      double v0 = k.Value; k.Down(75 + 40, 100); double v1 = k.Value;   // press at 3 o'clock: value must not change
+      double v0 = (double)k.Value; k.Down(75 + 40, 100); double v1 = (double)k.Value;   // press at 3 o'clock: value must not change
       // 3 clockwise turns from 3 o'clock: value should clamp at 100 while the pointer accumulates ~3 turns
       for (int i = 1; i <= 60; i++) { double a = i * Math.PI * 2 / 20; k.Move((int)(75 + 40 * Math.Cos(a)), (int)(100 + 40 * Math.Sin(a))); }
-      double v2 = k.Value;
+      double v2 = (double)k.Value;
       // now back a quarter turn: value must drop immediately (no dead travel)
       for (int i = 59; i >= 55; i--) { double a = i * Math.PI * 2 / 20; k.Move((int)(75 + 40 * Math.Cos(a)), (int)(100 + 40 * Math.Sin(a))); }
-      double v3 = k.Value; double deg3 = k.PointerDegrees;
+      double v3 = (double)k.Value; double deg3 = k.PointerDegrees;
       // pinned at 100: another half turn must still turn the pointer by ~180 degrees
       for (int i = 56; i <= 66; i++) { double a = i * Math.PI * 2 / 20; k.Move((int)(75 + 40 * Math.Cos(a)), (int)(100 + 40 * Math.Sin(a))); }
-      double v4 = k.Value, deg4 = k.PointerDegrees; k.Up(75, 100);
+      double v4 = (double)k.Value, deg4 = k.PointerDegrees; k.Up(75, 100);
       Console.WriteLine($"infinite past the end: value {v4} (expect 100), pointer turned {deg4 - deg3:0} deg (expect ~180)");
       if (v4 != 100 || Math.Abs(deg4 - deg3 - 180) > 15) Environment.Exit(1);
       Console.WriteLine($"infinite: press {v0}->{v1} (expect no change), 3 turns -> {v2} (expect 100), back 1/4 turn -> {v3:0} (expect ~72, integer mouse positions on a 40 px circle)");
@@ -2056,7 +2101,7 @@ static class P {
     e.Down(75, 60); for (int i = 1; i <= 60; i++) { double a = -Math.PI/2 + i * Math.PI * 2 / 20; e.Move((int)(75 + 40 * Math.Cos(a)), (int)(100 + 40 * Math.Sin(a))); } e.Up(75,100);
     Console.WriteLine($"endless bounded after 3 turns from 0: {e.Value} (expect 100)");
     canvas.Draw(e.RenderOnce(), 300, 420, SR2D.Op.Paint);
-    Save(canvas, "/home/user/.cache/ctlrun/knobs.rgba");
+    Save(canvas, "knobs.rgba");
     Buttons();
     Furniture();
     Fonts();
@@ -2102,6 +2147,6 @@ static class P {
       using var big = new Sprite(96, 96); big.ClearBuffer(unchecked((int)0xFF6080A0)); big.DrawScaled(c1, 0, 0, 3f, 0, 0, SR2D.Op.AlphaOver, SR2D.Filter.Nearest);
       sheet.Draw(big, 10 + k * 125, 125, SR2D.Op.Paint);
     }
-    Save(sheet, "/home/user/.cache/ctlrun/cursors.rgba"); Console.WriteLine("wrote cursors.rgba 800x240 (hot spot = red pixel)");
+    Save(sheet, "cursors.rgba"); Console.WriteLine("wrote cursors.rgba 800x240 (hot spot = red pixel)");
   }
 }

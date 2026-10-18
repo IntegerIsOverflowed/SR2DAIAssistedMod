@@ -48,6 +48,51 @@ using System.Windows.Forms;
 
 namespace Sr2d64CSport
 {
+    /// <summary>The built-in animation of the title bar colour bars (<see cref="SpriteForm.StripeAnimation"/>).</summary>
+    public enum StripeAnimationMode
+    {
+        /// <summary>The bars are static (the default).</summary>
+        None,
+        /// <summary>Your code drives the colours: <see cref="SpriteForm.StripeFrame"/> is raised on every frame, and the
+        /// colours you put into its <see cref="StripeFrameEventArgs.Colors"/> are painted for that frame. The palette
+        /// itself is not changed.</summary>
+        Custom,
+        /// <summary>The bars slide sideways and wrap around. The loop is seamless: it repeats every palette cycle.</summary>
+        WrapOffset,
+        /// <summary>Every colour turns around the hue circle, smoothly. The loop is seamless.</summary>
+        HueShift,
+        /// <summary>Discrete, not smooth: the colours jump one bar along on every step.</summary>
+        StepBars,
+        /// <summary>A brightness wave runs across the bars: each bar dims and brightens in turn, smoothly.</summary>
+        BrightnessWave,
+    }
+
+    /// <summary>Which way the colour bars travel in the moving animations (<see cref="SpriteForm.StripeAnimationDirection"/>).</summary>
+    public enum StripeDirection
+    {
+        /// <summary>The bars travel left (the colours flow to the left).</summary>
+        Left,
+        /// <summary>The bars travel right.</summary>
+        Right,
+    }
+
+    /// <summary>Arguments of <see cref="SpriteForm.StripeFrame"/>.</summary>
+    public sealed class StripeFrameEventArgs : EventArgs
+    {
+        internal StripeFrameEventArgs(double time, long frame, int[] colors) { Time = time; Frame = frame; Colors = colors; }
+
+        /// <summary>Seconds of animation so far (it stops while <see cref="SpriteForm.StripeAnimation"/> is None).</summary>
+        public double Time { get; }
+
+        /// <summary>The frame number, counting from 1.</summary>
+        public long Frame { get; }
+
+        /// <summary>The palette as it is now, as a copy. It is empty when the palette is empty, which means random
+        /// colours from <see cref="SpriteForm.StripeSeed"/>. Change it, or replace it with your own array: the colours
+        /// left here are painted for this frame only, and the palette itself is not changed.</summary>
+        public int[] Colors { get; set; }
+    }
+
     /// <summary>How <see cref="SpriteForm.StripeMode"/> decides the number of title bar colour bars.</summary>
     public enum StripeBarsMode
     {
@@ -169,6 +214,20 @@ namespace Sr2d64CSport
         bool stripesBehindText = true;        // the icon + the texts start at the left edge and sit ON the bars; false = they follow the pattern
         bool nativeFrame = true;              // WS_CAPTION + WS_THICKFRAME stay on, WM_NCCALCSIZE hands the whole frame back to the client area
         int[] stripePalette = Array.Empty<int>();
+        // animation: a WinForms timer repaints the bar; the phase advances by speed x elapsed time, and the paint reads it
+        StripeAnimationMode stripeAnim = StripeAnimationMode.None;
+        float stripeAnimSpeed = 0.5f;
+        StripeDirection stripeAnimDir = StripeDirection.Left;
+        int stripeAnimFps = 30, stripeAnimDepth = 50;
+        TangentMode stripeStartTan = TangentMode.Linear, stripeEndTan = TangentMode.Linear;
+        string stripeCurveText = "";
+        Curve? stripeCustom;                                    // the StripeCurve text, parsed; null = use the tangents
+        Keyframe stripeKeyA = new Keyframe(0, 0, TangentMode.Linear), stripeKeyB = new Keyframe(1, 1);   // one cycle = one segment (see RebuildEase)
+        readonly System.Windows.Forms.Timer stripeTimer = new System.Windows.Forms.Timer { Interval = 1000 / 30 };
+        readonly System.Diagnostics.Stopwatch stripeClock = new System.Diagnostics.Stopwatch();
+        double stripeLastT, stripeTime, stripePhase;
+        long stripeFrameNo;
+        int[]? stripeFrameColors;                               // Custom: the colours the StripeFrame handler set for this frame
         int titleColor = unchecked((int)0xFFFFFFFF), shadowColor = DefaultShadow, shadowOffset = 1;
         bool textShadow = true;
         string titleFontFamily = ""; float titleFontSize;
@@ -179,6 +238,8 @@ namespace Sr2d64CSport
             Size = new Size(960, 640);
             Text = " ";
             stripeSeedValue = Environment.TickCount;              // StripeSeed = -1: one random seed for the life of the form
+            stripeTimer.Tick += (_, _) => OnStripeTick();
+            RebuildEase();
             bar = new TitleBarStrip(this) { Height = MinBarHeight };
             barLive = true;
             Controls.Add(bar);
@@ -309,6 +370,121 @@ namespace Sr2d64CSport
         /// The same palette <see cref="StripeColorList"/> edits, as the integers the paint uses.</summary>
         [Browsable(false), DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
         public int[]? StripeColors { get => stripePalette.Length > 0 ? (int[])stripePalette.Clone() : null; set => SetPalette(value ?? Array.Empty<int>()); }
+
+        /// <summary>The bar colours as a read-only span over the palette (no copy). A span is a ref struct, so it cannot be
+        /// a designer property: the designer edits <see cref="StripeColorList"/>, and code reads this.</summary>
+        [Browsable(false), DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
+        public ReadOnlySpan<int> StripeColorSpan => stripePalette;
+
+        /// <summary>Replaces the bar colours from a span and repaints. The span is copied, so the caller can reuse its
+        /// buffer. An empty span means random colours from <see cref="StripeSeed"/>. Nothing happens when the colours
+        /// are the same as before.</summary>
+        public void SetStripeColors(ReadOnlySpan<int> colors) => SetPalette(colors.ToArray());
+
+        // ---- animation ------------------------------------------------------------------------------
+        /// <summary>The built-in animation of the colour bars. Anything but None starts a timer that repaints the
+        /// bars <see cref="StripeAnimationFps"/> times a second; None stops it. Custom lets your code set the colours
+        /// (see <see cref="StripeFrame"/>).</summary>
+        [Category("Animation"), DefaultValue(StripeAnimationMode.None), Description("Animates the colour bars: None (static), Custom (your code sets the colours in the StripeFrame event), WrapOffset (bars slide and wrap), HueShift (colours turn around the hue circle), StepBars (discrete, bar by bar), BrightnessWave (a brightness wave runs across the bars).")]
+        public StripeAnimationMode StripeAnimation { get => stripeAnim; set { stripeAnim = value; ApplyAnimation(); } }
+
+        /// <summary>Animation speed. Its unit depends on the mode: palette cycles (WrapOffset), turns (HueShift), steps
+        /// (StepBars), waves (BrightnessWave) per second. Custom only uses it for the time base. 0 freezes the animation.</summary>
+        [Category("Animation"), DefaultValue(0.5f), Description("Animation speed per second: palette cycles (WrapOffset), hue turns (HueShift), steps (StepBars), waves (BrightnessWave). 0 freezes it.")]
+        public float StripeAnimationSpeed { get => stripeAnimSpeed; set { stripeAnimSpeed = Math.Clamp(value, 0f, 20f); bar.Touch(); } }
+
+        /// <summary>Which way the bars travel in WrapOffset, StepBars and BrightnessWave (Left = the colours flow left).
+        /// HueShift turns the hue the other way round.</summary>
+        [Category("Animation"), DefaultValue(StripeDirection.Left), Description("Direction of the moving animations: Left or Right.")]
+        public StripeDirection StripeAnimationDirection { get => stripeAnimDir; set { stripeAnimDir = value; bar.Touch(); } }
+
+        /// <summary>The tangent of the motion at the start of each cycle (the Out of the cycle's first key), the modes of
+        /// <see cref="TangentMode"/>: Smooth (ease in-out), Linear (constant speed, the default), Step (holds, then
+        /// jumps), Fast (fast start), Slow (slow start), Spline (flat handles here, as Smooth), Auto (a cycle has no
+        /// neighbour keys, so a straight segment), Flat and Bezier (level handles here). Ignored while <see cref="StripeCurve"/> is set.</summary>
+        [Category("Animation"), DefaultValue(TangentMode.Linear), Description("Motion at the start of each cycle: Smooth, Linear (constant speed), Step, Fast, Slow, Spline, Auto, Flat or Bezier. Ignored while StripeCurve is set.")]
+        public TangentMode StripeStartTangent { get => stripeStartTan; set { stripeStartTan = value; RebuildEase(); bar.Touch(); } }
+
+        /// <summary>The tangent of the motion at the end of each cycle (the In of the cycle's last key), the same modes as
+        /// <see cref="StripeStartTangent"/>. The two are independent, like the Out and In tangents of a key in 3ds Max.</summary>
+        [Category("Animation"), DefaultValue(TangentMode.Linear), Description("Motion at the end of each cycle, same modes as the start tangent. Start and end are independent. Ignored while StripeCurve is set.")]
+        public TangentMode StripeEndTangent { get => stripeEndTan; set { stripeEndTan = value; RebuildEase(); bar.Touch(); } }
+
+        /// <summary>A custom motion curve as text: paste the <c>Copy as code</c> output of the curve editor here (or plain
+        /// point pairs such as <c>0,0 0.5,0.2 1,1</c>). The curve maps one cycle onto itself: the ends are pinned to
+        /// 0 and 1 so the loop stays seamless. Empty = use the start and end tangents. Code: <c>form.StripeCurve = curve.ToCode();</c>.
+        /// StepBars jumps from bar to bar and ignores the curve.</summary>
+        [Category("Animation"), DefaultValue(""), Description("Custom motion curve: paste the Copy as code text of the curve editor, or point pairs like 0,0 0.5,0.2 1,1. Empty = use the start and end tangents.")]
+        public string StripeCurve { get => stripeCurveText; set { stripeCurveText = value ?? ""; RebuildEase(); bar.Touch(); } }
+
+        /// <summary>Repaints per second of the animation timer (1 .. 120).</summary>
+        [Category("Animation"), DefaultValue(30), Description("Frames per second of the colour bar animation (1 to 120).")]
+        public int StripeAnimationFps { get => stripeAnimFps; set { stripeAnimFps = Math.Clamp(value, 1, 120); stripeTimer.Interval = 1000 / stripeAnimFps; } }
+
+        /// <summary>How far the bars dim at the trough of a <see cref="StripeAnimationMode.BrightnessWave"/>, in per
+        /// cent of the brightness (0 = no wave, 100 = down to black).</summary>
+        [Category("Animation"), DefaultValue(50), Description("BrightnessWave only: how far the bars dim at the trough of the wave, in per cent (0 = no wave).")]
+        public int StripeAnimationDepth { get => stripeAnimDepth; set { stripeAnimDepth = Math.Clamp(value, 0, 100); bar.Touch(); } }
+
+        /// <summary>Raised on every animation frame in <see cref="StripeAnimationMode.Custom"/>. Put the colours for that
+        /// frame into <see cref="StripeFrameEventArgs.Colors"/>; they are painted at once. The palette does not change.</summary>
+        [Category("Animation"), Description("Raised on every frame in Custom mode: set e.Colors to paint those colours for that frame.")]
+        public event EventHandler<StripeFrameEventArgs>? StripeFrame;
+
+        /// <summary>Builds the motion: one cycle is one keyframe segment (cs/Animation.cs), shaped by the start tangent
+        /// (the Out of the first key) and the end tangent (the In of the last key), the same Track.EaseSegment a Track uses.
+        /// The custom <see cref="StripeCurve"/> text, when it parses, replaces that.</summary>
+        void RebuildEase()
+        {
+            stripeKeyA = new Keyframe(0, 0, stripeStartTan);
+            stripeKeyB = new Keyframe(1, 1) { In = stripeEndTan };
+            stripeCustom = Curve.TryParse(stripeCurveText, out var custom) ? custom : null;
+        }
+
+        /// <summary>The motion profile of one cycle: maps the cycle position 0..1 onto 0..1. A custom curve is normalised
+        /// so its own ends count as 0 and 1, which keeps one full cycle mapping onto exactly one (a seamless loop).</summary>
+        double Ease(double u)
+        {
+            if (stripeCustom == null) return Track.EaseSegment(stripeKeyA, stripeKeyB, u);
+            double lo = stripeCustom.Evaluate(0), hi = stripeCustom.Evaluate(1);
+            if (hi - lo < 1e-6) return u;
+            return Math.Clamp((stripeCustom.Evaluate(u) - lo) / (hi - lo), 0, 1);
+        }
+
+        void ApplyAnimation()
+        {
+            bool run = stripeAnim != StripeAnimationMode.None && !DesignMode;
+            if (run)
+            {
+                if (!stripeClock.IsRunning) stripeClock.Start();
+                stripeLastT = stripeClock.Elapsed.TotalSeconds;          // resuming: no jump for the time it was stopped
+                if (!stripeTimer.Enabled) stripeTimer.Start();
+            }
+            else
+            {
+                stripeTimer.Stop();
+                stripeClock.Stop();
+                stripeFrameColors = null;
+            }
+            bar.Touch();
+        }
+
+        void OnStripeTick()
+        {
+            double now = stripeClock.Elapsed.TotalSeconds, dt = Math.Min(0.25, now - stripeLastT);   // a stalled UI does not jump the animation
+            stripeLastT = now;
+            stripeTime += dt;
+            stripePhase += dt * stripeAnimSpeed;
+            stripeFrameNo++;
+            stripeFrameColors = null;
+            if (stripeAnim == StripeAnimationMode.Custom && StripeFrame != null)
+            {
+                var args = new StripeFrameEventArgs(stripeTime, stripeFrameNo, (int[])stripePalette.Clone());
+                StripeFrame(this, args);
+                stripeFrameColors = args.Colors is { Length: > 0 } c ? (int[])c.Clone() : null;
+            }
+            bar.Touch();
+        }
 
         void SetPalette(int[] cols)
         {
@@ -738,28 +914,96 @@ namespace Sr2d64CSport
         /// <summary>Draws the bar run at its planned place, clipped to <see cref="BarPlan.ClipW"/> pixels.</summary>
         void DrawBars(Sprite s, BarPlan p, int h)
         {
-            int sk = p.Skew, line = Math.Max(1, stripeLineThickness);
-            var cols = new int[p.Count];
-            var rnd = new Random(stripeSeedValue);
-            for (int i = 0; i < p.Count; i++)
+            int sk = p.Skew, line = Math.Max(1, stripeLineThickness), n = p.Count;
+            int[] basis = BarBasis(n);
+            int cycle = basis.Length;
+            // the motion is shaped in TIME (so the start / end tangents mean start / end of the move), and the
+            // direction is applied afterwards: sgn = +1 travels left, -1 travels right
+            int sgn = stripeAnimDir == StripeDirection.Right ? -1 : 1;
+            double u = stripePhase - Math.Floor(stripePhase);                    // 0..1 within one cycle
+            double d = Ease(u);                                                   // the motion profile, 0..1 over one cycle
+            long steps = (long)Math.Floor(stripePhase);
+            int shift = 0, count = n;
+            double barStep = p.Step;
+            if (stripeAnim == StripeAnimationMode.WrapOffset)
             {
-                int c = stripePalette.Length > 0 ? stripePalette[i % stripePalette.Length] | unchecked((int)0xFF000000)
-                                                 : Hsl(rnd.NextDouble() * 360.0, 0.85, 0.55);
-                cols[i] = ScaleBrightness(c, stripeBrightness);
+                // The strip is one period of the pattern: the palette repeats a whole number of times across the
+                // run, and the bars are spread so that the run's full width holds exactly that many bars. A bar
+                // that slides off one end then re-enters at the other with its own colour and skew, so no bar is
+                // cut off by the strip edge.
+                double along = sgn > 0 ? d : 1 - d;                              // travel left: the run slides by d of a strip, right: by 1 - d
+                int period = cycle * Math.Max(1, (int)Math.Round(n / (double)cycle));   // bars per strip (a whole number of palettes)
+                barStep = p.RunW / (double)period;
+                shift = (int)Math.Round(along * p.RunW);                         // the run slides left by this many px
+                count = 2 * period + 2;                                          // two strips of bars: the window is covered at any shift
             }
-            int left = p.RunX, wide = p.ClipW;
+            var cols = new int[count];
+            for (int i = 0; i < count; i++)
+                cols[i] = ScaleBrightness(BarColorAt(basis, i, d, sgn, steps), BarPercent(i, cycle, d, sgn));
+            int left = p.RunX, wide = p.ClipW, x0 = left - shift;
             if (stripeStyle == StripeBarsStyle.FullBars)
             {
                 s.SetLockRectXY(left, 0, wide, h);
-                Bars(s, cols, p.Step, sk, h, left);
+                Bars(s, cols, barStep, sk, h, x0);
                 s.SetLockRect();
                 return;
             }
             s.SetLockRectXY(left, 0, wide, Math.Min(line, h));           // the same bars, only the top line
-            Bars(s, cols, p.Step, sk, h, left);
+            Bars(s, cols, barStep, sk, h, x0);
             s.SetLockRectXY(left, Math.Max(0, h - line), wide, line);     // ... and the bottom one
-            Bars(s, cols, p.Step, sk, h, left);
+            Bars(s, cols, barStep, sk, h, x0);
             s.SetLockRect();
+        }
+
+        /// <summary>The colours the bars are cut from, before the animation: the frame colours of a Custom handler, else
+        /// the palette, else random colours from the seed (one per bar).</summary>
+        int[] BarBasis(int n)
+        {
+            if (stripeAnim == StripeAnimationMode.Custom && stripeFrameColors != null) return stripeFrameColors;
+            if (stripePalette.Length > 0) return stripePalette;
+            var rnd = new Random(stripeSeedValue);
+            var cols = new int[n];
+            for (int i = 0; i < n; i++) cols[i] = Hsl(rnd.NextDouble() * 360.0, 0.85, 0.55);
+            return cols;
+        }
+
+        /// <summary>The colour of bar k (0 = the first bar of the run) for this frame, opaque.</summary>
+        int BarColorAt(int[] basis, int k, double d, int sgn, long steps)
+        {
+            int cycle = basis.Length;
+            switch (stripeAnim)
+            {
+                case StripeAnimationMode.HueShift:
+                    return RotateHue(basis[Mod(k, cycle)] | unchecked((int)0xFF000000), sgn * d * 360.0);
+                case StripeAnimationMode.StepBars:
+                    return basis[Mod(k + sgn * steps, cycle)] | unchecked((int)0xFF000000);
+                default:
+                    return basis[Mod(k, cycle)] | unchecked((int)0xFF000000);
+            }
+        }
+
+        /// <summary>The brightness of bar k in per cent: the bar brightness, dimmed by the wave in BrightnessWave.</summary>
+        int BarPercent(int k, int cycle, double d, int sgn)
+        {
+            if (stripeAnim != StripeAnimationMode.BrightnessWave || stripeAnimDepth <= 0) return stripeBrightness;
+            double w = 0.5 - 0.5 * Math.Cos(2 * Math.PI * (sgn * d + (double)Mod(k, cycle) / cycle));    // 0..1, a crest runs across the bars
+            return (int)Math.Round(stripeBrightness * (1 - stripeAnimDepth / 100.0 * w));
+        }
+
+        static int Mod(long a, int m) => (int)(((a % m) + m) % m);
+
+        /// <summary>Turns an opaque colour around the hue circle by <paramref name="degrees"/>; greys stay as they are.</summary>
+        static int RotateHue(int argb, double degrees)
+        {
+            double r = (argb >> 16 & 0xFF) / 255.0, g = (argb >> 8 & 0xFF) / 255.0, b = (argb & 0xFF) / 255.0;
+            double max = Math.Max(r, Math.Max(g, b)), min = Math.Min(r, Math.Min(g, b)), d = max - min;
+            if (d < 1e-9) return argb;
+            double l = (max + min) / 2, s = d / (1 - Math.Abs(2 * l - 1)), hue;
+            if (max == r) hue = 60 * ((g - b) / d % 6);
+            else if (max == g) hue = 60 * ((b - r) / d + 2);
+            else hue = 60 * ((r - g) / d + 4);
+            hue = ((hue + degrees) % 360 + 360) % 360;
+            return unchecked((int)(0xFF000000u | (uint)Hsl(hue, s, l) & 0xFFFFFFu));
         }
 
         static void Bars(Sprite s, int[] cols, double step, int sk, int h, int left)
@@ -1330,7 +1574,7 @@ namespace Sr2d64CSport
 
         protected override void Dispose(bool disposing)
         {
-            if (disposing) { menu?.Dispose(); menu = null; iconSprite?.Dispose(); iconSprite = null; titleIcon = null; }
+            if (disposing) { menu?.Dispose(); menu = null; iconSprite?.Dispose(); iconSprite = null; titleIcon = null; stripeTimer.Dispose(); }
             base.Dispose(disposing);
         }
 

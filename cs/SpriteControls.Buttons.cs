@@ -480,10 +480,10 @@ namespace Sr2d64CSport
 
         [Category("Appearance"), DefaultValue(ProgressStyle.Horizontal), Description("Horizontal, vertical or ring.")]
         public ProgressStyle Style { get => _style; set { _style = value; Redraw(); } }
-        [Category("Behavior"), DefaultValue(0.0)] public double Minimum { get => _min; set { _min = value; if (_max < _min) _max = _min; Redraw(); } }
-        [Category("Behavior"), DefaultValue(100.0)] public double Maximum { get => _max; set { _max = value; if (_min > _max) _min = _max; Redraw(); } }
-        [Category("Behavior"), DefaultValue(0.0), Description("Current position (clamped).")]
-        public double Value { get => _value; set { value = Math.Clamp(value, _min, _max); if (value == _value) return; _value = value; if (IsHandleCreated) RedrawNow(); else Redraw(); } }
+        [Category("Behavior"), DefaultValue(typeof(decimal), "0")] public decimal Minimum { get => (decimal)_min; set { _min = (double)value; if (_max < _min) _max = _min; Redraw(); } }
+        [Category("Behavior"), DefaultValue(typeof(decimal), "100")] public decimal Maximum { get => (decimal)_max; set { _max = (double)value; if (_min > _max) _min = _max; Redraw(); } }
+        [Category("Behavior"), DefaultValue(typeof(decimal), "0"), Description("Current position (clamped).")]
+        public decimal Value { get => (decimal)_value; set { double v = Math.Clamp((double)value, _min, _max); if (v == _value) return; _value = v; if (IsHandleCreated) RedrawNow(); else Redraw(); } }
         [Category("Appearance"), DefaultValue(true), Description("Draw the percentage (or the caption when Text is set).")]
         public bool ShowPercent { get => _showPercent; set { _showPercent = value; Redraw(); } }
         [Category("Appearance"), DefaultValue(false), Description("Indeterminate: a segment travels along the track instead of the fill (advance with Tick / Phase).")]

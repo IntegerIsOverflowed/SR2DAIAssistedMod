@@ -73,20 +73,8 @@ namespace Sr2d64CSport
         /// <summary>The tangent progress graph, in the canvas's top-right (the info area - never over the sprite).</summary>
         public static void TangentGraph(Sprite canvas, int modeIndex, float u)
         {
-            const int w = 78, h = 58;
-            int x = canvas.Width - w - 3, y = 34;                              // under the info lines (never overlapped by them)
-            canvas.FillRect(x, y, w, h, unchecked((int)0xC0101418), SR2D.LineOp.AlphaOver);
-            canvas.DrawRect(x, y, w, h, unchecked((int)0x60FFFFFF));
-            var pts = new PointF[25];
-            for (int i = 0; i < pts.Length; i++)
-            {
-                float t = i / (pts.Length - 1f);
-                float p = Math.Clamp((float)Shape(modeIndex, t), 0f, 1.5f);
-                pts[i] = new PointF(x + 4 + t * (w - 8), y + h - 5 - p * (h - 10) / 1.5f);
-            }
-            canvas.DrawPolyline(pts, unchecked((int)0xFF40C0FF), 1.5f, true, false, SR2D.LineOp.AlphaOver, true);
-            float cu = Math.Clamp(u, 0f, 1f), cp = Math.Clamp((float)Shape(modeIndex, cu), 0f, 1.5f);
-            canvas.FillCircle(x + 4 + cu * (w - 8), y + h - 5 - cp * (h - 10) / 1.5f, 2.5f, unchecked((int)0xFFFFC040), SR2D.LineOp.AlphaOver);
+            // the drawing lives in the library (cs/Animation.Graph.cs); this only picks the shape and the corner (under the info lines)
+            Sr2d64CSport.TangentGraph.Draw(canvas, t => Shape(modeIndex, (float)t), u, canvas.Width - 78 - 3, 34);
         }
     }
 

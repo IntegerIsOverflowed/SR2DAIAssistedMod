@@ -730,7 +730,7 @@ namespace Sr2d64CSport
         {
             base.OnMouseWheel(e);
             if (!_bar.Visible) return;
-            _scroll = Math.Clamp(_scroll - Math.Sign(e.Delta) * 48, 0, (int)Math.Max(0, _bar.Maximum - _bar.PageSize));
+            _scroll = Math.Clamp(_scroll - Math.Sign(e.Delta) * 48, 0, (int)Math.Max(0, (double)_bar.Maximum - (double)_bar.PageSize));
             _barSync = true; try { _bar.Value = _scroll; } finally { _barSync = false; }
             PerformLayout();
             if (e is HandledMouseEventArgs h) h.Handled = true;

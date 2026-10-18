@@ -28,8 +28,8 @@ namespace Sr2d64CSport
         [Category("Behavior"), DefaultValue(Orientation.Vertical), Description("Vertical or horizontal bar.")]
         public Orientation Orientation { get => _orient; set { _orient = value; Redraw(); } }
 
-        [Category("Behavior"), DefaultValue(10.0), Description("Size of the visible part in value units: the thumb length is PageSize / (Maximum - Minimum) of the track, the largest Value is Maximum - PageSize, a track click moves by PageSize.")]
-        public double PageSize { get => _page; set { _page = Math.Max(0, value); SetValue(Value, false); Redraw();   /* re-clamp to the new range */ } }
+        [Category("Behavior"), DefaultValue(typeof(decimal), "10"), Description("Size of the visible part in value units: the thumb length is PageSize / (Maximum - Minimum) of the track, the largest Value is Maximum - PageSize, a track click moves by PageSize.")]
+        public decimal PageSize { get => (decimal)_page; set { _page = Math.Max(0, (double)value); SetValue(DblValue, false); Redraw();   /* re-clamp to the new range */ } }
 
         [Category("Appearance"), DefaultValue(true), Description("Arrow buttons at both ends (one Step per click).")]
         public bool Arrows { get => _arrows; set { _arrows = value; Redraw(); } }
@@ -38,10 +38,10 @@ namespace Sr2d64CSport
         [Browsable(false), DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
         public new bool ShowValue { get => base.ShowValue; set => base.ShowValue = value; }
 
-        protected override double UpperLimit => Math.Max(Minimum, Maximum - _page);
+        protected override double UpperLimit => Math.Max(DblMin, DblMax - _page);
         protected override bool FocusOnPress => false;
         /// <summary>True when the whole range fits in one page (nothing to scroll).</summary>
-        [Browsable(false)] public bool IsIdle => Maximum - Minimum <= _page + 1e-9;
+        [Browsable(false)] public bool IsIdle => DblMax - DblMin <= _page + 1e-9;
 
         bool Hz => _orient == Orientation.Horizontal;
         int Thick => Hz ? ClientSize.Height : ClientSize.Width;
@@ -52,9 +52,9 @@ namespace Sr2d64CSport
         (float a, float b, float t0, float t1) Geometry()
         {
             float a = ArrowLen + 1, b = Len - ArrowLen - 1, track = Math.Max(1, b - a);
-            double span = Math.Max(1e-9, Maximum - Minimum);
+            double span = Math.Max(1e-9, DblMax - DblMin);
             float tl = (float)Math.Clamp(track * Math.Min(1, _page / span), Math.Min(track, Math.Max(8, Thick)), track);
-            double f = UpperLimit > Minimum ? (Shown - Minimum) / (UpperLimit - Minimum) : 0;
+            double f = UpperLimit > DblMin ? (Shown - DblMin) / (UpperLimit - DblMin) : 0;
             float t0 = a + (float)((track - tl) * Math.Clamp(f, 0, 1));
             return (a, b, t0, t0 + tl);
         }
@@ -77,21 +77,21 @@ namespace Sr2d64CSport
                 _grab = (int)((Hz ? e.X : e.Y) - t0);
                 switch (_hitPart)
                 {
-                    case 4: SetValue(Value - Step, true); return;      // arrows / track: no drag
-                    case 5: SetValue(Value + Step, true); return;
-                    case 2: SetValue(Value - _page, true); return;
-                    case 3: SetValue(Value + _page, true); return;
+                    case 4: SetValue(DblValue - DblStep, true); return;      // arrows / track: no drag
+                    case 5: SetValue(DblValue + DblStep, true); return;
+                    case 2: SetValue(DblValue - _page, true); return;
+                    case 3: SetValue(DblValue + _page, true); return;
                 }
             }
             base.OnMouseDown(e);
         }
         protected override double ValueFromPointer(Point p, Point start, double startValue, bool fine)
         {
-            if (_hitPart != 1) return Value;
+            if (_hitPart != 1) return DblValue;
             var (a, b, t0, t1) = Geometry();
             float track = b - a, tl = t1 - t0, q = (Hz ? p.X : p.Y) - _grab;
             double f = track - tl > 0 ? (q - a) / (track - tl) : 0;
-            return Minimum + Math.Clamp(f, 0, 1) * (UpperLimit - Minimum);
+            return DblMin + Math.Clamp(f, 0, 1) * (UpperLimit - DblMin);
         }
         protected override void OnMouseMove(MouseEventArgs e)
         {

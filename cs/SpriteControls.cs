@@ -404,6 +404,10 @@ namespace Sr2d64CSport
     /// <summary>Shared snapping helpers for the discrete-value mode of the range controls (Values / PowersOfTwo).</summary>
     internal static class Discrete
     {
+        /// <summary>Converts a decimal list (the public API) to the internal double list; null stays null.</summary>
+        public static double[]? ToDouble(decimal[]? v) => v == null ? null : Array.ConvertAll(v, x => (double)x);
+        /// <summary>Converts the internal double list to the public decimal list; null stays null.</summary>
+        public static decimal[]? ToDecimal(double[]? v) => v == null ? null : Array.ConvertAll(v, x => (decimal)x);
         /// <summary>The most decimals any entry of a discrete list needs (0..3): the value text of a slider snapped
         /// to 0 / 0.5 / 1.5 / 3 must show "1.5", not the rounded "2" the integer default produced.</summary>
         public static int DecimalsOf(double[]? v)
@@ -466,6 +470,13 @@ namespace Sr2d64CSport
         string _unit = "";
         double[]? _values; bool _pow2;
 
+        // Double views for the drawing and hit-test code (the public properties are decimal).
+        protected double DblMin => _min;
+        protected double DblMax => _max;
+        protected double DblValue => _value;
+        protected double DblStep => _step;
+        protected double[]? DblValues => _values;
+
         protected SpriteRangeControl() { Cursor = SpriteCursors.HandOpen; }   // "drag me": the open hand while hovering, the fist while dragging
 
         // ------------------------------------------------------------------ value model
@@ -473,21 +484,21 @@ namespace Sr2d64CSport
         [Category("Action"), Description("Raised after Value changed.")]
         public event EventHandler? ValueChanged;
 
-        [Category("Behavior"), DefaultValue(0.0), Description("Lower end of the range.")]
-        public double Minimum { get => _min; set { if (_min == value) return; _min = value; if (_max < _min) _max = _min; SyncPow2(); SetValue(_value, false); Redraw(); } }
+        [Category("Behavior"), DefaultValue(typeof(decimal), "0"), Description("Lower end of the range.")]
+        public decimal Minimum { get => (decimal)_min; set { double v = (double)value; if (_min == v) return; _min = v; if (_max < _min) _max = _min; SyncPow2(); SetValue(_value, false); Redraw(); } }
 
-        [Category("Behavior"), DefaultValue(100.0), Description("Upper end of the range.")]
-        public double Maximum { get => _max; set { if (_max == value) return; _max = value; if (_min > _max) _min = _max; SyncPow2(); SetValue(_value, false); Redraw(); } }
+        [Category("Behavior"), DefaultValue(typeof(decimal), "100"), Description("Upper end of the range.")]
+        public decimal Maximum { get => (decimal)_max; set { double v = (double)value; if (_max == v) return; _max = v; if (_min > _max) _min = _max; SyncPow2(); SetValue(_value, false); Redraw(); } }
 
-        [Category("Behavior"), DefaultValue(0.0), Description("Current value (clamped to Minimum..Maximum; snapped to Step when Snap is set).")]
-        public double Value { get => _value; set => SetValue(value, false); }
+        [Category("Behavior"), DefaultValue(typeof(decimal), "0"), Description("Current value (clamped to Minimum..Maximum; snapped to Step when Snap is set).")]
+        public decimal Value { get => (decimal)_value; set => SetValue((double)value, false); }
 
-        [Category("Behavior"), DefaultValue(1.0), Description("Increment for the mouse wheel and the arrow keys; also the snapping grid when Snap is set.")]
-        public double Step { get => _step; set { _step = value <= 0 ? 1 : value; } }
+        [Category("Behavior"), DefaultValue(typeof(decimal), "1"), Description("Increment for the mouse wheel and the arrow keys; also the snapping grid when Snap is set.")]
+        public decimal Step { get => (decimal)_step; set { _step = value <= 0 ? 1 : (double)value; } }
 
         /// <summary>Discrete values the control snaps to: sorted and de-duplicated automatically, every input (drag, wheel, keys, typed, code) picks the nearest entry, and the wheel / arrow keys move one entry at a time. When set, Snap / Step are ignored.</summary>
         [Category("Behavior"), Description("Discrete values to snap to (e.g. 2 4 6 8 10 12, or any predetermined set). Every value picks the nearest entry; the wheel and the arrow keys step through the list.")]
-        public double[]? Values { get => _values; set { _values = Discrete.Norm(value); SetValue(_value, false); Redraw(); } }
+        public decimal[]? Values { get => Discrete.ToDecimal(_values); set { _values = Discrete.Norm(Discrete.ToDouble(value)); SetValue(_value, false); Redraw(); } }
         [Browsable(false)] public bool ShouldSerializeValues() => _values != null;
         /// <summary>Snap to the powers of two inside Minimum..Maximum (2 4 8 16 ...); the list follows range changes. Equivalent to assigning <see cref="Values"/>.</summary>
         [Category("Behavior"), DefaultValue(false), Description("Snap to the powers of two inside Minimum..Maximum (2 4 8 16 ...) instead of a continuous range.")]
@@ -502,8 +513,8 @@ namespace Sr2d64CSport
         [Category("Behavior"), DefaultValue(false), Description("Round the value to multiples of Step (relative to Minimum).")]
         public bool Snap { get => _snap; set { _snap = value; SetValue(_value, false); } }
 
-        [Category("Behavior"), DefaultValue(0.0), Description("Value restored by a double click.")]
-        public double ResetValue { get => _reset; set => _reset = value; }
+        [Category("Behavior"), DefaultValue(typeof(decimal), "0"), Description("Value restored by a double click.")]
+        public decimal ResetValue { get => (decimal)_reset; set => _reset = (double)value; }
 
         [Category("Appearance"), DefaultValue(0), Description("Decimal places of the value text.")]
         public int Decimals { get => _decimals; set { _decimals = Math.Clamp(value, 0, 6); Redraw(); } }
@@ -594,7 +605,7 @@ namespace Sr2d64CSport
         /// <summary>True while a <see cref="CommitOnRelease"/> drag previews a value that is not applied yet.</summary>
         [Browsable(false)] public bool HasPendingValue => !double.IsNaN(_pending);
         /// <summary>The value the picture shows: the pending one during a deferred drag, otherwise <see cref="Value"/>.</summary>
-        [Browsable(false)] public double PendingValue => Shown;
+        [Browsable(false)] public decimal PendingValue => (decimal)Shown;
         /// <summary>The value to paint (pending during a deferred drag, else the value).</summary>
         protected double Shown => double.IsNaN(_pending) ? _value : _pending;
         /// <summary>0..1 position of <see cref="Value"/> (the committed one) inside the range.</summary>
@@ -832,23 +843,23 @@ namespace Sr2d64CSport
         [Category("Behavior"), DefaultValue(3), Description("Number of turns from Minimum to Maximum: Endless winding (when ValuePerTurn is 0) and the coils of the Spiral / Rings gauges (1 = a plain 360-degree knob).")]
         public int Turns { get => _turns; set { _turns = Math.Max(1, value); Redraw(); } }
 
-        [Category("Behavior"), DefaultValue(0.0), Description("Endless mode: value change per full turn of the pointer (0 = (Maximum - Minimum) / Turns).")]
-        public double ValuePerTurn { get => _perTurn; set { _perTurn = Math.Max(0, value); Redraw(); } }
+        [Category("Behavior"), DefaultValue(typeof(decimal), "0"), Description("Endless mode: value change per full turn of the pointer (0 = (Maximum - Minimum) / Turns).")]
+        public decimal ValuePerTurn { get => (decimal)_perTurn; set { _perTurn = Math.Max(0, (double)value); Redraw(); } }
 
-        double PerTurn => _perTurn > 0 ? _perTurn : (Maximum - Minimum) / _turns;
+        double PerTurn => _perTurn > 0 ? _perTurn : (DblMax - DblMin) / _turns;
         double FractionOf(double v) => DiscreteFractionOf(v);               // even spacing between the entries of a Values list
-        double EndlessAngleOf(double v) => (v - Minimum) / PerTurn * 2 * Math.PI;
+        double EndlessAngleOf(double v) => (v - DblMin) / PerTurn * 2 * Math.PI;
         /// <summary>Endless: total pointer angle (radians, 0 = 12 o'clock, clockwise) that represents the shown value.</summary>
         double EndlessAngle => EndlessAngleOf(Shown);
         /// <summary>Number of turns the gauge spans (Rings / Spiral): Turns, or what the range needs in Endless mode.</summary>
-        int GaugeTurns => _mode == KnobDragMode.Endless ? Math.Max(1, (int)Math.Ceiling((Maximum - Minimum) / PerTurn - 1e-9)) : _turns;
+        int GaugeTurns => _mode == KnobDragMode.Endless ? Math.Max(1, (int)Math.Ceiling((DblMax - DblMin) / PerTurn - 1e-9)) : _turns;
         /// <summary>Turns wound so far on a multi-turn gauge (Endless: the real pointer turns, so gauge and pointer agree; Angular: the value spread over Turns).</summary>
         double GaugeWound => _mode == KnobDragMode.Endless ? EndlessAngle / (2 * Math.PI) : Fraction * GaugeTurns;
 
         /// <summary>Value change per full turn of the pointer (what the infinite pointer's relative motion is worth).</summary>
         double GainPerTurn => _mode == KnobDragMode.Endless ? PerTurn
-            : (Gauge == KnobGauge.Arc || Gauge == KnobGauge.None) ? (Maximum - Minimum) * 360.0 / SweepDeg
-            : (Maximum - Minimum);
+            : (Gauge == KnobGauge.Arc || Gauge == KnobGauge.None) ? (DblMax - DblMin) * 360.0 / SweepDeg
+            : (DblMax - DblMin);
 
         // endless / infinite drag: previous pointer angle (screen atan2) to unwrap the motion; free = the infinite pointer's
         // own angle (screen radians), an accumulator that follows the hand for ever - beyond the ends too, where the value
@@ -859,7 +870,7 @@ namespace Sr2d64CSport
         protected override void OnValueApplied(double oldValue)
         {
             if (_mouseDriven || IsCommittingDrag) { _mouseDriven = false; return; }       // the drag already moved the pointer
-            if (_pointer == KnobPointer.Infinite && !double.IsNaN(_free)) _free += (Value - oldValue) / GainPerTurn * 2 * Math.PI;
+            if (_pointer == KnobPointer.Infinite && !double.IsNaN(_free)) _free += (DblValue - oldValue) / GainPerTurn * 2 * Math.PI;
         }
 
         // layout: caption line (if Text) on top, value line (if ShowValue) at the bottom, knob fills the rest
@@ -926,11 +937,11 @@ namespace Sr2d64CSport
                     if (d > Math.PI) d -= 2 * Math.PI; else if (d < -Math.PI) d += 2 * Math.PI;   // unwrap: shortest way round
                     _lastAngle = a;
                     if (_pointer == KnobPointer.Infinite && !double.IsNaN(_free)) _free += d * (fine ? 0.1 : 1.0);   // the pointer takes all of the motion - beyond the ends too
-                    total = (Shown - Minimum) / GainPerTurn * (2 * Math.PI) + d * (fine ? 0.1 : 1.0);   // relative to the shown value, in GainPerTurn units
+                    total = (Shown - DblMin) / GainPerTurn * (2 * Math.PI) + d * (fine ? 0.1 : 1.0);   // relative to the shown value, in GainPerTurn units
                 }
                 // clamp in value space; because the angle is re-derived from the clamped value every move, turning past
                 // an end and back reacts immediately (no dead travel)
-                return Math.Clamp(Minimum + total / (2 * Math.PI) * GainPerTurn, Minimum, Maximum);
+                return Math.Clamp(DblMin + total / (2 * Math.PI) * GainPerTurn, DblMin, DblMax);
             }
             double deg = a * 180 / Math.PI;                                       // -180..180, y down
             if (Gauge == KnobGauge.Arc || Gauge == KnobGauge.None)
@@ -1049,9 +1060,9 @@ namespace Sr2d64CSport
                 br *= 1 + 0.06f * lift;
             }
             PaintBody(s, cx, cy, br, IsDragging, Math.Max(1f, r * 0.04f));
-            if (HasPendingValue && _pointer == KnobPointer.Bounded && Math.Abs(Shown - Value) > 1e-9)
+            if (HasPendingValue && _pointer == KnobPointer.Bounded && Math.Abs(Shown - DblValue) > 1e-9)
             {   // ghost of the committed value
-                float ga = (float)AngleOf(Value);
+                float ga = (float)AngleOf(DblValue);
                 s.DrawWideLine(cx + MathF.Cos(ga) * br * 0.35f, cy + MathF.Sin(ga) * br * 0.35f, cx + MathF.Cos(ga) * br * 0.85f, cy + MathF.Sin(ga) * br * 0.85f, Mix(BackColor, AccentRaw, 0.45f), Math.Max(1f, r * 0.05f), true, SR2D.LineOp.Set, true);
             }
             float ang = (float)PointerAngle;

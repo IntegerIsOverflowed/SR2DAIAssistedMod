@@ -291,7 +291,7 @@ namespace Sr2d64CSport
 
         /// <summary>Discrete values the control snaps to: sorted and de-duplicated automatically, every input (typing, buttons, keys, code) picks the nearest entry, and the buttons / arrow keys step through the list one entry at a time. When set, Step is ignored.</summary>
         [Category("Behavior"), Description("Discrete values to snap to (e.g. 2 4 6 8 10 12, or any predetermined set). Every value picks the nearest entry; the buttons and the arrow keys step through the list.")]
-        public double[]? Values { get => _values; set { _values = Discrete.Norm(value); SetValue(_value, false); } }
+        public decimal[]? Values { get => Discrete.ToDecimal(_values); set { _values = Discrete.Norm(Discrete.ToDouble(value)); SetValue(_value, false); } }
         [Browsable(false)] public bool ShouldSerializeValues() => _values != null;
         /// <summary>Snap to the powers of two inside Minimum..Maximum (2 4 8 16 ...); the list follows range changes.</summary>
         [Category("Behavior"), DefaultValue(false), Description("Snap to the powers of two inside Minimum..Maximum (2 4 8 16 ...) instead of a continuous range.")]
