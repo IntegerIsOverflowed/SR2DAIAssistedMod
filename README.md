@@ -102,6 +102,8 @@ SR2D/
 │  ├─ Sprite.Rect.cs       partial Sprite: Rectangle (x,y,w,h) overloads of the L/R/T/B methods, Bounds, LockRect
 │  ├─ Sprite.Curves.cs     partial Sprite: splines through points, Béziers, arcs, PathBuilder (DrawPath / FillPath)
 │  ├─ Vector.cs / .Render.cs / .Svg.cs / .Anim.cs / .Ps.cs / .Pdf.cs   VectorImage model, rasteriser, SVG (SMIL animation, alpha masks) / PostScript-EPS-AI / PDF importers
+│  ├─ Vector.MbTiles.cs    MBTiles vector map tiles → VectorImage (+ default OpenMapTiles style)
+│  ├─ MbTiles.cs / Mvt.cs  read-only SQLite reader for .mbtiles (no NuGet) / protobuf MVT decoder
 │  ├─ Vector.Cache.cs      VectorSprite: static raster cache + animated layer compositor
 │  ├─ Vector.Precompose.cs optional bounded bitmap-loop cache: bake once, DrawAt(t) = bitmap playback without vector evaluation
 │  ├─ Vector.Edit.cs       Container edits: Recolor / SwapColors / Palette (fill, stroke or both), by-name SetFill / SetStroke / Hide / Show / Remove, Merge, Shuffle, order
@@ -2197,6 +2199,29 @@ feature, a PDF with xref + object streams / shadings / a type-4 function / `Rota
 with a broken `startxref`, an RC4-encrypted PDF, a DOS-EPS with binary header, the Ghostscript
 tiger as SVG and EPS, `golfer.eps`, `colorcir.ps`). `tests/cs/vecrun` loads them headlessly and
 dumps renderings (`vecrun.dll <outdir> <files...>`, then `topng.py`).
+
+### MBTiles map tiles (`cs/MbTiles.cs`, `cs/Mvt.cs`, `cs/Vector.MbTiles.cs`)
+
+An `.mbtiles` file (a SQLite database of tiles) with vector tiles (format `pbf`, MVT) loads as a
+`VectorImage`, so it draws at any scale like an SVG. The SQLite reader is part of the engine: read-only,
+no NuGet package, handles multi-page tables and gzip-compressed tiles.
+
+```csharp
+using var mb = MbTiles.Open("map.mbtiles");          // Name, Format, MinZoom, MaxZoom, DataMaxZoom, West/South/East/North
+byte[]? tile = mb.GetTile(z, x, yXyz);               // null if the tile is not in the file; gzip is removed
+List<MvtLayer>? layers = tile is null ? null : Mvt.Decode(tile);   // layers → features: Props, Geoms (tile units), GeomType 1 point / 2 line / 3 polygon
+
+var map = VectorImage.FromMbTiles("map.mbtiles", new MbTilesView {
+    Zoom = 13,                                       // -1 (default) = DataMaxZoom, the highest zoom with tiles
+    West = 61.2, South = 55.05, East = 61.6, North = 55.25,   // default = whole file
+    Style = null                                     // null = MbTilesStyle.Default (OpenMapTiles); or your own MbTilesStyleRule
+});
+map.DrawFit(canvas);                                 // or Rasterize(w, h)
+```
+
+Limits: raster MBTiles (png / jpg) throw `NotSupportedException`; labels and icons are not drawn
+(the importer adds that to `Warnings`). Loading a whole city at zoom 13 is tens of thousands of shapes,
+so pick a smaller `West/South/East/North` or a lower `Zoom` when you only need an overview.
 
 ## WebP pictures: `cs/WebP.cs` (`Sprite.FromWebP`, automatic in `new Sprite(file)`)
 

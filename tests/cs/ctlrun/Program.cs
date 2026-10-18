@@ -2108,6 +2108,7 @@ static class P {
     TextViews();
     Wheels();
     ContainerButtonStyle();
+    MbTilesChecks.Run();
     MouseClickEvents();
     Looks();
     Views();

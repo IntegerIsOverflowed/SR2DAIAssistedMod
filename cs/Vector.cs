@@ -376,7 +376,7 @@ namespace Sr2d64CSport
     }
 
     /// <summary>Which importer <see cref="VectorImage.Load(string)"/> used.</summary>
-    internal enum VectorFormat { Unknown, Svg, PostScript, Pdf }
+    internal enum VectorFormat { Unknown, Svg, PostScript, Pdf, MbTiles }
 
     /// <summary>
     /// A container of vector shapes with an intrinsic size (<see cref="Width"/> x <see cref="Height"/> = the view box). See the
@@ -412,9 +412,20 @@ namespace Sr2d64CSport
 
         // ------------------------------------------------------------------ loading
         /// <summary>Loads .svg / .svgz, .eps / .ps / .ai (PostScript), .pdf; the content is sniffed when the extension does not tell.</summary>
-        public static VectorImage Load(string file, int page = 0) => Load(File.ReadAllBytes(file), Path.GetExtension(file), page);
+        public static VectorImage Load(string file, int page = 0)
+        {
+            // MBTiles is a SQLite database: read it from the file, not into memory (a map can be hundreds of MB)
+            if (MbTiles.IsSqliteFile(file)) return FromMbTiles(file);
+            return Load(File.ReadAllBytes(file), Path.GetExtension(file), page);
+        }
         public static VectorImage Load(byte[] data, string? hint = null, int page = 0)
         {
+            if (MbTiles.IsSqlite(data))
+            {
+                using var ms = new MemoryStream(data);
+                using var mb = MbTiles.Open(ms);
+                return FromMbTiles(mb);
+            }
             hint = (hint ?? "").Trim().TrimStart('.').ToLowerInvariant();
             if (data.Length >= 2 && data[0] == 0x1F && data[1] == 0x8B)
             {   // gzip (svgz)
@@ -432,6 +443,7 @@ namespace Sr2d64CSport
         }
         public static VectorFormat Sniff(byte[] data, string? hint = null)
         {
+            if (MbTiles.IsSqlite(data)) return VectorFormat.MbTiles;
             if (data.Length >= 4)
             {
                 if (data[0] == '%' && data[1] == 'P' && data[2] == 'D' && data[3] == 'F') return VectorFormat.Pdf;
@@ -442,7 +454,7 @@ namespace Sr2d64CSport
             if (head.Contains("<svg", StringComparison.OrdinalIgnoreCase) || head.TrimStart().StartsWith("<?xml", StringComparison.Ordinal) || head.TrimStart().StartsWith('<')) return VectorFormat.Svg;
             int pdf = head.IndexOf("%PDF", StringComparison.Ordinal); if (pdf >= 0 && pdf < 1024) return VectorFormat.Pdf;
             if (head.Contains("%!PS", StringComparison.Ordinal)) return VectorFormat.PostScript;
-            return hint switch { "svg" or "svgz" => VectorFormat.Svg, "pdf" => VectorFormat.Pdf, "eps" or "ps" or "ai" or "epsf" => VectorFormat.PostScript, _ => VectorFormat.Unknown };
+            return hint switch { "mbtiles" => VectorFormat.MbTiles, "svg" or "svgz" => VectorFormat.Svg, "pdf" => VectorFormat.Pdf, "eps" or "ps" or "ai" or "epsf" => VectorFormat.PostScript, _ => VectorFormat.Unknown };
         }
         public static VectorImage FromSvg(string xml) { var img = SvgReader.Read(xml); img.Format = VectorFormat.Svg; return img; }
         public static VectorImage FromPostScript(byte[] ps) { var img = PsReader.Read(ps); img.Format = VectorFormat.PostScript; return img; }

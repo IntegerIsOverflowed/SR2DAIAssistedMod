@@ -16,6 +16,24 @@ Conventions
   DOCS     README / comments only
 
 
+2026-10-19  MBTiles vector map tiles in the vector container
+------------------------------------------------------------------------------------------------
+ADDED    VectorImage.Load("map.mbtiles") and VectorImage.FromMbTiles(path, view) load vector map tiles (MBTiles,
+         format pbf / MVT) as a shape list, drawn like any other VectorImage (DrawFit, Rasterize ...).
+         The default zoom is the highest zoom that has tiles (DataMaxZoom), because some files say maxzoom 14 in
+         the metadata and only hold tiles to z11.
+         New files: cs/MbTiles.cs (read-only SQLite reader with gzip tiles; no NuGet package), cs/Mvt.cs
+         (protobuf MVT decoder; MvtFeature.Name picks the label), cs/Vector.MbTiles.cs (importer and an
+         OpenMapTiles default style, MbTilesStyleRule for your own style).
+         Changed file: cs/Vector.cs (VectorFormat.MbTiles; SQLite files are routed to the reader in Load and Sniff).
+         Raster MBTiles throw NotSupportedException. Labels and icons are not drawn (geometry only, reported in Warnings).
+COMPAT   None. SVG / PDF / PostScript loading takes the same path as before.
+CHECKED  tests/cs/ctlrun MbTilesChecks.cs: two small fixtures in tests/data/mbtiles (every tile byte-for-byte, digests
+         recorded in tests/data/mbtiles/README.md), MVT decode of all tiles, random bytes do not throw, and with
+         MBTILES_FILE set the full chelyabinsk.mbtiles (2,597 tiles read in 189 ms; z13 city import 47,608 shapes in
+         411 ms; first draw 1.4 s). Measured on a Linux managed run, not on Windows.
+PROJECTS demo, webpchk, fontchk, edgechk and vecfuzz list the three new files in their project files.
+
 2026-10-19  Designer fix: SpritePanel attributes
 ------------------------------------------------------------------------------------------------
 FIXED    SpritePanel had lost its own class attributes. The ContainerButtons helper (2026-10-15) was inserted between

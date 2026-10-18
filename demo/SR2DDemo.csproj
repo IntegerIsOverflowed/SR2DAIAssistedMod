@@ -71,6 +71,9 @@
     <Compile Include="..\cs\Sprite.Font.cs" Link="cs\Sprite.Font.cs" />
     <Compile Include="..\cs\Sprite.Shear.cs" Link="cs\Sprite.Shear.cs" />
     <Compile Include="..\cs\Vector.cs" Link="cs\Vector.cs" />
+    <Compile Include="..\cs\MbTiles.cs" Link="cs\MbTiles.cs" />
+    <Compile Include="..\cs\Mvt.cs" Link="cs\Mvt.cs" />
+    <Compile Include="..\cs\Vector.MbTiles.cs" Link="cs\Vector.MbTiles.cs" />
     <Compile Include="..\cs\Vector.Render.cs" Link="cs\Vector.Render.cs" />
     <Compile Include="..\cs\Vector.Svg.cs" Link="cs\Vector.Svg.cs" />
     <Compile Include="..\cs\Vector.Anim.cs" Link="cs\Vector.Anim.cs" />
