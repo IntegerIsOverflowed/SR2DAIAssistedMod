@@ -84,6 +84,46 @@ static class MbTilesChecks
         else Console.WriteLine("  skip street-name check (set MBTILES_FILE to chelyabinsk.mbtiles)");
     }
 
+    // the bitmap cache: a baked view copied at a whole-pixel pan equals the direct draw; a pan past the margin is not covered
+    public static void BakeCache()
+    {
+        var dir = FindDataDir();
+        Chk(dir != null, "tests/data/mbtiles found (bake checks)");
+        using var mb = MbTiles.Open(Path.Combine(dir!, "chel-z11-smallpages.mbtiles"));
+        var img = Sr2d64CSport.VectorImage.FromMbTiles(mb, new Sr2d64CSport.MbTilesView { Zoom = 11, Labels = false, Threads = 1 });
+        const int W = 800, H = 500, bg = unchecked((int)0xFFF4F1E8);
+        const string key = "bake-check";
+        var o = Sr2d64CSport.VectorRenderOptions.Default;
+        double cx = img.Width * 0.5, cy = img.Height * 0.5;
+        var cache = new Sr2d64CSport.VectorViewCache();
+        cache.Bake(img, key, W, H, cx, cy, 1.0, o, 1.5f, bg);
+        Chk(cache.Covers(key, W, H, cx + 37, cy - 21, 1.0), "a 37,-21 pan stays inside the baked margin");
+        Chk(!cache.Covers(key, W, H, cx + 1000, cy, 1.0), "a 1000 px pan is outside the margin");
+        Chk(!cache.Covers(key + "x", W, H, cx, cy, 1.0), "another picture key is not covered");
+        Chk(!cache.Covers(key, W, H, cx, cy, 2.0), "another zoom is not covered");
+        foreach (var (dx, dy) in new[] { (0.0, 0.0), (37.0, -21.0), (-120.0, 64.0) })
+        {
+            Chk(cache.Covers(key, W, H, cx + dx, cy + dy, 1.0), $"pan {dx},{dy} is covered");
+            var blit = new Sr2d64CSport.Sprite(W, H); blit.ClearBuffer(bg);
+            cache.Blit(blit, cx + dx, cy + dy);
+            var direct = new Sr2d64CSport.Sprite(W, H); direct.ClearBuffer(bg);
+            img.DrawVisible(direct, Sr2d64CSport.VectorViewCache.ViewMatrix(cx + dx, cy + dy, 1f, W / 2f, H / 2f), o, 1.5f);
+            int diff = 0; long sum = 0;
+            for (int i = 0; i < direct.Pixels.Length; i++)
+            {
+                if (blit.Pixels[i] == direct.Pixels[i]) continue;
+                diff++;
+                for (int sh = 0; sh < 32; sh += 8) sum += Math.Abs(((blit.Pixels[i] >>> sh) & 255) - ((direct.Pixels[i] >>> sh) & 255));
+            }
+            double mean = sum / (double)direct.Pixels.Length / 4;
+            Chk(mean < 0.05, $"blit at {dx},{dy} equals the direct draw (mean difference {mean:0.0000}, {diff} pixels differ)");
+        }
+        // a pan of a fraction of a pixel is rounded to whole pixels: shown, not claimed exact
+        var frac = new Sr2d64CSport.Sprite(W, H); frac.ClearBuffer(bg);
+        cache.Blit(frac, cx + 0.4, cy);
+        Console.WriteLine("  info  a 0.4 px pan is rounded to whole pixels (the blit is not sub-pixel)");
+    }
+
     public static void Run()
     {
         var dir = FindDataDir();

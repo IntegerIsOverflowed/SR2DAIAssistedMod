@@ -187,6 +187,8 @@ namespace Sr2d64CSport
         public bool ShadowByMouse;
         /// <summary>The whole canvas is the draggable object (a backdrop the test shifts by Ctx.X / Y - canvas centre): open hand everywhere, no pivot marker.</summary>
         public bool DragAnywhere;
+        /// <summary>Reset params also calls this (after the pan goes back to the centre): a test that keeps its own view, like the map, recentres it here.</summary>
+        public Action? OnReset;
         /// <summary>Grabbable checker backdrop: drag anywhere with the hand cursor slides it - without the "follow the mouse" check box (the offset lives in Ctx.BackdropX/Y, not in the Mouse parameter).</summary>
         public bool GrabBackdrop;
         /// <summary>The canvas is a drawing surface: the pen cursor shows and the LEFT button paints (Ctx.PenDown / PenX / PenY), like an image editor.</summary>
@@ -1219,14 +1221,14 @@ T(GControls, "SpriteLabel / GroupBox / Tabs / TextBox / Numeric / Combo / ListBo
             // QGIS-style simplification of the picture (Vector.Simplify.cs): threshold in SVG units, algorithm, provider side
             L[L.Count - 1].Ui(Param.Grid, "Simplification threshold, SVG units (0 = off)", Param.Op, "Simplification algorithm",
                               Param.GridOn, "Use simplification on provider side if possible (SVG has no tile provider: it is applied once the file is read)")
-                          .Ops("Linear (Douglas-Peucker)", "Snap To Grid", "Visvalingam").Range(Param.Grid, 0, 20).With(Param.Grid, 0).With(Param.GridOn, true);
-            L[L.Count - 1].ObjectSize = c => { var vt = L.Find(x => x.Name.StartsWith("Vector import", StringComparison.Ordinal))!; var (vi, _) = EnsureVector(vt.FilePath, c.DotStep); return VectorObjectSize(c, vi); };
+                          .Ops("None", "Linear (Douglas-Peucker)", "Snap To Grid", "Visvalingam").Range(Param.Grid, 0, 20).With(Param.Grid, 0).With(Param.GridOn, true);
+            L[L.Count - 1].ObjectSize = c => { var vt = L.Find(x => x.Name.StartsWith("Vector import", StringComparison.Ordinal))!; var (vi, _) = EnsureVector(vt.FilePath, c.DotStep, SvgSimplify(c)); return VectorObjectSize(c, vi); };
             L[L.Count - 1].ControlStrip = RecolorDemo.Build; L[L.Count - 1].StripHeight = RecolorDemo.StripHeight;
             // pick mode: a click on the picture (object units = picture units x fit) picks the colour under it
             L[L.Count - 1].ObjectClick = (c, ox, oy) =>
             {
                 if (RecolorDemo.PickMode == 0) return false;
-                var vt = L.Find(x => x.Name.StartsWith("Vector import", StringComparison.Ordinal))!; var (vi, _) = EnsureVector(vt.FilePath, c.DotStep);
+                var vt = L.Find(x => x.Name.StartsWith("Vector import", StringComparison.Ordinal))!; var (vi, _) = EnsureVector(vt.FilePath, c.DotStep, SvgSimplify(c));
                 var osz = VectorObjectSize(c, vi); float fit = osz.Width / MathF.Max(1e-3f, vi.Width);
                 RecolorDemo.PickAt(new PointF(vi.ViewBox.X + ox / fit, vi.ViewBox.Y + oy / fit));
                 return true;
@@ -1238,10 +1240,11 @@ T(GControls, "SpriteLabel / GroupBox / Tabs / TextBox / Numeric / Combo / ListBo
               "Every glyph is straight strokes from the font's own data, with the corners rounded (Radius 6 font units, the font's default). Size = cap height in pixels. No font file is loaded.",
               c =>
               {
-                  float size = 12f * MathF.Max(0.1f, c.Scale);
+                  float size = c.Count;                                    // cap height in px at zoom 1
                   c.Canvas.ClearBuffer(VtPaper);
                   var ink = new VectorTextStyle { Color = VtInk };
-                  float y = c.Y;
+                  var scene = new TextScene();
+                  float y = 0;
                   foreach (var line in new[]
                   {
                       "ABCDEFGHIJKLMNOPQRSTUVWXYZ",
@@ -1251,17 +1254,19 @@ T(GControls, "SpriteLabel / GroupBox / Tabs / TextBox / Numeric / Combo / ListBo
                       "абвгдеёжзийклмнопрстуфхцчшщъыьэюяіїєґ",
                   })
                   {
-                      VectorText.Create(line, size, ink).Draw(c.Canvas, c.X, (int)y);
+                      scene.Add(VectorText.Create(line, size, ink), 0, y, topLeft: true);
                       y += size * 1.9f;
                   }
-              }).Ui(Param.Mouse, "Move the text (the mouse)", Param.Scale, "Size (x12 px cap height)");
+                  scene.Draw(c, c.Scale);                                  // centred on the canvas; the wheel zooms
+              }).Ui(Param.Count, "Size (cap height, px at zoom 1)", Param.Scale, "Zoom (the slider or the wheel; drag anywhere to move)")
+                .Also(t => t.DragAnywhere = true).Range(Param.Count, 4, 80).With(Param.Count, 12);
 
             T(GVText, "VectorText styles: plain, bold, italic, bold italic, monospace, corner radius, tip limit",
               "Bold = wider stroke. Italic = skew. Monospace = one advance for every glyph (wide ones squeezed). Radius = corner rounding in font units (0 = angular). TipDrop = how far an acute tip may be cut (0 = sharp). The captions on the left are plain.",
               c =>
               {
-                  float size = 16f * MathF.Max(0.1f, c.Scale);
-                  float cap = 9f * MathF.Max(0.1f, c.Scale);
+                  float size = c.Count;                                    // text cap height in px at zoom 1
+                  float cap = size * 9f / 16f;                             // the captions are smaller (9 of 16 px)
                   c.Canvas.ClearBuffer(VtPaper);
                   var ink = new VectorTextStyle { Color = VtInk };
                   var bold = new VectorTextStyle { Color = VtInk, Bold = true };
@@ -1282,21 +1287,24 @@ T(GControls, "SpriteLabel / GroupBox / Tabs / TextBox / Numeric / Combo / ListBo
                       ("radius 12", "Rounded AVWXYZ", rounded),
                       ("radius 12, tip 3", "Tips AVWXYZ", tipped),
                   };
-                  float y = c.Y;
+                  var scene = new TextScene();
+                  float y = 0;
                   foreach (var (caption, text, style) in rows)
                   {
-                      VectorText.Create(caption, cap, new VectorTextStyle { Color = VtMuted }).Draw(c.Canvas, c.X, (int)(y + cap * 0.6f));
-                      VectorText.Create(text, size, style).Draw(c.Canvas, c.X + 170, (int)y);
+                      scene.Add(VectorText.Create(caption, cap, new VectorTextStyle { Color = VtMuted }), 0, y + size * 0.5f - cap * 0.5f, topLeft: true);
+                      scene.Add(VectorText.Create(text, size, style), 170, y, topLeft: true);
                       y += size * 1.9f;
                   }
-              }).Ui(Param.Mouse, "Move the text (the mouse)", Param.Scale, "Size (x16 px cap height)");
+                  scene.Draw(c, c.Scale);
+              }).Ui(Param.Count, "Size (text cap height, px at zoom 1)", Param.Scale, "Zoom (the slider or the wheel; drag anywhere to move)")
+                .Also(t => t.DragAnywhere = true).Range(Param.Count, 4, 80).With(Param.Count, 16);
 
             T(GVText, "VectorText outlines: joins (bevel, miter, round), caps (butt, round, square), outline position (centre, inside, outside)",
               "Joins are the corner shapes of the strokes (Radius 0 shows them best); caps are the ends of open strokes. Outline position puts the stroke of a closed glyph centred on its edge, inside it or outside it; open strokes stay centred. The outline rows are bold so the difference shows.",
               c =>
               {
-                  float size = 28f * MathF.Max(0.1f, c.Scale);
-                  float cap = 9f * MathF.Max(0.1f, c.Scale);
+                  float size = c.Count;                                    // cap height in px at zoom 1
+                  float cap = size * 9f / 28f;                             // the captions: the old 9 of 28 px proportion
                   c.Canvas.ClearBuffer(VtPaper);
                   var rows = new (string Caption, string Text, VectorTextStyle Style)[]
                   {
@@ -1310,47 +1318,47 @@ T(GControls, "SpriteLabel / GroupBox / Tabs / TextBox / Numeric / Combo / ListBo
                       ("outline inside", "OBD", new VectorTextStyle { Color = VtAccent, Bold = true, OutlinePosition = VectorOutlinePosition.Inside }),
                       ("outline outside", "OBD", new VectorTextStyle { Color = VtInk, Bold = true, OutlinePosition = VectorOutlinePosition.Outside }),
                   };
-                  float y = c.Y;
+                  var scene = new TextScene();
+                  float y = 0;
                   foreach (var (caption, text, style) in rows)
                   {
-                      VectorText.Create(caption, cap, new VectorTextStyle { Color = VtMuted }).Draw(c.Canvas, c.X, (int)(y + size * 0.5f - cap * 0.5f));
-                      VectorText.Create(text, size, style).Draw(c.Canvas, c.X + 170, (int)y);
+                      scene.Add(VectorText.Create(caption, cap, new VectorTextStyle { Color = VtMuted }), 0, y + size * 0.5f - cap * 0.5f, topLeft: true);
+                      scene.Add(VectorText.Create(text, size, style), 170, y, topLeft: true);
                       y += size * 1.7f;
                   }
-              }).Ui(Param.Mouse, "Move the text (the mouse)", Param.Scale, "Size (x28 px cap height)");
+                  scene.Draw(c, c.Scale);
+              }).Ui(Param.Count, "Size (cap height, px at zoom 1)", Param.Scale, "Zoom (the slider or the wheel; drag anywhere to move)")
+                .Also(t => t.DragAnywhere = true).Range(Param.Count, 4, 80).With(Param.Count, 28);
 
             T(GVText, "VectorText on a curve: arc, text below a path, fitted to a path and to a wave, alignment",
               "VectorText.OnPath places each glyph by its distance along a polyline and its height above it, so the letters follow the curve. FitToPath stretches the text so its ink spans the whole path. Below the path (Above = false) the text hangs under the line. Start / Center / End set the place on the path.",
               c =>
               {
-                  float size = 14f * MathF.Max(0.1f, c.Scale);
+                  float size = c.Count;                                    // cap height in px at zoom 1
                   c.Canvas.ClearBuffer(VtPaper);
                   var bold = new VectorTextStyle { Color = VtInk, Bold = true };
                   var plain = new VectorTextStyle { Color = VtInk };
                   var accent = new VectorTextStyle { Color = VtAccent, Bold = true };
                   const string Sentence = "The quick brown fox jumps over the lazy dog";
+                  var scene = new TextScene();                             // every piece is in the content's own coordinates (the origin is the centre)
 
                   // 1. upper arc, centred, bold: the letters stand on the arc
-                  var upper = ArcPoints(c.X, c.Y, 220f, Math.PI, 0, 96);
-                  VectorText.OnPath(Sentence, upper, size, new VectorTextPathOptions { Style = bold, Align = VectorTextAlign.Center })
-                      .Draw(c.Canvas, System.Numerics.Matrix3x2.Identity);
+                  var upper = ArcPoints(0, 0, 220f, Math.PI, 0, 96);
+                  scene.Add(VectorText.OnPath(Sentence, upper, size, new VectorTextPathOptions { Style = bold, Align = VectorTextAlign.Center }), 0, 0);
 
                   // 2. inner arc, text below the path (hangs inside the circle)
-                  var inner = ArcPoints(c.X, c.Y, 150f, Math.PI, 0, 96);
-                  VectorText.OnPath("Lorem ipsum dolor sit amet, consectetur", inner, size * 0.8f,
-                      new VectorTextPathOptions { Style = accent, Align = VectorTextAlign.Center, Above = false })
-                      .Draw(c.Canvas, System.Numerics.Matrix3x2.Identity);
+                  var inner = ArcPoints(0, 0, 150f, Math.PI, 0, 96);
+                  scene.Add(VectorText.OnPath("Lorem ipsum dolor sit amet, consectetur", inner, size * 0.8f,
+                      new VectorTextPathOptions { Style = accent, Align = VectorTextAlign.Center, Above = false }), 0, 0);
 
                   // 3. fitted to a straight line: the ink spans the whole line
-                  var line = new List<PointF> { new PointF(c.X - 200, c.Y + 200), new PointF(c.X + 200, c.Y + 200) };
-                  VectorText.OnPath("Fit to the path", line, size, new VectorTextPathOptions { Style = plain, FitToPath = true })
-                      .Draw(c.Canvas, System.Numerics.Matrix3x2.Identity);
+                  var line = new List<PointF> { new PointF(-200, 200), new PointF(200, 200) };
+                  scene.Add(VectorText.OnPath("Fit to the path", line, size, new VectorTextPathOptions { Style = plain, FitToPath = true }), 0, 0);
 
                   // 4. fitted to a wave
                   var wave = new List<PointF>();
-                  for (int i = 0; i <= 80; i++) wave.Add(new PointF(c.X - 200 + i * 5f, c.Y + 250 + 12f * MathF.Sin(i / 80f * MathF.PI * 2)));
-                  VectorText.OnPath("Fitted to a wave", wave, size, new VectorTextPathOptions { Style = accent, FitToPath = true })
-                      .Draw(c.Canvas, System.Numerics.Matrix3x2.Identity);
+                  for (int i = 0; i <= 80; i++) wave.Add(new PointF(-200 + i * 5f, 250 + 12f * MathF.Sin(i / 80f * MathF.PI * 2)));
+                  scene.Add(VectorText.OnPath("Fitted to a wave", wave, size, new VectorTextPathOptions { Style = accent, FitToPath = true }), 0, 0);
 
                   // 5. alignment on one straight path: Start, Center, End
                   foreach (var (align, text, dy) in new[]
@@ -1360,17 +1368,19 @@ T(GControls, "SpriteLabel / GroupBox / Tabs / TextBox / Numeric / Combo / ListBo
                       (VectorTextAlign.End, "end: lazy dog", 360f),
                   })
                   {
-                      var seg = new List<PointF> { new PointF(c.X - 200, c.Y + dy), new PointF(c.X + 200, c.Y + dy) };
-                      VectorText.OnPath(text, seg, size * 0.7f, new VectorTextPathOptions { Style = plain, Align = align })
-                          .Draw(c.Canvas, System.Numerics.Matrix3x2.Identity);
+                      var seg = new List<PointF> { new PointF(-200, dy), new PointF(200, dy) };
+                      scene.Add(VectorText.OnPath(text, seg, size * 0.7f, new VectorTextPathOptions { Style = plain, Align = align }), 0, 0);
                   }
-              }).Ui(Param.Mouse, "Move the arc (the mouse)", Param.Scale, "Size (x14 px cap height)");
+                  scene.Draw(c, c.Scale);                                  // the whole group is centred; the wheel zooms
+              }).Ui(Param.Count, "Size (cap height, px at zoom 1)", Param.Scale, "Zoom (the slider or the wheel; drag anywhere to move)")
+                .Also(t => t.DragAnywhere = true).Range(Param.Count, 4, 80).With(Param.Count, 14);
 
             // ===================================================== Vector map (MBTiles)
             T(GMaps, "Vector map: open a .mbtiles file ('Open File'); zoom past the data as far as you like",
               "A vector MBTiles file (format pbf) becomes a VectorImage for the chosen zoom level Z. Extra zoom (Scale) past it is still vector, so the lines stay sharp. Drag anywhere to pan (no inertia). Nothing is drawn for missing tiles except the background colour. Open File Time is how long the file took to read and build; the flags below change the build or the drawing.",
               c => MapDemo.Draw(c, L.Find(x => x.Name.StartsWith("Vector map", StringComparison.Ordinal))!.FilePath))
               .Also(t => t.DragAnywhere = true)                       // drag the map itself: no bounding box around the picture
+              .Also(t => t.OnReset = MapDemo.ResetView)               // Reset recentres the map (the pan lives in the map, not in Ctx.X)
               .Ui(Param.Z, "Zoom level Z (0..14, the level the shapes are imported at)", Param.Scale, "Extra zoom past Z (x1.00 = none; the shapes are vectors, so it stays sharp)",
                   Param.Smooth, "Anti-aliased edges",
                   Param.Xor, "Hide names of streets",
@@ -1379,7 +1389,7 @@ T(GControls, "SpriteLabel / GroupBox / Tabs / TextBox / Numeric / Combo / ListBo
                   Param.DotStep, "Simplification threshold, px at Z (0 = off)",
                   Param.Op, "Simplification algorithm",
                   Param.GridOn, "Simplify while the tiles are read (provider side)")
-              .Ops("Linear (Douglas-Peucker)", "Snap To Grid", "Visvalingam")
+              .Ops("None", "Linear (Douglas-Peucker)", "Snap To Grid", "Visvalingam")
               .With(Param.NotMask, true).With(Param.Count, 1).With(Param.DotStep, 0).With(Param.GridOn, true)
               .Range(Param.Count, 1, 12).Range(Param.DotStep, 0, 20);
             L[L.Count - 1].FileFilter = "MBTiles (*.mbtiles)|*.mbtiles|All files|*.*";
@@ -2671,25 +2681,63 @@ T(GControls, "SpriteLabel / GroupBox / Tabs / TextBox / Numeric / Combo / ListBo
         /// The map test's camera. One VectorImage per zoom level (imported once, reused while Z stays), drawn with a
         /// centre, the level and an extra scale. Centre = normalised web-mercator (0..1); panning changes it.
         /// </summary>
+        /// <summary>
+        /// Lays out vector text pictures on one content grid and draws them centred on the canvas at a zoom. The centre of
+        /// the content's ink bounds sits on the canvas centre (Ctx.X/Y, which the drag moves). Used by the vector text tests.
+        /// </summary>
+        sealed class TextScene
+        {
+            readonly List<(VectorImage Pic, float Dx, float Dy)> items = new List<(VectorImage, float, float)>();
+
+            /// <summary>topLeft: the picture's ViewBox corner goes to (x, y) on the grid; otherwise its own coordinates are shifted by (x, y).</summary>
+            public void Add(VectorImage pic, float x, float y, bool topLeft = false)
+                => items.Add((pic, topLeft ? x - pic.ViewBox.X : x, topLeft ? y - pic.ViewBox.Y : y));
+
+            public void Draw(Ctx c, float zoom)
+            {
+                bool any = false; float l = 0, t = 0, r = 0, b = 0;
+                foreach (var (pic, dx, dy) in items)
+                    foreach (var sh in pic.Shapes)
+                    {
+                        if (sh.Path.SegmentCount == 0) continue;
+                        var bb = sh.Path.ControlBounds();
+                        float x0 = bb.Left + dx, x1 = bb.Right + dx, y0 = bb.Top + dy, y1 = bb.Bottom + dy;
+                        if (!any) { l = x0; r = x1; t = y0; b = y1; any = true; }
+                        else { l = Math.Min(l, x0); r = Math.Max(r, x1); t = Math.Min(t, y0); b = Math.Max(b, y1); }
+                    }
+                if (!any) return;
+                float cu = (l + r) / 2, cv = (t + b) / 2;
+                foreach (var (pic, dx, dy) in items)
+                    pic.Draw(c.Canvas, System.Numerics.Matrix3x2.CreateTranslation(dx - cu, dy - cv) * System.Numerics.Matrix3x2.CreateScale(zoom) * System.Numerics.Matrix3x2.CreateTranslation(c.X, c.Y));
+            }
+        }
+
         static class MapDemo
         {
             static VectorImage? img; static string imgKey = "", status = "";
             static double openMs; static int openShapes;                 // "Open File Time": read + build of the last open
             static double originX, originY;              // world pixels (at the level) of the picture's (0,0)
+            static double homeX = double.NaN, homeY;     // the file's centre, normalised world (0..1): reset goes here
             static double nx = double.NaN, ny;           // centre, normalised world (0..1)
             static int lastX, lastY; static bool haveLast;
-            // bitmap cache: while the zoom is still, the picture is drawn once into a bitmap with a margin; pans within the
-            // margin blit it (whole pixels), and a zoom or a pan past the margin draws the vectors again
-            static Sprite? bake; static string bakeKey = "";
-            static double bakeCx, bakeCy, bakeK; static int bakeW, bakeH;
+            // bitmap cache: while the view is still, the picture is drawn once into a bitmap with a margin; pans within the
+            // margin copy it (whole pixels), and a zoom, a pan past the margin, or a changed key draws the vectors again
+            static readonly VectorViewCache cache = new VectorViewCache();
             static double lastK = double.NaN;
             static string cacheInfo = "";
 
             static double MercY(double lat) { double r = lat * Math.PI / 180.0; return (1.0 - Math.Log(Math.Tan(r) + 1.0 / Math.Cos(r)) / Math.PI) / 2.0; }
 
-            /// <summary>The simplification the flags ask for: threshold in picture px (0 = off), algorithm, provider side.</summary>
-            static SimplifySettings? SimplifyFrom(Ctx c) => c.DotStep <= 0 ? null
-                : new SimplifySettings { Tolerance = c.DotStep, Algorithm = (SimplifyAlgorithm)Math.Clamp((int)c.Op - 1, 0, 2), ProviderSide = c.ShowGrid };   // ctx.Op = index + 1 (DefaultOp = 0)
+            /// <summary>
+            /// The simplification the flags ask for. Algorithm list: index 0 "None" (no simplification), 1 Linear,
+            /// 2 Snap To Grid, 3 Visvalingam. ctx.Op = index + 1 (DefaultOp = 0 counts as None).
+            /// </summary>
+            static SimplifySettings? SimplifyFrom(Ctx c)
+            {
+                int idx = (int)c.Op - 1;
+                if (c.DotStep <= 0 || idx <= 0) return null;
+                return new SimplifySettings { Tolerance = c.DotStep, Algorithm = (SimplifyAlgorithm)Math.Clamp(idx - 1, 0, 2), ProviderSide = c.ShowGrid };
+            }
 
             static void Open(string path, int z, SimplifySettings? simp, bool streetNames)
             {
@@ -2697,7 +2745,8 @@ T(GControls, "SpriteLabel / GroupBox / Tabs / TextBox / Numeric / Combo / ListBo
                 try
                 {
                     using var mb = MbTiles.Open(path);
-                    if (double.IsNaN(nx)) { nx = ((mb.West + mb.East) / 2 + 180) / 360; ny = MercY((mb.North + mb.South) / 2); }
+                    homeX = ((mb.West + mb.East) / 2 + 180) / 360; homeY = MercY((mb.North + mb.South) / 2);
+                    if (double.IsNaN(nx)) { nx = homeX; ny = homeY; }
                     img = VectorImage.FromMbTiles(mb, new MbTilesView { Zoom = z, StreetNames = streetNames, Simplify = simp });
                     img.BuildIndex();                                  // grid over the shapes: each frame draws only what is in view
                     double world = 256.0 * Math.Pow(2, z);
@@ -2708,7 +2757,15 @@ T(GControls, "SpriteLabel / GroupBox / Tabs / TextBox / Numeric / Combo / ListBo
                     status = $"z{z}, {img.Shapes.Count} shapes";
                 }
                 catch (Exception ex) { img = null; status = ex.Message; }
-                bake = null;
+                cache.Clear();
+            }
+
+            /// <summary>Reset (the Reset button): the map goes back to the file's centre, at the level, without a drag.</summary>
+            public static void ResetView()
+            {
+                if (!double.IsNaN(homeX)) { nx = homeX; ny = homeY; }
+                haveLast = false;                                  // the next frame is not a move
+                cache.Clear();
             }
 
             public static void Draw(Ctx c, string? path)
@@ -2741,6 +2798,8 @@ T(GControls, "SpriteLabel / GroupBox / Tabs / TextBox / Numeric / Combo / ListBo
                 double cx = nx * 256.0 * Math.Pow(2, z) - originX, cy = ny * 256.0 * Math.Pow(2, z) - originY;
                 var opts = new VectorRenderOptions { AA = c.Smooth };
                 int minPx = Math.Max(1, c.Count);                     // "hide by zoom": shapes whose larger side is under this many px are left out
+                // everything that changes the drawn pixels is in the cache key, so the bitmap is never stale
+                string vkey = key + "|" + minPx + "|" + c.Smooth;
                 if (!c.NotMask)
                 {
                     DrawDirect(c, cx, cy, k, opts, minPx);
@@ -2748,12 +2807,11 @@ T(GControls, "SpriteLabel / GroupBox / Tabs / TextBox / Numeric / Combo / ListBo
                 }
                 else
                 {
-                    if (!Covers(c, key, cx, cy, k) && !moved && !zoomed) Bake(c, cx, cy, k, opts, minPx, key);   // still: bake with a margin
-                    if (Covers(c, key, cx, cy, k))
+                    if (!cache.Covers(vkey, c.W, c.H, cx, cy, k) && !moved && !zoomed)
+                        cache.Bake(img, vkey, c.W, c.H, cx, cy, k, opts, minPx, MbTilesStyle.Background);   // still: bake with a margin
+                    if (cache.Covers(vkey, c.W, c.H, cx, cy, k))
                     {
-                        // canvas pixel (x, y) is bake pixel (x + dx, y + dy); the bake is placed at (-dx, -dy)
-                        double dx = (bakeW - c.W) / 2.0 + (bakeCx - cx) * k, dy = (bakeH - c.H) / 2.0 + (bakeCy - cy) * k;
-                        c.Canvas.Draw(bake!, -(int)Math.Round(dx), -(int)Math.Round(dy));
+                        cache.Blit(c.Canvas, cx, cy);
                         cacheInfo = "bitmap cache: drawn from the picture";
                     }
                     else
@@ -2766,29 +2824,9 @@ T(GControls, "SpriteLabel / GroupBox / Tabs / TextBox / Numeric / Combo / ListBo
                 c.Note = $"Open File Time {openMs:0} ms ({openShapes} shapes) | {status} | Z{z} x{k:0.00} | centre {lat:F5}, {lon:F5} | {cacheInfo}";
             }
 
-            /// <summary>True when the baked picture covers the canvas at this view (same file, zoom, and the view inside the margin).</summary>
-            static bool Covers(Ctx c, string key, double cx, double cy, float k)
-                => bake != null && bakeKey == key && Math.Abs(bakeK - k) < 1e-9
-                   && Math.Abs((bakeCx - cx) * k) < (bakeW - c.W) / 2.0 - 2 && Math.Abs((bakeCy - cy) * k) < (bakeH - c.H) / 2.0 - 2;
-
-            static System.Numerics.Matrix3x2 ViewMatrix(double cx, double cy, float k, float ox, float oy)
-                => System.Numerics.Matrix3x2.CreateTranslation((float)-cx, (float)-cy)
-                 * System.Numerics.Matrix3x2.CreateScale(k)
-                 * System.Numerics.Matrix3x2.CreateTranslation(ox, oy);
-
             static void DrawDirect(Ctx c, double cx, double cy, float k, VectorRenderOptions opts, int minPx)
             {
-                img!.DrawVisible(c.Canvas, ViewMatrix(cx, cy, k, c.W * 0.5f, c.H * 0.5f), opts, minPx);   // only the shapes in view
-            }
-
-            /// <summary>Draws the picture into a bitmap twice the canvas size, centred on the current view.</summary>
-            static void Bake(Ctx c, double cx, double cy, float k, VectorRenderOptions opts, int minPx, string key)
-            {
-                int w = c.W * 2, h = c.H * 2;
-                if (bake == null || bake.Width != w || bake.Height != h) { bake?.Dispose(); bake = new Sprite(w, h); }
-                bake.ClearBuffer(MbTilesStyle.Background);
-                img!.DrawVisible(bake, ViewMatrix(cx, cy, k, w * 0.5f, h * 0.5f), opts, minPx);
-                bakeKey = key; bakeCx = cx; bakeCy = cy; bakeK = k; bakeW = w; bakeH = h;
+                img!.DrawVisible(c.Canvas, VectorViewCache.ViewMatrix(cx, cy, k, c.W * 0.5f, c.H * 0.5f), opts, minPx);   // only the shapes in view
             }
         }
 
@@ -2805,8 +2843,13 @@ T(GControls, "SpriteLabel / GroupBox / Tabs / TextBox / Numeric / Combo / ListBo
             return new SizeF(MathF.Max(1f, img.Width * fit), MathF.Max(1f, img.Height * fit));
         }
         /// <summary>The SVG test's simplification flags: threshold (Grid, SVG units; 0 = off), algorithm (Op), provider side (GridOn).</summary>
-        static SimplifySettings? SvgSimplify(Ctx c) => c.Grid <= 0 ? null
-            : new SimplifySettings { Tolerance = c.Grid, Algorithm = (SimplifyAlgorithm)Math.Clamp((int)c.Op - 1, 0, 2), ProviderSide = c.ShowGrid };
+        /// <summary>Algorithm list: 0 None, 1 Linear, 2 Snap To Grid, 3 Visvalingam (ctx.Op = index + 1). Every caller of EnsureVector passes this one result, so the cache key is the same for all of them.</summary>
+        static SimplifySettings? SvgSimplify(Ctx c)
+        {
+            int idx = (int)c.Op - 1;
+            if (c.Grid <= 0 || idx <= 0) return null;
+            return new SimplifySettings { Tolerance = c.Grid, Algorithm = (SimplifyAlgorithm)Math.Clamp(idx - 1, 0, 2), ProviderSide = c.ShowGrid };
+        }
 
         static (VectorImage img, string info) EnsureVector(string? path, int page, SimplifySettings? simp = null)
         {

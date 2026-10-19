@@ -16,6 +16,25 @@ Conventions
   DOCS     README / comments only
 
 
+2026-10-19  Map open test: bitmap-cache drag, hide by zoom, reset; SVG slowdown; vector text centred and zoomed
+------------------------------------------------------------------------------------------------
+ADDED    cs/Vector.Index.cs VectorViewCache (internal): the bitmap cache of a picture (Bake / Covers / Blit).
+         ctlrun BakeCache: an integer-pan blit of a baked view equals the direct draw (mean difference 0.0001).
+FIXED    Vector map test: the bitmap-cache blit had the pan sign reversed (the map drifted or stopped matching
+         the cursor). The cache key now holds the minimum size and antialiasing, so "Hide by zoom" updates the
+         map at once. Reset recentres the map (MapDemo.ResetView through the new DemoTest.OnReset).
+FIXED    SVG import test slow: the size and pick callers passed no simplification, so the single-slot cache key
+         differed from the draw call and the file was re-read and re-simplified every frame. All three callers
+         now pass SvgSimplify(c).
+CHANGED  Simplification algorithm lists (vector map, SVG import) start with "None" (index 0 = off). Existing
+         saved settings shift by one entry.
+CHANGED  Vector text tests (alphabet, styles, outlines, curves): Size is Count (a slider only); Scale is the zoom
+         (slider and wheel); the content is centred on the canvas by TextScene; drag anywhere moves the view.
+         Compat: the saved Scale of these four tests is now zoom, not size.
+FIXED    Open File button: its width follows the text (Btn had set the width once). Long names are shortened.
+DEMO     Reset params also resets the viewport pan and zoom for the map test (DemoTest.OnReset).
+
+
 2026-10-19  Map open test, map project, vector text dots, stripe wrap, simplification
 ------------------------------------------------------------------------------------------------
 ADDED    cs/Vector.Simplify.cs: QGIS-style simplification (SimplifySettings, SimplifyAlgorithm: Linear

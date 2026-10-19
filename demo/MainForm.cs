@@ -363,6 +363,16 @@ namespace Sr2d64CSport
             log.TextFontFamily = codeBox.TextFontFamily = real ? "Consolas" : ""; log.TextFontSize = codeBox.TextFontSize = 12;
         }
 
+        /// <summary>Sets the Open File button text and fits its width to the text. Btn sets the width once, so a longer text would clip.</summary>
+        void SetFileButton(string text)
+        {
+            btnFile.Text = text;
+            btnFile.Size = new Size(Sprite.MeasureText(text).Width + 22, 26);
+            btnFile.Parent?.PerformLayout();
+        }
+        /// <summary>A long file name is shortened on the button (the full path is in the log).</summary>
+        static string FileLabel(string name) => name.Length <= 28 ? name : name.Substring(0, 25) + "...";
+
         static void Btn(Control parent, SpriteButton b, string text, EventHandler onClick)
         {
             b.Text = text; b.Size = new Size(Sprite.MeasureText(text).Width + 22, 26); b.Click += onClick;
@@ -799,7 +809,8 @@ namespace Sr2d64CSport
             if (current != null) { savedParams.Remove(current); WriteParams(current, new Dictionary<Param, int>()); }
             chkClear.Checked = chkPresent.Checked = true;
             camYaw = 0.8f; camPitch = 0.55f; camPanX = camPanY = 0; animTime = 0; pivotX = pivotY = -1;
-            if (canvas != null) GoHome(current);
+            if (canvas != null) GoHome(current);                 // the pan (the mouse position) back to the centre
+            current?.OnReset?.Invoke();                          // a test with its own view (the map) recentres too
         }
 
         void ReloadTests()
@@ -896,7 +907,7 @@ namespace Sr2d64CSport
             btnFile.Visible = t.FileFilter != null;
             btnMeasure.Visible = chkProgress.Visible = t.SlowFrames > 0;
             ShowStrip(t);
-            btnFile.Text = t.FilePath != null ? "Open File (" + (t.FilePath.Contains('|') ? t.FilePath.Split('|').Length + " files" : Path.GetFileName(t.FilePath)) + ")" : "Open File";
+            SetFileButton(t.FilePath != null ? "Open File (" + (t.FilePath.Contains('|') ? t.FilePath.Split('|').Length + " files" : FileLabel(Path.GetFileName(t.FilePath))) + ")" : "Open File");
             StartSlowRun();
             emaRender = -1;
             fpsFrames = 0; fpsAccumMs = renderAccumMs = presentAccumMs = 0;
@@ -1243,7 +1254,7 @@ namespace Sr2d64CSport
             if (current.FilePath != null) { try { dlg.InitialDirectory = Path.GetDirectoryName(current.FilePath.Split('|')[0]); } catch { } }
             if (dlg.ShowDialog(this) != DialogResult.OK) return;
             current.FilePath = string.Join("|", dlg.FileNames);
-            btnFile.Text = "Open File (" + (dlg.FileNames.Length > 1 ? dlg.FileNames.Length + " files" : Path.GetFileName(dlg.FileName)) + ")";
+            SetFileButton("Open File (" + (dlg.FileNames.Length > 1 ? dlg.FileNames.Length + " files" : FileLabel(Path.GetFileName(dlg.FileName))) + ")");
             Log("file: " + current.FilePath);
             canvas?.ClearBuffer(unchecked((int)0xFF101418));
             StartSlowRun();

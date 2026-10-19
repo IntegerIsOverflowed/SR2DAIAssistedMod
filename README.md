@@ -2229,6 +2229,13 @@ map.DrawVisible(canvas, matrix, null, 1.5f);         // image -> canvas matrix; 
 TrackMap map project uses it for every frame: while the zoom changes it draws the vectors into the window,
 and when the zoom is still it bakes a larger bitmap that is moved with the pan.
 
+`VectorViewCache` (`cs/Vector.Index.cs`, internal) is the bitmap cache those maps use: `Bake(img, key, w, h, cx, cy, k, opts, minPx, background)`
+draws the picture into a bitmap twice the canvas, `Covers(key, w, h, cx, cy, k)` says whether a view is still inside
+it, and `Blit(canvas, cx, cy)` copies it at whole pixels (`ViewMatrix` is the view matrix both use). The key must contain
+everything that changes the pixels (file, level, simplification, minimum size, antialiasing). A zoom change or a pan past
+the margin needs a new bake; while the view moves, draw directly. ctlrun `BakeCache` checks that an integer pan of a baked
+view equals the direct draw.
+
 **Outlines are hairlines.** Building outlines (`MbPaint.Hairline`) are one device pixel at every zoom, not a width in
 map units. Any shape can do this: `VectorShape.Hairline = true` (the `StrokeWidth` is then ignored; SVG export writes
 `vector-effect="non-scaling-stroke"`).

@@ -2110,6 +2110,7 @@ static class P {
     ContainerButtonStyle();
     MbTilesChecks.Run();
     MbTilesChecks.SimplifyAndHairlines();
+    MbTilesChecks.BakeCache();
     VectorTextChecks.Run();
     VectorTextChecks.DotsAndSimplify();
     MouseClickEvents();

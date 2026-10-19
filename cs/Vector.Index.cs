@@ -129,4 +129,51 @@ namespace Sr2d64CSport
             _visibleView.Shapes.Clear();                 // do not keep the shapes alive through the view
         }
     }
+
+    /// <summary>
+    /// The bitmap cache of a picture: the picture is drawn once into a bitmap twice the canvas size, centred on a view.
+    /// Pans that keep the canvas inside that bitmap are a copy of it (whole pixels); a zoom change, a pan past the
+    /// margin or a different picture key means the vectors are drawn again. The caller decides when to bake (the view
+    /// is still) and passes a key with everything that changes the picture (file, level, options, minimum size).
+    /// </summary>
+    internal sealed class VectorViewCache : IDisposable
+    {
+        Sprite? _bmp;
+        string _key = "";
+        double _cx, _cy, _k;             // the view the bitmap was drawn for: picture units at the centre, scale
+        int _w, _h;                      // the canvas size the margin was made for
+        int _bw, _bh;                    // the bitmap size (twice the canvas)
+
+        /// <summary>Forgets the picture (the memory is kept for the next bake).</summary>
+        public void Clear() => _key = "";
+
+        /// <summary>The view matrix: picture units at (cx, cy) map to the centre (ox, oy) of the target, at scale k.</summary>
+        internal static Matrix3x2 ViewMatrix(double cx, double cy, float k, float ox, float oy)
+            => Matrix3x2.CreateTranslation((float)-cx, (float)-cy) * Matrix3x2.CreateScale(k) * Matrix3x2.CreateTranslation(ox, oy);
+
+        /// <summary>True when the bitmap covers a w x h canvas at this view: same key, same scale, and the view inside the margin.</summary>
+        public bool Covers(string key, int w, int h, double cx, double cy, double k)
+            => _bmp != null && key == _key && w == _w && h == _h && Math.Abs(_k - k) < 1e-9
+               && Math.Abs((cx - _cx) * k) <= (_bw - w) / 2.0 - 2 && Math.Abs((cy - _cy) * k) <= (_bh - h) / 2.0 - 2;
+
+        /// <summary>Draws the picture into the bitmap for this view (background first, same options as the direct draw).</summary>
+        public void Bake(VectorImage img, string key, int w, int h, double cx, double cy, double k, VectorRenderOptions o, float minPx, int background)
+        {
+            int bw = 2 * w, bh = 2 * h;
+            if (_bmp == null || _bmp.Width != bw || _bmp.Height != bh) { _bmp?.Dispose(); _bmp = new Sprite(bw, bh); }
+            _bmp.ClearBuffer(background);
+            img.DrawVisible(_bmp, ViewMatrix(cx, cy, (float)k, bw * 0.5f, bh * 0.5f), o, minPx);
+            _key = key; _cx = cx; _cy = cy; _k = k; _w = w; _h = h; _bw = bw; _bh = bh;
+        }
+
+        /// <summary>Copies the bitmap onto the canvas for the view (cx, cy). Only valid when <see cref="Covers"/> is true.</summary>
+        public void Blit(Sprite canvas, double cx, double cy)
+        {
+            // canvas pixel (x, y) is bitmap pixel (x + dx, y + dy): picture units -> bitmap pixels, minus the canvas centre
+            double dx = (_bw - _w) / 2.0 + (cx - _cx) * _k, dy = (_bh - _h) / 2.0 + (cy - _cy) * _k;
+            canvas.Draw(_bmp!, -(int)Math.Round(dx), -(int)Math.Round(dy));
+        }
+
+        public void Dispose() { _bmp?.Dispose(); _bmp = null; _key = ""; }
+    }
 }
