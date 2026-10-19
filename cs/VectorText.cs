@@ -375,7 +375,7 @@ namespace Sr2d64CSport
                 var g = new GlyphDef { Width = float.Parse(parts[1], CultureInfo.InvariantCulture) };
                 foreach (var spec in parts[2].Split('|'))
                 {
-                    var rs = new RawStroke { Closed = spec.EndsWith("Z", StringComparison.Ordinal) };
+                    var rs = new RawStroke { Closed = spec.EndsWith('Z') };
                     var body = rs.Closed ? spec.Substring(0, spec.Length - 1) : spec;
                     foreach (var pt in body.Split(' ', StringSplitOptions.RemoveEmptyEntries))
                     {
