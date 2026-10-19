@@ -193,11 +193,90 @@ static class MbTilesChecks
                 }
             }
             CullChecks(full);
+            RenderModeChecks(full);
         }
         else Console.WriteLine("  skip full-size sample (set MBTILES_FILE to chelyabinsk.mbtiles)");
     }
 
     // The grid index + DrawVisible: culled drawing must equal the full drawing, cull must drop shapes, labels must add shapes.
+    // hairline outlines, the map level of detail, and the parallel tile import
+    static void RenderModeChecks(string full)
+    {
+        static int Dark(Sprite sp, int x, int y)
+        {
+            int px = sp.Pixels[y * sp.Width + x];
+            return ((px >> 16) & 255) < 128 && ((px >> 8) & 255) < 128 && (px & 255) < 128 ? 1 : 0;
+        }
+        var black = new VectorColor(unchecked((int)0xFF000000));
+        var white = unchecked((int)0xFFFFFFFF);
+
+        // 1. hairline: a 1-unit line is one device pixel at every scale; a normal 1-unit line grows with the scale
+        var lineP = new VectorPath(); lineP.MoveTo(-8, 0); lineP.LineTo(8, 0);
+        var hair = new VectorImage(); hair.Shapes.Add(new VectorShape(lineP, null, black, 1f) { Hairline = true });
+        var thin = new VectorImage(); thin.Shapes.Add(new VectorShape(lineP, null, black, 1f));
+        float Cover(VectorImage img, float sc)
+        {   // ink across one column of the line = its width in device pixels
+            var sp = new Sprite(200, 200); sp.ClearBuffer(white);
+            img.Draw(sp, System.Numerics.Matrix3x2.CreateScale(sc) * System.Numerics.Matrix3x2.CreateTranslation(100, 100));
+            float sum = 0;
+            for (int y = 0; y < sp.Height; y++) sum += (255 - ((sp.Pixels[y * sp.Width + 100] >> 16) & 255)) / 255f;
+            return sum;
+        }
+        foreach (float sc in new[] { 0.5f, 1f, 4f, 10f })
+        {
+            float c = Cover(hair, sc);
+            Chk(c > 0.6f && c < 1.5f, $"hairline at scale {sc}: {c:0.00} px across (one device pixel)");
+        }
+        float thick = Cover(thin, 4f);
+        Chk(thick > 3.5f, $"a 1-unit stroke at scale 4 is {thick:0.0} px across (it scales; the hairline does not)");
+
+        // 2. map level of detail: only a map (IsMap) leaves out small buildings; other pictures keep every shape
+        VectorImage Scene(bool map)
+        {
+            var v = new VectorImage { IsMap = map };
+            v.MapLayerMinPx["building"] = 2.5f;
+            void Square(float x, float y, float w, string layer)
+            {
+                var p = new VectorPath(); p.MoveTo(x, y); p.LineTo(x + w, y); p.LineTo(x + w, y + w); p.LineTo(x, y + w); p.Close();
+                v.Shapes.Add(new VectorShape(p, black, null, 0f) { Layer = layer });
+            }
+            Square(10, 10, 1, "building");       // a house 1 px wide at scale 1: left out of a map
+            Square(50, 50, 40, "building");      // a big building: always drawn
+            Square(150, 150, 1, "landuse");      // a small piece of another layer: the building rule does not touch it
+            return v;
+        }
+        var mapPic = new Sprite(200, 200); mapPic.ClearBuffer(white); Scene(true).DrawVisible(mapPic, System.Numerics.Matrix3x2.Identity);
+        var plainPic = new Sprite(200, 200); plainPic.ClearBuffer(white); Scene(false).DrawVisible(plainPic, System.Numerics.Matrix3x2.Identity);
+        Chk(Dark(mapPic, 10, 10) == 0 && Dark(plainPic, 10, 10) == 1, "map: a 1 px building is left out; a picture that is not a map keeps it");
+        Chk(Dark(mapPic, 60, 60) == 1 && Dark(mapPic, 150, 150) == 1, "map: a big building and other layers are drawn");
+
+        // 3. parallel tile import: the same picture at any thread count, with the time for each
+        if (full == null) return;
+        var sw1 = Stopwatch.StartNew();
+        var serial = VectorImage.FromMbTiles(full, new MbTilesView { Zoom = 14, Threads = 1 });
+        long t1 = sw1.ElapsedMilliseconds;
+        var sw2 = Stopwatch.StartNew();
+        var parallel = VectorImage.FromMbTiles(full, new MbTilesView { Zoom = 14, Threads = 0 });
+        long t2 = sw2.ElapsedMilliseconds;
+        Console.WriteLine($"  time  z14 import, whole file: 1 thread {t1} ms, {Environment.ProcessorCount} threads {t2} ms ({serial.Shapes.Count} shapes)");
+        Chk(serial.Shapes.Count == parallel.Shapes.Count && serial.Warnings.SequenceEqual(parallel.Warnings), "parallel import: same shapes and warnings, in the same order");
+        int buildings = serial.Shapes.Count(sh => sh.Layer == "building");
+        Chk(buildings > 0 && serial.Shapes.Where(sh => sh.Layer == "building").All(sh => sh.Hairline), $"building outlines are hairlines ({buildings} shapes)");
+        var va = serial.VisibleArea!.Value;
+        float k = Math.Min(800f / va.Width, 600f / va.Height);
+        var m = System.Numerics.Matrix3x2.CreateScale(k) * System.Numerics.Matrix3x2.CreateTranslation(-va.X * k, -va.Y * k);
+        var pa = new Sprite(800, 600); pa.ClearBuffer(white); serial.DrawVisible(pa, m, null, 1.5f);
+        var pb = new Sprite(800, 600); pb.ClearBuffer(white); parallel.DrawVisible(pb, m, null, 1.5f);
+        int diff = 0; for (int i = 0; i < pa.Pixels.Length; i++) if (pa.Pixels[i] != pb.Pixels[i]) diff++;
+        Chk(diff == 0, $"parallel import draws the same pixels ({diff} different)");
+        // pictures of the real map for a look: fitted, and zoomed 4x on the middle (buildings are hairlines at every zoom)
+        SaveSprite(pa, "map_fit.png");
+        float cx = va.X + va.Width / 2, cy = va.Y + va.Height / 2;
+        var z4 = System.Numerics.Matrix3x2.CreateScale(k * 4) * System.Numerics.Matrix3x2.CreateTranslation(400 - cx * k * 4, 300 - cy * k * 4);
+        var pz = new Sprite(800, 600); pz.ClearBuffer(white); serial.DrawVisible(pz, z4, null, 1.5f);
+        SaveSprite(pz, "map_zoom4.png");
+    }
+
     static void CullChecks(string full)
     {
         using var mb = MbTiles.Open(full);

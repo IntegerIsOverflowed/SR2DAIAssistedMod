@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Drawing;
 using System.Linq;
+using System.Threading.Tasks;
 
 namespace Sr2d64CSport
 {
@@ -16,9 +17,11 @@ namespace Sr2d64CSport
         public readonly int Fill, Stroke;
         public readonly float StrokeWidth;
         public readonly int Rank;
-        public MbPaint(int fill, int stroke = 0, float strokeWidth = 1f, int rank = 0)
+        /// <summary>Hairline outline: the stroke is one device pixel at every zoom (the width is ignored).</summary>
+        public readonly bool Hairline;
+        public MbPaint(int fill, int stroke = 0, float strokeWidth = 1f, int rank = 0, bool hairline = false)
         {
-            Fill = fill; Stroke = stroke; StrokeWidth = strokeWidth; Rank = rank;
+            Fill = fill; Stroke = stroke; StrokeWidth = strokeWidth; Rank = rank; Hairline = hairline;
         }
     }
 
@@ -44,6 +47,11 @@ namespace Sr2d64CSport
         /// point. Sizes are in image units, not scaled by zoom, so the text keeps a readable size at every level.
         /// </summary>
         public bool Labels = true;
+        /// <summary>
+        /// Threads that decode and build the tiles: 0 = all processors, 1 = one thread. The picture is the same at any count.
+        /// The style rule is called from several threads at once, so a rule that is not thread-safe needs 1.
+        /// </summary>
+        public int Threads = 0;
     }
 
     /// <summary>Default colours and widths for the OpenMapTiles schema that tilemaker writes.</summary>
@@ -73,7 +81,7 @@ namespace Sr2d64CSport
                     if (line) return new MbPaint(0, unchecked((int)0xFFE0E0E8), 3.0f, 15);
                     return point ? null : new MbPaint(unchecked((int)0xFFE8E8EC), 0, 0, 15);
                 case "building":
-                    return point ? null : new MbPaint(unchecked((int)0xFFD9D0C9), unchecked((int)0xFFBAAC9C), 0.5f, 20);
+                    return point ? null : new MbPaint(unchecked((int)0xFFD9D0C9), unchecked((int)0xFFBAAC9C), 0.5f, 20, hairline: true);
                 case "transportation":
                     return line ? RoadPaint(cls) : null;
                 case "boundary":
@@ -172,6 +180,8 @@ namespace Sr2d64CSport
             var style = view.Style ?? MbTilesStyle.Default;
             float zs = (float)Math.Pow(2, zoom - 14);
             var img = new VectorImage { Format = VectorFormat.MbTiles, Title = mb.Name };
+            img.IsMap = true;                          // a map: the map level of detail applies (see MapLayerMinPx)
+            img.MapLayerMinPx["building"] = 2.5f;     // a building whose larger side is under 2.5 px on screen is left out
             float width = (x1 - x0 + 1) * (float)TileSize, height = (y1 - y0 + 1) * (float)TileSize;
             img.ViewBox = new RectangleF(0, 0, width, height);
             img.Width = width;
@@ -184,34 +194,62 @@ namespace Sr2d64CSport
             var bg = new VectorPath();
             bg.MoveTo(0, 0); bg.LineTo(width, 0); bg.LineTo(width, height); bg.LineTo(0, height); bg.Close();
             drawn.Add((int.MinValue, new VectorShape(bg, new VectorColor(MbTilesStyle.Background), null, 0f)));
+
+            // The raw tiles are read first, in order, from the one reader. Decoding and building their shapes is the expensive
+            // part, and each tile is independent, so tiles are built in parallel. The parts are joined in tile order, so the
+            // picture is the same at any thread count.
+            int cols = x1 - x0 + 1, count = cols * (y1 - y0 + 1);
+            var raw = new byte[]?[count];
             for (int ty = y0; ty <= y1; ty++)
-            for (int tx = x0; tx <= x1; tx++)
+                for (int tx = x0; tx <= x1; tx++)
+                    raw[(ty - y0) * cols + (tx - x0)] = mb.GetTile(zoom, tx, ty);
+            var parts = new (List<(int Rank, VectorShape Shape)> Shapes, List<string> Warnings)[count];
+            void BuildTile(int idx)
             {
-                byte[]? raw = mb.GetTile(zoom, tx, ty);
-                if (raw == null) continue;
+                var shapes = new List<(int Rank, VectorShape Shape)>();
+                var warn = new List<string>();
+                parts[idx] = (shapes, warn);
+                var bytes = raw[idx];
+                if (bytes == null) return;
+                int tx = x0 + idx % cols, ty = y0 + idx / cols;
                 List<MvtLayer> layers;
-                try { layers = Mvt.Decode(raw); }
+                try { layers = Mvt.Decode(bytes); }
                 catch (Exception ex) when (ex is ArgumentException or IndexOutOfRangeException)
                 {
-                    img.Warnings.Add("MBTiles: tile " + zoom + "/" + tx + "/" + ty + " could not be decoded.");
-                    continue;
+                    warn.Add("MBTiles: tile " + zoom + "/" + tx + "/" + ty + " could not be decoded.");
+                    return;
                 }
                 float ox = (float)((tx - x0) * TileSize), oy = (float)((ty - y0) * TileSize);
                 var labelNames = new HashSet<string>();      // one label per name and tile (no repeats along a long road)
                 foreach (var layer in layers)
                 {
                     float k = (float)(TileSize / layer.Extent);
+                    string ln = string.Intern(layer.Name);    // the map layer of each shape (one shared string, not one per shape)
                     foreach (var f in layer.Features)
                     {
                         var paint = style(layer.Name, f, zoom);
                         if (paint == null) continue;
-                        AddFeature(drawn, f, paint.Value, ox, oy, k, zs, view.SeamWidth);
+                        int before = shapes.Count;
+                        AddFeature(shapes, f, paint.Value, ox, oy, k, zs, view.SeamWidth);
+                        for (int j = before; j < shapes.Count; j++)
+                        {
+                            shapes[j].Shape.Layer = ln;
+                            shapes[j].Shape.Hairline = paint.Value.Hairline;
+                        }
                     }
                     if (view.Labels)
                         foreach (var f in layer.Features)
                             if (layer.Name == "transportation_name" || layer.Name == "place")
-                                AddLabel(drawn, layer.Name, f, ox, oy, k, zoom, labelNames);
+                                AddLabel(shapes, layer.Name, f, ox, oy, k, zoom, labelNames);
                 }
+            }
+            int threads = view.Threads <= 0 ? Environment.ProcessorCount : view.Threads;
+            if (threads == 1) for (int i = 0; i < count; i++) BuildTile(i);
+            else Parallel.For(0, count, new ParallelOptions { MaxDegreeOfParallelism = threads }, BuildTile);
+            foreach (var (shapes, warn) in parts)
+            {
+                drawn.AddRange(shapes);
+                img.Warnings.AddRange(warn);
             }
 
             // LINQ OrderBy is stable: features keep their order inside one rank, so roads stay above land across tile borders

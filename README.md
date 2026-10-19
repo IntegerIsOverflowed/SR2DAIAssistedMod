@@ -2228,6 +2228,20 @@ map.DrawVisible(canvas, matrix, null, 1.5f);         // image -> canvas matrix; 
 TrackMap map project uses it for every frame: while the zoom changes it draws the vectors into the window,
 and when the zoom is still it bakes a larger bitmap that is moved with the pan.
 
+**Outlines are hairlines.** Building outlines (`MbPaint.Hairline`) are one device pixel at every zoom, not a width in
+map units. Any shape can do this: `VectorShape.Hairline = true` (the `StrokeWidth` is then ignored; SVG export writes
+`vector-effect="non-scaling-stroke"`).
+
+**Map level of detail.** Every shape from a tile keeps its OpenMapTiles layer in `VectorShape.Layer` ("building", "road", ...).
+Only for a map (`VectorImage.IsMap`, set by the importer), `DrawVisible` leaves out a shape whose layer is in
+`MapLayerMinPx` while its larger side is smaller than that many device pixels. The importer sets "building" to 2.5 px,
+so houses disappear when the map is zoomed out. Other pictures are not affected.
+
+**Parallel import.** `MbTilesView.Threads` (default 0 = all processors; 1 = one thread) decodes and builds the tiles in
+parallel. The tiles are read in order and joined in order, so the picture is the same at any thread count. The style rule
+is called from several threads, so use 1 for a rule that is not thread-safe. On a 2-core machine the z14 import of the
+whole test file took 1.2-1.8 s with 2 threads against 1.4-1.8 s with 1 (the timings vary between runs).
+
 Limits: raster MBTiles (png / jpg) throw `NotSupportedException`; icons are not drawn. Labels are placed
 without collision checks, so dense streets can overlap. Loading a whole city at zoom 13 is tens of thousands
 of shapes, so pick a smaller `West/South/East/North` or a lower `Zoom` when you only need an overview.

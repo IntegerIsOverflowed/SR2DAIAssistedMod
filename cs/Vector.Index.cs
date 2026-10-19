@@ -19,12 +19,23 @@ namespace Sr2d64CSport
         int[] _indexStamp = Array.Empty<int>();
         int _indexGen;
         VectorImage? _visibleView;
+        float[] _indexSize = Array.Empty<float>();      // larger side of each shape's own path (no stroke padding)
+
+        /// <summary>True for a map loaded from tiles (MBTiles): only then does <see cref="MapLayerMinPx"/> apply.</summary>
+        public bool IsMap;
+        /// <summary>
+        /// Map level of detail, for maps only (<see cref="IsMap"/>): a shape whose <see cref="VectorShape.Layer"/> is a key here
+        /// is left out of <see cref="DrawVisible"/> while its larger side is smaller than the value, in device pixels.
+        /// The importer sets "building" to 2.5 px: houses vanish when the map is zoomed out and show again when it is closer.
+        /// </summary>
+        public readonly Dictionary<string, float> MapLayerMinPx = new Dictionary<string, float>();
 
         /// <summary>Builds (or rebuilds) the grid over the shapes' bounds (image units). Call after the shape list changes.</summary>
         public void BuildIndex(float cell = 256f)
         {
             int n = Shapes.Count;
             _indexBounds = new RectangleF[n];
+            _indexSize = new float[n];
             _indexCell = Math.Max(16f, cell);
             float minX = float.MaxValue, minY = float.MaxValue, maxX = float.MinValue, maxY = float.MinValue;
             for (int i = 0; i < n; i++)
@@ -32,6 +43,7 @@ namespace Sr2d64CSport
                 var s = Shapes[i];
                 if (s.Path.IsEmpty) { _indexBounds[i] = RectangleF.Empty; continue; }
                 var b = s.Path.ControlBounds();
+                _indexSize[i] = Math.Max(b.Width, b.Height);
                 float pad = (s.Stroke != null ? s.StrokeWidth * 0.5f : 0f) + 1f;      // a stroke reaches past its path
                 b = RectangleF.Inflate(b, pad, pad);
                 _indexBounds[i] = b;
@@ -100,17 +112,18 @@ namespace Sr2d64CSport
             var visible = new RectangleF(x0, y0, x1 - x0, y1 - y0);
             float scale = MathF.Sqrt(MathF.Abs(m.M11 * m.M22 - m.M12 * m.M21));
 
-            var ids = ShapesIn(visible);
+            // 2 device pixels around the view: a hairline reaches one device pixel past its path, at any zoom
+            float margin = scale > 1e-6f ? 2f / scale : 0f;
+            var ids = ShapesIn(RectangleF.Inflate(visible, margin, margin));
             _visibleView ??= new VectorImage { Format = Format, Title = Title, ViewBox = ViewBox, Width = Width, Height = Height, VisibleArea = VisibleArea, ClipViewport = ClipViewport };
             _visibleView.Shapes.Clear();
             foreach (int i in ids)
             {
-                if (minScreenPx > 0f)
-                {
-                    var b = _indexBounds[i];
-                    if (Math.Max(b.Width, b.Height) * scale < minScreenPx) continue;
-                }
-                _visibleView.Shapes.Add(Shapes[i]);
+                var sh = Shapes[i];
+                float need = minScreenPx;
+                if (IsMap && sh.Layer != null && MapLayerMinPx.TryGetValue(sh.Layer, out float layerMin)) need = Math.Max(need, layerMin);
+                if (need > 0f && _indexSize[i] * scale < need) continue;
+                _visibleView.Shapes.Add(sh);
             }
             _visibleView.Draw(dst, m, o);
             _visibleView.Shapes.Clear();                 // do not keep the shapes alive through the view

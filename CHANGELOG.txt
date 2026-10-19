@@ -16,6 +16,25 @@ Conventions
   DOCS     README / comments only
 
 
+2026-10-19  Map: hairline outlines, level of detail for maps, parallel tile import
+------------------------------------------------------------------------------------------------
+ADDED    VectorShape.Hairline: the stroke is one device pixel at every zoom (StrokeWidth is ignored). Drawn, culled
+         and bounded in device pixels; SVG export writes vector-effect="non-scaling-stroke". Compat: none (default off).
+ADDED    VectorShape.Layer: the OpenMapTiles layer of a shape from tiles (null for other pictures). Strings are shared.
+ADDED    VectorImage.IsMap and VectorImage.MapLayerMinPx: for maps only, DrawVisible leaves out a shape whose layer is
+         in MapLayerMinPx while it is smaller on screen than that. The importer sets "building" to 2.5 px. Other
+         pictures are drawn as before.
+CHANGED  MBTiles building outlines are hairlines (before: 0.5 map units, growing with the zoom). Compat: pass a custom
+         MbTilesStyleRule that returns MbPaint(..., hairline: false) to keep the old outlines.
+ADDED    MbTilesView.Threads (default 0 = all processors; 1 = one thread). Tiles are decoded and built in parallel and
+         joined in tile order, so the picture is identical at any count. Compat: a style rule that is not thread-safe
+         needs Threads = 1.
+CHECKED  ctlrun: 435 ok, 0 FAIL. Hairline 1.00 px at scales 0.5, 1, 4 and 10 (a 1-unit stroke: 4.0 px at scale 4);
+         map: a 1 px house left out, a picture that is not a map keeps it; parallel and serial imports draw the same
+         pixels (0 different). Import of the whole test file at zoom 14: 1.2-1.8 s (2 threads and 1 thread alike within
+         the noise on this 2-core machine).
+         Not checked on Windows.
+
 2026-10-19  VectorText: joins, caps and outline position (as in the font file)
 ------------------------------------------------------------------------------------------------
 ADDED    VectorTextStyle.Join (VectorJoin, default Bevel): the corner shape of the strokes. Bevel is the font file's

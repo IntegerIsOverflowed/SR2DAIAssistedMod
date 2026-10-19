@@ -345,6 +345,11 @@ namespace Sr2d64CSport
         public string? Group;
         /// <summary>Hidden shapes stay in the container (with their name) but are not drawn, hit-tested or included in bounds; saved as display:none.</summary>
         public bool Hidden;
+        /// <summary>Hairline stroke: the stroke is one device pixel wide at every zoom (map outlines). StrokeWidth is ignored.</summary>
+        public bool Hairline;
+        /// <summary>Map layer the shape came from (OpenMapTiles name such as "building"); null for other shapes. The map level
+        /// of detail (VectorImage.MapLayerMinPx) reads it.</summary>
+        public string? Layer;
         /// <summary>Set by the importers: the shape is glyph outlines of a text run (its Unicode text is in <see cref="Tag"/>) / a placed raster image.</summary>
         public bool IsText, IsImage;
         public object? Tag { get; set; }
@@ -364,7 +369,7 @@ namespace Sr2d64CSport
             var m = extra.HasValue ? Transform * extra.Value : Transform;
             if (m.IsIdentity) return this;
             Path = Path.Transformed(m); Clip = Clip?.Transformed(m);
-            float s = VectorRender.MeanScale(m); StrokeWidth *= s;
+            float s = VectorRender.MeanScale(m); if (!Hairline) StrokeWidth *= s;
             if (Dash != null) for (int i = 0; i < Dash.Length; i++) Dash[i] *= s; DashOffset *= s;
             if (Fill is VectorGradient fg && !fg.ObjectBoundingBox) fg.Matrix *= m;
             if (Stroke is VectorGradient sg && !sg.ObjectBoundingBox) sg.Matrix *= m;
@@ -661,7 +666,8 @@ namespace Sr2d64CSport
                 if (s.EvenOdd) body.Append(" fill-rule=\"evenodd\"");
                 if (s.Stroke != null)
                 {
-                    body.Append(ci, $" stroke-width=\"{F(s.StrokeWidth)}\"");
+                    if (s.Hairline) body.Append(ci, $" stroke-width=\"1\" vector-effect=\"non-scaling-stroke\"");
+                    else body.Append(ci, $" stroke-width=\"{F(s.StrokeWidth)}\"");
                     if (s.Cap != VectorCap.Butt) body.Append(ci, $" stroke-linecap=\"{s.Cap.ToString().ToLowerInvariant()}\"");
                     if (s.Join != VectorJoin.Miter) body.Append(ci, $" stroke-linejoin=\"{s.Join.ToString().ToLowerInvariant()}\"");
                     if (Math.Abs(s.MiterLimit - 4f) > 1e-3f) body.Append(ci, $" stroke-miterlimit=\"{F(s.MiterLimit)}\"");

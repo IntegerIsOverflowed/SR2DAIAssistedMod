@@ -288,7 +288,7 @@ namespace Sr2d64CSport
             float l = float.MaxValue, tp = float.MaxValue, r = float.MinValue, b = float.MinValue;
             foreach (var p in pts) { if (p.X < l) l = p.X; if (p.X > r) r = p.X; if (p.Y < tp) tp = p.Y; if (p.Y > b) b = p.Y; }
             var rc = RectangleF.FromLTRB(l, tp, r, b);
-            if (s.Stroke != null) { float w = s.StrokeWidth * MaxScale(t) / 2 * (s.Join == VectorJoin.Miter ? MathF.Max(1, s.MiterLimit) : 1); rc.Inflate(w, w); }
+            if (s.Stroke != null) { float w = s.Hairline ? 1f : s.StrokeWidth * MaxScale(t) / 2 * (s.Join == VectorJoin.Miter ? MathF.Max(1, s.MiterLimit) : 1); rc.Inflate(w, w); }
             if (s.Clip != null && !s.Clip.IsRect(out _)) { }   // (a non-rect clip can only shrink it; ignored for a conservative box)
             else if (s.Clip != null && s.Clip.IsRect(out var cr)) rc = RectangleF.Intersect(rc, TransformRect(cr, t));
             return rc;
@@ -300,7 +300,7 @@ namespace Sr2d64CSport
             if (s.Stroke != null)
             {
                 var o = new List<PointF>(); var oc = new List<int>();
-                Stroke(pts, subs, s, MathF.Max(s.StrokeWidth * MeanScale(s.Transform), 1f), o, oc);
+                Stroke(pts, subs, s, s.Hairline ? 1f : MathF.Max(s.StrokeWidth * MeanScale(s.Transform), 1f), o, oc);
                 var ss = new List<(int, int, bool)>(); int st = 0; foreach (var c in oc) { ss.Add((st, c, true)); st += c; }
                 return Inside(o, ss, p, false);
             }
@@ -366,7 +366,7 @@ namespace Sr2d64CSport
         static void CopyInto(VectorShape from, VectorShape to)
         {
             to.Path = from.Path; to.Fill = from.Fill; to.Stroke = from.Stroke; to.EvenOdd = from.EvenOdd; to.StrokeWidth = from.StrokeWidth; to.Cap = from.Cap; to.Join = from.Join;
-            to.MiterLimit = from.MiterLimit; to.Dash = from.Dash; to.DashOffset = from.DashOffset; to.Opacity = from.Opacity; to.Transform = from.Transform; to.Hidden = from.Hidden; to.IsText = from.IsText; to.IsImage = from.IsImage;
+            to.MiterLimit = from.MiterLimit; to.Hairline = from.Hairline; to.Layer = from.Layer; to.Dash = from.Dash; to.DashOffset = from.DashOffset; to.Opacity = from.Opacity; to.Transform = from.Transform; to.Hidden = from.Hidden; to.IsText = from.IsText; to.IsImage = from.IsImage;
         }
         /// <summary>Draws a single shape (the gradient fills of Sprite.Gradient.cs go through here).</summary>
         public static void DrawShape(VectorShape s, Sprite dst, Matrix3x2 m, bool aa)
@@ -404,7 +404,7 @@ namespace Sr2d64CSport
                 float bl = float.MaxValue, bt = float.MaxValue, br = float.MinValue, bb = float.MinValue;
                 foreach (var p in pts) { if (p.X < bl) bl = p.X; if (p.X > br) br = p.X; if (p.Y < bt) bt = p.Y; if (p.Y > bb) bb = p.Y; }
                 float sw = 0;
-                if (s.Stroke != null && o.Strokes) { sw = MathF.Max(s.StrokeWidth * MeanScale(t), o.MinStrokeWidth); float inf = sw * (s.Join == VectorJoin.Miter ? MathF.Max(1, s.MiterLimit) : 1); bl -= inf; bt -= inf; br += inf; bb += inf; }
+                if (s.Stroke != null && o.Strokes) { sw = s.Hairline ? 1f : MathF.Max(s.StrokeWidth * MeanScale(t), o.MinStrokeWidth); float inf = sw * (s.Join == VectorJoin.Miter ? MathF.Max(1, s.MiterLimit) : 1); bl -= inf; bt -= inf; br += inf; bb += inf; }
                 if (br < lr.Left - 1 || bl > lr.Right + 1 || bb < lr.Top - 1 || bt > lr.Bottom + 1) return;
                 var shapeBox = RectangleF.FromLTRB(bl, bt, br, bb);
 
@@ -424,7 +424,7 @@ namespace Sr2d64CSport
                     else
                     {   // squished: stroke in local space (width in local units), then transform the outline
                         var lp = new List<PointF>(); var ls = Flatten(s.Path, Matrix3x2.Identity, tol / scale, lp);
-                        float lw = MathF.Max(s.StrokeWidth, o.MinStrokeWidth / MeanScale(t));
+                        float lw = s.Hairline ? 1f / MathF.Max(MeanScale(t), 1e-6f) : MathF.Max(s.StrokeWidth, o.MinStrokeWidth / MeanScale(t));
                         Stroke(lp, ls, s, lw, op, opc);
                         for (int i = 0; i < op.Count; i++) { var v = Vector2.Transform(new Vector2(op[i].X, op[i].Y), t); op[i] = new PointF(v.X, v.Y); }
                         if (t.M11 * t.M22 - t.M12 * t.M21 < 0) { int st = 0; foreach (var c in opc) { op.Reverse(st, c); st += c; } }   // mirrored: keep positive orientation
