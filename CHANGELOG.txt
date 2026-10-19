@@ -16,6 +16,21 @@ Conventions
   DOCS     README / comments only
 
 
+2026-10-19  VectorText: new stroke font (151 glyphs), corner radius and tip limit; fit to path; below-path fix
+------------------------------------------------------------------------------------------------
+CHANGED  VectorText glyph data replaced by the "Angular Vector Font" (Latin + Cyrillic, 151 glyphs). Glyphs are open
+         straight strokes; the data is a string table in cs/VectorText.cs (no font file). Cap height 70 font units.
+ADDED    VectorTextStyle.Radius (default 6 font units): quadratic rounding of each interior corner, cut at
+         min(radius, half of each adjacent segment). Open stroke ends are not rounded.
+ADDED    VectorTextStyle.TipDrop (default 0): an acute tip may be cut back by at most this many font units.
+ADDED    VectorTextStyle.Monospace: every glyph gets one 60-unit advance; wide glyphs are squeezed to fit.
+CHANGED  Width and OnPath use the ink extent, not the advance, so FitToPath ends exactly at the path ends.
+FIXED    OnPath with Above = false drew the glyphs upside down. They now stay upright, hanging under the line.
+CHECKED  ctlrun: 418 ok, 0 FAIL (rounding adds curve points; apex at cap height with TipDrop 0; monospace W = 46;
+         below-path H spans y 100..170 on a line at y 100). Demo: "VectorText styles" and "VectorText on a curve" tests.
+         The demo text uses generic sample sentences only.
+         Not checked on Windows: the demo runs on Windows only; the curve layout was rendered headlessly (Linux).
+
 2026-10-19  Vector map: grid index and culled drawing; road and place names as vector text
 ------------------------------------------------------------------------------------------------
 ADDED    VectorImage.BuildIndex(cell) and VectorImage.DrawVisible(dst, matrix, options, minScreenPx): a grid over

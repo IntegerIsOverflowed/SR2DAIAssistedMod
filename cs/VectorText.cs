@@ -1,28 +1,39 @@
-// VectorText.cs - text made of open strokes (lines and arcs), no font files.
-// Glyphs are single-stroke designs in em units (cap height 10, x-height 6.5, descender -3), drawn as stroked paths,
-// so the text stays sharp at any scale and can be bent along a path (map labels along roads and rivers).
-// Bold = a wider stroke. Italic = a skew (x += 0.2 * y). Latin, digits, basic punctuation and full Cyrillic.
+// VectorText.cs - text drawn from open strokes, no font files.
+// Glyph data: the "VectorAngular" font (glyph outlines are straight polylines, in font units, y up, baseline 0,
+// cap height 70, x-height 50, descender -20). The data is the font's own table, exported from its page
+// (Latin, digits, punctuation, Cyrillic). Drawing rounds each interior corner with a quadratic curve
+// (Radius), can keep acute tips sharp (TipDrop), and can use one advance per glyph (Monospace).
+// Bold = a wider stroke, Italic = a skew (x += 0.2 * y). Curves are flattened to short segments, so the text
+// can be bent along a path (map labels along roads and rivers) with the same code as straight text.
 using System;
 using System.Collections.Generic;
 using System.Drawing;
 using System.Globalization;
 using System.Linq;
+using System.Numerics;
 
 namespace Sr2d64CSport
 {
-    /// <summary>How text is drawn. Size is the cap height in image units (glyph em = Size / 10).</summary>
+    /// <summary>How text is drawn. Size is the cap height in image units.</summary>
     public sealed class VectorTextStyle
     {
         public bool Bold;
         public bool Italic;
         /// <summary>ARGB colour of the strokes.</summary>
         public int Color = unchecked((int)0xFF000000);
-        /// <summary>Stroke width as a fraction of Size (regular 0.08; bold doubles it). 0 = the default.</summary>
+        /// <summary>Stroke width as a fraction of Size (regular 6/70 = 0.086; bold 0.16). 0 = the default.</summary>
         public float Weight;
         /// <summary>Space between glyphs as a fraction of Size.</summary>
         public float Tracking = 0.1f;
+        /// <summary>Corner rounding radius in font units (cap height = 70). 0 = angular corners. Default 6 (the font's own).</summary>
+        public float Radius = 6f;
+        /// <summary>Tip limit in font units: an acute corner at the top or bottom of a stroke is lowered by at most this.
+        /// 0 keeps such tips sharp (the font's default).</summary>
+        public float TipDrop;
+        /// <summary>One advance (60 units) for every glyph, wide glyphs squeezed to 46 units, glyphs centred.</summary>
+        public bool Monospace;
 
-        internal float StrokeFraction => Weight > 0 ? Weight : (Bold ? 0.16f : 0.08f);
+        internal float StrokeFraction => Weight > 0 ? Weight : (Bold ? 0.16f : 6f / 70f);
     }
 
     /// <summary>Text along a path.</summary>
@@ -33,7 +44,7 @@ namespace Sr2d64CSport
         public float Offset;
         /// <summary>Start, Center or End: where the text sits along the path, after Offset.</summary>
         public VectorTextAlign Align = VectorTextAlign.Start;
-        /// <summary>True: text on the left of the path's direction (screen up); false: below it.</summary>
+        /// <summary>True: text above the path (screen up from the line); false: hanging below it. The glyphs stay upright in both cases.</summary>
         public bool Above = true;
         /// <summary>True: the text is stretched or squeezed along the path so it spans it exactly (Offset is then 0).</summary>
         public bool FitToPath;
@@ -44,16 +55,40 @@ namespace Sr2d64CSport
     /// <summary>Stroke-font text as a <see cref="VectorImage"/>, and text bent along a polyline.</summary>
     internal static class VectorText
     {
+        const float CapHeight = 70f;          // font units
+        const float SideBearing = 5f;         // font units, each side of a glyph
+        const float SpaceAdvance = 30f;
+        const float MonoAdvance = 60f;
+        const float MonoMaxWidth = 46f;
+        const int CurveSteps = 4;             // segments per rounded corner
+
         /// <summary>True when the glyph exists. Characters without a glyph are drawn as a gap.</summary>
         public static bool HasGlyph(char c) => Glyphs.ContainsKey(c);
 
-        /// <summary>Width of the text in image units at the given size (advance of every glyph, no trailing gap).</summary>
+        /// <summary>Width of the visible text (ink, from the left edge of the first glyph to the right edge of the last) in image units.</summary>
         public static float Width(string text, float size = 10f, VectorTextStyle? style = null)
         {
             style ??= new VectorTextStyle();
-            float s = size / 10f, w = 0;
-            foreach (char c in text) w += Advance(c, style) * s;
-            return w > 0 ? w - style.Tracking * size : 0;
+            var (lo, hi) = Ink(text, style);
+            return (hi - lo) * size / CapHeight;
+        }
+
+        /// <summary>Left and right edge of the ink in font units, the pen starting at 0.</summary>
+        static (float Lo, float Hi) Ink(string text, VectorTextStyle style)
+        {
+            float lo = float.MaxValue, hi = float.MinValue, pen = 0;
+            foreach (char c in text)
+            {
+                float ox = pen + Lsb(c, style);
+                foreach (var st in GlyphStrokes(c, style))
+                    foreach (var p in st.P)
+                    {
+                        float x = ox + p.X + (style.Italic ? p.Y * 0.2f : 0f);
+                        lo = Math.Min(lo, x); hi = Math.Max(hi, x);
+                    }
+                pen += Advance(c, style);
+            }
+            return lo <= hi ? (lo, hi) : (0f, 0f);
         }
 
         /// <summary>
@@ -62,18 +97,20 @@ namespace Sr2d64CSport
         public static VectorImage Create(string text, float size = 10f, VectorTextStyle? style = null)
         {
             style ??= new VectorTextStyle();
-            float s = size / 10f;
+            float s = size / CapHeight;
             var path = new VectorPath();
-            float cursor = 0;
+            float pen = 0;
             foreach (char c in text)
             {
-                foreach (var line in Strokes(c))
+                float ox = pen + Lsb(c, style);
+                foreach (var st in GlyphStrokes(c, style))
                 {
-                    if (line.Count < 2) continue;
-                    path.MoveTo(Map(line[0], cursor, s, style.Italic));
-                    for (int i = 1; i < line.Count; i++) path.LineTo(Map(line[i], cursor, s, style.Italic));
+                    if (st.P.Count < 2) continue;
+                    path.MoveTo(Map(st.P[0], ox, s, style.Italic));
+                    for (int i = 1; i < st.P.Count; i++) path.LineTo(Map(st.P[i], ox, s, style.Italic));
+                    if (st.Closed) path.Close();
                 }
-                cursor += Advance(c, style) * s;
+                pen += Advance(c, style);
             }
             return Picture(path, size, style, text);
         }
@@ -90,11 +127,12 @@ namespace Sr2d64CSport
             var style = options.Style ?? new VectorTextStyle();
             if (points == null || points.Count < 2) throw new ArgumentException("A text path needs at least two points.", nameof(points));
             var pl = new PolyLine(points);
-            float s = size / 10f;
+            float s = size / CapHeight;
+            var (inkLo, inkHi) = Ink(text, style);
             float total = Width(text, size, style);
-            float f = 1f;                                                    // distance per text unit
+            float f = 1f;                                                    // distance per image unit of text
             float start = options.Offset;
-            if (options.FitToPath && total > 0) { f = (pl.Length - 0) / total; start = 0; }
+            if (options.FitToPath && total > 0) { f = pl.Length / total; start = 0; }
             else
             {
                 start = options.Align switch
@@ -104,36 +142,39 @@ namespace Sr2d64CSport
                     _ => options.Offset,
                 };
             }
-            float side = options.Above ? 1f : -1f;
             var path = new VectorPath();
-            float cursor = 0;
+            float pen = 0;
             foreach (char c in text)
             {
-                foreach (var line in Strokes(c))
+                float ox = pen + Lsb(c, style);
+                foreach (var st in GlyphStrokes(c, style))
                 {
-                    if (line.Count < 2) continue;
+                    if (st.P.Count < 2) continue;
                     PointF Mapped(PointF p)
                     {
                         float gx = p.X + (style.Italic ? p.Y * 0.2f : 0f), gy = p.Y;
-                        float d = start + (cursor + gx * s) * f;      // cursor is already in image units
+                        float d = start + (ox + gx - inkLo) * s * f;  // distance along the path (image units); the ink starts at start
                         var (at, tx, ty) = pl.At(d);
-                        float h = gy * s * side;                             // up = (ty, -tx) in y-down screen space
+                        // up = (ty, -tx) in y-down screen space. Glyphs stay upright either way;
+                        // below the path the glyph's top sits on the line and the body hangs under it.
+                        float h = (options.Above ? gy : gy - CapHeight) * s;
                         return new PointF(at.X + h * ty, at.Y - h * tx);
                     }
-                    path.MoveTo(Mapped(line[0]));
-                    for (int i = 1; i < line.Count; i++) path.LineTo(Mapped(line[i]));
+                    path.MoveTo(Mapped(st.P[0]));
+                    for (int i = 1; i < st.P.Count; i++) path.LineTo(Mapped(st.P[i]));
+                    if (st.Closed) path.Close();
                 }
-                cursor += Advance(c, style) * s;
+                pen += Advance(c, style);
             }
             return Picture(path, size, style, text);
         }
 
         // ------------------------------------------------------------------ internals
 
-        static PointF Map(PointF p, float cursor, float s, bool italic)
+        static PointF Map(PointF p, float ox, float s, bool italic)
         {
-            float x = p.X + (italic ? p.Y * 0.2f : 0f);
-            return new PointF(cursor + x * s, -p.Y * s);                     // flip: glyphs are y-up, the picture is y-down
+            float x = ox + p.X + (italic ? p.Y * 0.2f : 0f);
+            return new PointF(x * s, -p.Y * s);                              // flip: glyphs are y-up, the picture is y-down
         }
 
         static VectorImage Picture(VectorPath path, float size, VectorTextStyle style, string text)
@@ -150,16 +191,302 @@ namespace Sr2d64CSport
             return img;
         }
 
+        /// <summary>Advance of a character in font units, tracking included.</summary>
         static float Advance(char c, VectorTextStyle style)
         {
-            if (c == ' ') return 3.0f + style.Tracking * 10f;
-            return (Glyphs.TryGetValue(c, out var g) ? g.Advance : 0f) + style.Tracking * 10f;
+            float a;
+            if (c == ' ') a = SpaceAdvance;
+            else if (!Glyphs.TryGetValue(c, out var g)) a = 0f;
+            else a = style.Monospace ? MonoAdvance : g.Width + 2 * SideBearing;
+            return a + style.Tracking * CapHeight;
         }
 
-        static IEnumerable<List<PointF>> Strokes(char c)
+        /// <summary>Left side bearing (font units): the glyph's origin relative to its pen position.</summary>
+        static float Lsb(char c, VectorTextStyle style)
         {
-            return Glyphs.TryGetValue(c, out var g) ? g.Lines : Enumerable.Empty<List<PointF>>();
+            if (!style.Monospace || !Glyphs.TryGetValue(c, out var g)) return SideBearing;
+            return (MonoAdvance - Math.Min(g.Width, MonoMaxWidth)) / 2;
         }
+
+        sealed class Stroke
+        {
+            public List<PointF> P = new List<PointF>();
+            public bool Closed;
+        }
+
+        /// <summary>The glyph's strokes in font units (y up), squeezed for Monospace and rounded at the corners.</summary>
+        static List<Stroke> GlyphStrokes(char c, VectorTextStyle style)
+        {
+            var list = new List<Stroke>();
+            if (!Glyphs.TryGetValue(c, out var g)) return list;
+            float kx = style.Monospace && g.Width > MonoMaxWidth ? MonoMaxWidth / g.Width : 1f;
+            foreach (var raw in g.Strokes)
+            {
+                var pts = raw.P.Select(p => new PointF(p.X * kx, p.Y)).ToList();
+                list.Add(new Stroke { P = Round(pts, raw.Closed, style.Radius, style.TipDrop), Closed = raw.Closed });
+            }
+            return list;
+        }
+
+        /// <summary>
+        /// Rounds the corners of a polyline: each interior corner (every corner when closed) becomes a quadratic curve
+        /// whose control point is the corner; the cut distance is at most <paramref name="r"/> and at most half of each
+        /// adjoining segment. An acute corner at the top or bottom of the stroke is cut no deeper than
+        /// 2 * tip / sqrt((1 + cos) / 2), so the tip is not lowered by more than <paramref name="tip"/>.
+        /// Open ends are not rounded. Curves are returned as short segments.
+        /// </summary>
+        static List<PointF> Round(List<PointF> p, bool closed, float r, float tip)
+        {
+            int n = p.Count;
+            var result = new List<PointF>(n * (CurveSteps + 1));
+            if (n < 3 || r <= 0f)
+            {
+                result.AddRange(p);
+                return result;
+            }
+            float ymax = p.Max(q => q.Y), ymin = p.Min(q => q.Y);
+
+            (PointF a, PointF b, PointF v, float t) Corner(int i)
+            {
+                var v = p[i];
+                var A = p[(i - 1 + n) % n];
+                var B = p[(i + 1) % n];
+                float l1 = Dist(A, v), l2 = Dist(B, v);
+                float t = l1 > 0 && l2 > 0 ? Math.Min(r, Math.Min(l1 / 2, l2 / 2)) : 0f;
+                if (t > 0)
+                {
+                    float cos = ((A.X - v.X) * (B.X - v.X) + (A.Y - v.Y) * (B.Y - v.Y)) / (l1 * l2);
+                    if (cos > 0 && (v.Y == ymax || v.Y == ymin))
+                        t = Math.Min(t, 2 * tip / MathF.Sqrt((1 + cos) / 2));
+                }
+                PointF a2 = l1 > 0 && t > 0 ? new PointF(v.X + (A.X - v.X) * t / l1, v.Y + (A.Y - v.Y) * t / l1) : v;
+                PointF b2 = l2 > 0 && t > 0 ? new PointF(v.X + (B.X - v.X) * t / l2, v.Y + (B.Y - v.Y) * t / l2) : v;
+                return (a2, b2, v, t);
+            }
+
+            void Emit(int i)
+            {
+                var (a, b, v, t) = Corner(i);
+                result.Add(a);
+                if (t <= 0f) return;
+                for (int k = 1; k <= CurveSteps; k++)
+                {
+                    float u = k / (float)CurveSteps, w = 1 - u;
+                    result.Add(new PointF(w * w * a.X + 2 * w * u * v.X + u * u * b.X, w * w * a.Y + 2 * w * u * v.Y + u * u * b.Y));
+                }
+            }
+
+            if (closed)
+            {
+                for (int i = 0; i < n; i++) Emit(i);
+            }
+            else
+            {
+                result.Add(p[0]);
+                for (int i = 1; i < n - 1; i++) Emit(i);
+                result.Add(p[n - 1]);
+            }
+            return result;
+        }
+
+        static float Dist(PointF a, PointF b) => MathF.Sqrt((a.X - b.X) * (a.X - b.X) + (a.Y - b.Y) * (a.Y - b.Y));
+
+        // ------------------------------------------------------------------ glyph table
+
+        sealed class RawStroke
+        {
+            public List<PointF> P = new List<PointF>();
+            public bool Closed;
+        }
+
+        sealed class GlyphDef
+        {
+            public float Width;
+            public List<RawStroke> Strokes = new List<RawStroke>();
+        }
+
+        static readonly Dictionary<char, GlyphDef> Glyphs = Load();
+
+        /// <summary>Reads the table: one glyph per line, "char TAB width TAB strokes"; strokes are split by '|', points are
+        /// "x,y" separated by spaces, a trailing Z closes the stroke.</summary>
+        static Dictionary<char, GlyphDef> Load()
+        {
+            var dict = new Dictionary<char, GlyphDef>();
+            foreach (var line in Data.Split('\n'))
+            {
+                var parts = line.TrimEnd('\r').Split('\t');
+                if (parts.Length != 3 || parts[0].Length != 1) continue;
+                var g = new GlyphDef { Width = float.Parse(parts[1], CultureInfo.InvariantCulture) };
+                foreach (var spec in parts[2].Split('|'))
+                {
+                    var rs = new RawStroke { Closed = spec.EndsWith("Z", StringComparison.Ordinal) };
+                    var body = rs.Closed ? spec.Substring(0, spec.Length - 1) : spec;
+                    foreach (var pt in body.Split(' ', StringSplitOptions.RemoveEmptyEntries))
+                    {
+                        var xy = pt.Split(',');
+                        rs.P.Add(new PointF(float.Parse(xy[0], CultureInfo.InvariantCulture), float.Parse(xy[1], CultureInfo.InvariantCulture)));
+                    }
+                    if (rs.P.Count > 0) g.Strokes.Add(rs);
+                }
+                dict[parts[0][0]] = g;
+            }
+            return dict;
+        }
+
+        /// <summary>Glyph table of the VectorAngular font (exported from its page, aliases already expanded).</summary>
+        const string Data = @"
+0	36	12,0 24,0 36,12 36,58 24,70 12,70 0,58 0,12Z
+1	18	2,54 18,70 18,0
+2	36	2,54 8,66 20,70 30,64 34,52 28,38 0,0 36,0
+3	36	2,58 10,70 24,70 33,60 33,48 24,38 12,37 24,36 36,26 36,10 26,0 10,0 0,12
+4	38	30,0 30,70 0,22 38,22
+5	36	32,70 4,70 2,38 14,42 26,42 36,32 36,10 26,0 10,0 0,12
+6	36	30,66 22,70 12,70 0,56 0,12 8,0 26,0 36,12 36,30 26,42 10,42 0,30
+7	36	0,70 36,70 12,0
+8	36	10,70 26,70 33,63 33,49 27,42 9,28 0,20 0,8 8,0 28,0 36,8 36,20 27,28 9,42 3,49 3,63Z
+9	36	6,4 14,0 24,0 36,14 36,58 28,70 10,70 0,58 0,40 10,28 26,28 36,40
+A	44	0,0 22,70 44,0|8,24 36,24
+B	36	0,0 28,0 36,8 36,30 30,38 34,46 34,62 26,70 0,70Z|0,38 30,38
+C	36	36,56 28,70 8,70 0,60 0,10 8,0 28,0 36,14
+D	36	0,0 0,70 20,70 36,54 36,16 20,0Z
+E	36	36,70 0,70 0,0 36,0|0,35 28,35
+F	34	0,0 0,70 34,70|0,35 26,35
+G	36	36,56 28,70 8,70 0,60 0,10 8,0 28,0 36,10 36,32 20,32
+H	36	0,0 0,70|36,0 36,70|0,35 36,35
+I	0	0,0 0,70
+J	28	28,70 28,14 20,0 8,0 0,12
+K	36	0,0 0,70|34,70 0,24|10,37 36,0
+L	32	0,70 0,0 32,0
+M	44	0,0 0,70 22,14 44,70 44,0
+N	36	0,0 0,70 36,0 36,70
+O	40	12,0 28,0 40,12 40,58 28,70 12,70 0,58 0,12Z
+P	36	0,0 0,70 24,70 36,60 36,46 24,36 0,36
+Q	40	12,0 28,0 40,12 40,58 28,70 12,70 0,58 0,12Z|26,16 40,-4
+R	36	0,0 0,70 24,70 36,60 36,46 24,36 0,36|18,36 36,0
+S	36	34,56 28,70 10,70 2,60 2,48 12,37 26,33 36,22 36,10 28,0 8,0 0,12
+T	40	0,70 40,70|20,70 20,0
+U	36	0,70 0,16 12,0 24,0 36,16 36,70
+V	40	0,70 20,0 40,70
+W	56	0,70 13,0 28,52 43,0 56,70
+X	36	0,0 36,70|36,0 0,70
+Y	40	0,70 20,36 40,70|20,36 20,0
+Z	34	0,70 34,70 0,0 34,0
+a	30	10,0 20,0 30,10 30,40 20,50 10,50 0,40 0,10Z|30,50 30,0
+b	30	10,0 20,0 30,10 30,40 20,50 10,50 0,40 0,10Z|0,70 0,0
+c	30	30,38 22,50 8,50 0,40 0,10 8,0 22,0 30,12
+d	30	10,0 20,0 30,10 30,40 20,50 10,50 0,40 0,10Z|30,70 30,0
+e	30	0,25 30,25 30,40 22,50 8,50 0,40 0,10 8,0 22,0 30,10
+f	24	24,66 18,70 12,66 12,0|0,50 24,50
+g	30	10,0 20,0 30,10 30,40 20,50 10,50 0,40 0,10Z|30,50 30,-8 22,-20 8,-20 0,-12
+h	30	0,70 0,0|0,34 6,50 24,50 30,40 30,0
+i	0	0,0 0,50|0,62 0,65
+j	10	10,50 10,-8 4,-20 0,-20|10,62 10,65
+k	28	0,70 0,0|26,50 0,18|10,30 28,0
+l	0	0,70 0,0
+m	52	0,0 0,50|0,34 6,50 20,50 26,40 26,0|26,40 32,50 46,50 52,40 52,0
+n	30	0,0 0,50|0,34 6,50 24,50 30,40 30,0
+o	30	10,0 20,0 30,10 30,40 20,50 10,50 0,40 0,10Z
+p	30	10,0 20,0 30,10 30,40 20,50 10,50 0,40 0,10Z|0,50 0,-20
+q	30	10,0 20,0 30,10 30,40 20,50 10,50 0,40 0,10Z|30,50 30,-20
+r	20	0,0 0,50|0,34 6,50 20,50
+s	28	26,40 20,50 8,50 2,42 2,34 8,27 22,24 28,16 28,8 20,0 8,0 0,8
+t	22	10,66 10,8 16,0 22,0|0,50 22,50
+u	30	0,50 0,10 8,0 22,0 30,10|30,50 30,0
+v	32	0,50 16,0 32,50
+w	48	0,50 10,0 24,38 38,0 48,50
+x	30	0,50 30,0|30,50 0,0
+y	32	0,50 17,3|32,50 10,-20
+z	28	0,50 28,50 0,0 28,0
+.	0	0,0 0,3
+,	4	4,2 0,-10
+:	0	0,0 0,3|0,38 0,41
+;	4	4,38 4,41|4,2 0,-10
+!	0	0,70 0,22|0,0 0,3
+?	36	0,56 6,68 18,70 30,68 36,56 36,48 18,38 18,24|18,0 18,3
+-	24	0,26 24,26
+_	36	0,-8 36,-8
++	30	0,30 30,30|15,15 15,45
+=	30	0,38 30,38|0,22 30,22
+/	26	0,-4 26,74
+(	16	16,76 4,56 4,6 16,-8
+)	14	0,76 12,56 12,6 0,-8
+""	12	0,70 0,54|12,70 12,54
+'	0	0,70 0,54
+А	44	0,0 22,70 44,0|8,24 36,24
+В	36	0,0 28,0 36,8 36,30 30,38 34,46 34,62 26,70 0,70Z|0,38 30,38
+Е	36	36,70 0,70 0,0 36,0|0,35 28,35
+К	36	0,0 0,70|34,70 0,24|10,37 36,0
+М	44	0,0 0,70 22,14 44,70 44,0
+Н	36	0,0 0,70|36,0 36,70|0,35 36,35
+О	40	12,0 28,0 40,12 40,58 28,70 12,70 0,58 0,12Z
+Р	36	0,0 0,70 24,70 36,60 36,46 24,36 0,36
+С	36	36,56 28,70 8,70 0,60 0,10 8,0 28,0 36,14
+Т	40	0,70 40,70|20,70 20,0
+Х	36	0,0 36,70|36,0 0,70
+І	0	0,0 0,70
+а	30	10,0 20,0 30,10 30,40 20,50 10,50 0,40 0,10Z|30,50 30,0
+е	30	0,25 30,25 30,40 22,50 8,50 0,40 0,10 8,0 22,0 30,10
+о	30	10,0 20,0 30,10 30,40 20,50 10,50 0,40 0,10Z
+к	28	0,70 0,0|26,50 0,18|10,30 28,0
+р	30	10,0 20,0 30,10 30,40 20,50 10,50 0,40 0,10Z|0,50 0,-20
+с	30	30,38 22,50 8,50 0,40 0,10 8,0 22,0 30,12
+х	30	0,50 30,0|30,50 0,0
+у	32	0,50 17,3|32,50 10,-20
+і	0	0,0 0,50|0,62 0,65
+З	36	2,58 10,70 24,70 33,60 33,48 24,38 12,37 24,36 36,26 36,10 26,0 10,0 0,12
+Б	36	34,70 0,70 0,0 20,0 36,10 36,26 20,36 0,36
+Г	32	0,0 0,70 32,70
+Д	44	10,0 16,70 40,70 40,0|2,-12 2,0 44,0 44,-12
+Ж	38	0,70 19,35 0,0|38,70 19,35 38,0|19,70 19,0
+И	36	0,70 0,0 36,70 36,0
+Й	36	0,70 0,0 36,70 36,0|8,86 18,80 28,86
+Л	36	0,0 15,70 36,70 36,0
+П	34	0,0 0,70 34,70 34,0
+У	38	0,70 21,22|38,70 10,-10
+Ф	36	18,70 18,0|12,13 24,13 36,25 36,45 24,57 12,57 0,45 0,25Z
+Ц	36	0,70 0,0 36,0|36,70 36,-12
+Ч	34	0,70 0,50 8,34 20,32 34,32|34,70 34,0
+Ш	50	0,70 0,0 50,0 50,70|25,70 25,0
+Щ	50	0,70 0,0 50,0|50,70 50,-12|25,70 25,0
+Ъ	36	0,70 14,70 14,0 24,0 36,8 36,26 24,34 14,34
+Ь	35	0,70 0,0 22,0 35,9 35,25 22,34 0,34
+Ы	46	0,70 0,0 22,0 35,9 35,25 22,34 0,34|46,70 46,0
+Э	40	4,56 10,70 28,70 40,60 40,10 28,0 10,0 4,14|10,35 40,35
+Ю	48	0,70 0,0|0,35 12,35|24,0 36,0 48,12 48,58 36,70 24,70 12,58 12,12Z
+Я	36	36,0 36,70 14,70 2,60 2,46 14,36 36,36|18,36 0,0
+Ё	36	36,70 0,70 0,0 36,0|0,35 28,35|10,84 10,87|26,84 26,87
+Є	34	34,56 28,70 10,70 0,60 0,10 10,0 28,0 34,14|8,35 32,35
+Ї	16	8,0 8,70|2,84 2,87|14,84 14,87
+Ґ	30	0,0 0,70 30,70 30,80
+б	30	0,25 4,50 16,66 30,70|10,0 20,0 30,10 30,40 20,50 10,50 0,40 0,10Z
+в	28	0,0 18,0 28,6 28,18 18,25 24,32 24,43 16,50 0,50Z|0,25 18,25
+г	24	0,0 0,50 24,50
+д	32	8,0 13,50 28,50 28,0|0,-10 0,0 32,0 32,-10
+ж	32	0,50 16,25 0,0|32,50 16,25 32,0|16,50 16,0
+з	28	2,40 8,50 18,50 26,43 26,34 18,26 10,25 22,24 28,16 28,8 20,0 8,0 0,8
+и	30	0,50 0,0 30,50 30,0
+й	30	0,50 0,0 30,50 30,0|7,66 15,62 23,66
+л	30	0,0 12,50 30,50 30,0
+м	32	0,0 0,50 16,12 32,50 32,0
+н	30	0,50 0,0|0,25 30,25|30,50 30,0
+п	30	0,0 0,50 30,50 30,0
+т	28	0,50 28,50|14,50 14,0
+ф	32	16,70 16,-20|10,3 22,3 32,13 32,37 22,47 10,47 0,37 0,13Z
+ц	30	0,50 0,0 30,0|30,50 30,-10
+ч	28	0,50 0,38 6,24 16,22 28,22|28,50 28,0
+ш	44	0,50 0,0 44,0 44,50|22,50 22,0
+щ	44	0,50 0,0 44,0|44,50 44,-10|22,50 22,0
+ъ	30	0,50 12,50 12,0 20,0 30,6 30,19 20,25 12,25
+ь	29	0,50 0,0 18,0 29,6 29,19 18,25 0,25
+ы	40	0,50 0,0 18,0 29,6 29,19 18,25 0,25|40,50 40,0
+э	32	2,38 8,50 22,50 32,40 32,10 22,0 8,0 2,12|8,25 32,25
+ю	36	0,50 0,0|0,25 10,25|20,0 26,0 36,10 36,40 26,50 20,50 10,40 10,10Z
+я	26	26,0 26,50 12,50 2,44 2,31 12,25 26,25|12,25 0,0
+ё	30	0,25 30,25 30,40 22,50 8,50 0,40 0,10 8,0 22,0 30,10|10,64 10,66|22,64 22,66
+є	30	30,38 22,50 8,50 0,40 0,10 8,0 22,0 30,12|8,25 28,25
+ї	16	8,0 8,50|2,64 2,66|14,64 14,66
+ґ	22	0,0 0,50 22,50 22,60
+";
 
         /// <summary>Polyline with arc length; At(d) gives the point and unit tangent at distance d (extrapolated past the ends).</summary>
         sealed class PolyLine
@@ -204,224 +531,6 @@ namespace Sr2d64CSport
                 float dx = b.X - a.X, dy = b.Y - a.Y, len = MathF.Sqrt(dx * dx + dy * dy);
                 return len > 0 ? (dx / len, dy / len) : (1f, 0f);
             }
-
-            static float Dist(PointF a, PointF b) => MathF.Sqrt((a.X - b.X) * (a.X - b.X) + (a.Y - b.Y) * (a.Y - b.Y));
-        }
-
-        static float F(string s) => float.Parse(s, NumberStyles.Float, CultureInfo.InvariantCulture);
-
-        /// <summary>
-        /// Parses a glyph: "M x y" starts a stroke, "L x y" adds a line, "A cx cy rx ry a0 a1" adds an elliptical arc
-        /// from angle a0 to a1 in degrees (y up, negative sweeps clockwise). A line is inserted if the arc does not start where the stroke ends.
-        /// </summary>
-        static List<List<PointF>> Parse(string spec)
-        {
-            var lines = new List<List<PointF>>();
-            var cur = new List<PointF>();
-            // "M0 0" and "M 0 0" both work: a command letter is always its own token
-            var t = System.Text.RegularExpressions.Regex.Replace(spec, "([MLA])", " $1 ").Split(' ', StringSplitOptions.RemoveEmptyEntries);
-            int i = 0;
-            while (i < t.Length)
-            {
-                string op = t[i++];
-                if (op == "M")
-                {
-                    cur = new List<PointF> { new PointF(F(t[i]), F(t[i + 1])) };
-                    lines.Add(cur); i += 2;
-                }
-                else if (op == "L")
-                {
-                    if (cur.Count == 0) { cur.Add(new PointF(0, 0)); lines.Add(cur); }
-                    cur.Add(new PointF(F(t[i]), F(t[i + 1]))); i += 2;
-                }
-                else if (op == "A")
-                {
-                    float cx = F(t[i]), cy = F(t[i + 1]), rx = F(t[i + 2]), ry = F(t[i + 3]), a0 = F(t[i + 4]), a1 = F(t[i + 5]);
-                    i += 6;
-                    if (cur.Count == 0) { cur.Add(new PointF(0, 0)); lines.Add(cur); }
-                    int n = Math.Max(4, (int)(Math.Abs(a1 - a0) / 8f));
-                    for (int k = 0; k <= n; k++)
-                    {
-                        float a = (a0 + (a1 - a0) * k / n) * MathF.PI / 180f;
-                        var p = new PointF(cx + rx * MathF.Cos(a), cy + ry * MathF.Sin(a));
-                        var last = cur[^1];
-                        if (Math.Abs(last.X - p.X) > 1e-3f || Math.Abs(last.Y - p.Y) > 1e-3f) cur.Add(p);
-                    }
-                }
-                else throw new FormatException("Glyph op '" + op + "' is not M, L or A.");
-            }
-            return lines;
-        }
-
-        sealed class Glyph
-        {
-            public readonly float Advance;
-            public readonly List<List<PointF>> Lines;
-            public Glyph(float advance, string spec) { Advance = advance; Lines = Parse(spec); }
-        }
-
-        static readonly Dictionary<char, Glyph> Glyphs = BuildGlyphs();
-
-        static Dictionary<char, Glyph> BuildGlyphs()
-        {
-            var g = new Dictionary<char, Glyph>();
-            void Add(char c, float adv, string spec) => g[c] = new Glyph(adv, spec);
-            void Alias(char c, char like) => g[c] = g[like];
-
-            // ---- capitals (cap height 10)
-            Add('A', 6, "M0 0 L3 10 L6 0 M1.2 4 L4.8 4");
-            Add('B', 6.4f, "M0 0 L0 10 L3.2 10 A3.2 7.5 3.2 2.5 90 -90 A3.2 2.5 3.2 2.5 90 -90 L0 0 M0 5 L3.2 5");
-            Add('C', 6.6f, "A3.2 5 3.2 5 45 315");
-            Add('D', 7, "M0 0 L0 10 L3 10 A3 5 3 5 90 -90 L0 0");
-            Add('E', 5, "M5 0 L0 0 L0 10 L5 10 M0 5 L4 5");
-            Add('F', 5, "M0 0 L0 10 L5 10 M0 5 L4 5");
-            Add('G', 7, "A3.2 5 3.2 5 45 360 L3.5 5");
-            Add('H', 6, "M0 0 L0 10 M6 0 L6 10 M0 5 L6 5");
-            Add('I', 2, "M0 0 L2 0 M1 0 L1 10 M0 10 L2 10");
-            Add('J', 4.5f, "M4.5 10 L4.5 2.5 A2.25 2.5 2.25 2.5 0 -180");
-            Add('K', 5.5f, "M0 0 L0 10 M5.5 10 L0 4 M2 6 L5.5 0");
-            Add('L', 5, "M0 10 L0 0 L5 0");
-            Add('M', 7, "M0 0 L0 10 L3.5 4 L7 10 L7 0");
-            Add('N', 6, "M0 0 L0 10 L6 0 L6 10");
-            Add('O', 6.5f, "A3.25 5 3.25 5 0 360");
-            Add('P', 5.6f, "M0 0 L0 10 L3.2 10 A3.2 7.5 3.2 2.5 90 -90 L0 5");
-            Add('Q', 6.5f, "A3.25 5 3.25 5 0 360 M4 2.5 L6.5 0");
-            Add('R', 6, "M0 0 L0 10 L3.2 10 A3.2 7.5 3.2 2.5 90 -90 L0 5 M3 5 L6 0");
-            Add('S', 5.6f, "A2.75 7.5 2.75 2.5 30 270 A2.75 2.5 2.75 2.5 90 -150");
-            Add('T', 6, "M0 10 L6 10 M3 10 L3 0");
-            Add('U', 6, "M0 10 L0 3.5 A3 3.5 3 3.5 180 360 L6 10");
-            Add('V', 6, "M0 10 L3 0 L6 10");
-            Add('W', 8, "M0 10 L2 0 L4 7 L6 0 L8 10");
-            Add('X', 6, "M0 0 L6 10 M6 0 L0 10");
-            Add('Y', 6, "M0 10 L3 5 L6 10 M3 5 L3 0");
-            Add('Z', 6, "M0 10 L6 10 L0 0 L6 0");
-
-            // ---- digits
-            Add('0', 5.5f, "A2.75 5 2.75 5 0 360");
-            Add('1', 4, "M0 8 L2.5 10 L2.5 0 M0 0 L5 0");
-            Add('2', 5.5f, "A2.75 7.5 2.75 2.5 160 -30 L0 0 L5.5 0");
-            Add('3', 5.5f, "A2.75 7.5 2.75 2.5 160 -90 A2.75 2.5 2.75 2.5 90 -160");
-            Add('4', 6, "M4.5 0 L4.5 10 L0 3 L6 3");
-            Add('5', 5.5f, "M5.5 10 L0.5 10 L0 5.5 L2.5 6 A2.9 2.5 2.6 2.5 90 -150");
-            Add('6', 5.5f, "A2.75 3.25 2.75 3.25 0 360 M0 3.25 L0 5 A2.75 6.75 2.75 3.25 180 60");
-            Add('7', 5.5f, "M0 10 L5.5 10 L2 0");
-            Add('8', 5.5f, "A2.75 2.6 2.75 2.6 0 360 A2.75 7.4 2.5 2.6 0 360");
-            Add('9', 5.5f, "A2.75 6.75 2.75 3.25 0 360 M5.5 6.75 L5.5 4 A2.75 3.25 2.75 3.25 0 -90");
-
-            // ---- lower case (x-height 6.5, descender -3)
-            Add('a', 5, "A2.5 3.25 2.5 3.25 0 360 M5 0 L5 6.5");
-            Add('b', 5, "M0 10 L0 0 A2.5 3.25 2.5 3.25 180 -180");
-            Add('c', 4.5f, "A2.25 3.25 2.25 3.25 45 315");
-            Add('d', 5, "M5 10 L5 0 A2.5 3.25 2.5 3.25 0 360");
-            Add('e', 5, "M0.5 3.25 L4.5 3.25 A2.5 3.25 2.5 3.25 0 330");
-            Add('f', 3.5f, "M1 0 L1 7.5 A1.5 1.5 1.5 1.5 180 60 M0 6.5 L3 6.5");
-            Add('g', 5, "A2.5 3.25 2.5 3.25 0 360 M5 6.5 L5 -2 A2.5 -2 2.5 1.5 0 -150");
-            Add('h', 5, "M0 10 L0 0 M0 3.5 A2.5 3.25 2.5 3.25 180 0 L5 0");
-            Add('i', 2, "M1 0 L1 6.5 M1 8.5 L1 9");
-            Add('j', 2.5f, "M1.5 6.5 L1.5 -1.5 A0.5 -1.5 0.5 0.4 0 -180 M2 8.5 L2 9");
-            Add('k', 4.5f, "M0 10 L0 0 M4.5 6.5 L0 2.5 M1.8 3.8 L4.5 0");
-            Add('l', 2, "M1 0 L1 10");
-            Add('m', 6, "M0 0 L0 6.5 M0 4.5 L2 6.5 L2 0 M2 4.5 L4 6.5 L4 0 M4 4.5 L6 6.5 L6 0");
-            Add('n', 5, "M0 0 L0 6.5 M0 4.5 L2 6.5 L5 6.5 L5 0");
-            Add('o', 5, "A2.5 3.25 2.5 3.25 0 360");
-            Add('p', 5, "M0 -3 L0 6.5 A2.5 3.25 2.5 3.25 180 -180");
-            Add('q', 5, "M5 -3 L5 6.5 A2.5 3.25 2.5 3.25 0 360");
-            Add('r', 3.5f, "M0 0 L0 6.5 M0 4 A2 4 2 2.5 150 60");
-            Add('s', 4.5f, "A2.25 4.9 2.25 1.6 40 270 A2.25 1.6 2.25 1.6 90 -140");
-            Add('t', 3.5f, "M1 9 L1 1.5 L3.5 1.5 M0 6.5 L3 6.5");
-            Add('u', 5, "M0 6.5 L0 2.5 A2.5 2.5 2.5 2.5 180 360 M5 6.5 L5 0");
-            Add('v', 5, "M0 6.5 L2.5 0 L5 6.5");
-            Add('w', 7, "M0 6.5 L1.75 0 L3.5 4.5 L5.25 0 L7 6.5");
-            Add('x', 5, "M0 0 L5 6.5 M5 0 L0 6.5");
-            Add('y', 5, "M0 6.5 L2.5 0 M5 6.5 L1.5 -3");
-            Add('z', 5, "M0 6.5 L5 6.5 L0 0 L5 0");
-
-            // ---- punctuation and signs
-            Add(' ', 3, "");
-            Add('.', 1.6f, "A0.8 0.8 0.8 0.8 0 360");
-            Add(',', 1.6f, "M1.2 1.5 L0.6 -1");
-            Add(':', 1.6f, "A0.8 2.5 0.8 0.8 0 360 A0.8 7.5 0.8 0.8 0 360");
-            Add(';', 1.6f, "A0.8 2.5 0.8 0.8 0 360 M1.2 1.5 L0.6 -1");
-            Add('!', 2, "M1 10 L1 3.5 M1 0.5 L1 0.8");
-            Add('?', 5, "A2.5 7.5 2.5 2.5 160 -30 L2.5 5 L2.5 4.5 M2.5 0.5 L2.5 1.2");
-            Add('-', 4, "M0.5 5 L3.5 5");
-            Add('_', 5, "M0 -1.5 L5 -1.5");
-            Add('+', 6, "M1 5 L5 5 M3 3 L3 7");
-            Add('=', 6, "M1 3.8 L5 3.8 M1 6.2 L5 6.2");
-            Add('/', 4, "M0 0 L4 10");
-            Add('\\', 4, "M0 10 L4 0");
-            Add('|', 2, "M1 -3 L1 10");
-            Add('(', 3, "A3.2 5 2 5 60 300");
-            Add(')', 3, "A0.5 5 2 5 -120 120");
-            Add('[', 3, "M3 -2 L1 -2 L1 11 L3 11");
-            Add(']', 3, "M0 -2 L2 -2 L2 11 L0 11");
-            Add('"', 3, "M1 10 L1 7 M3 10 L3 7");
-            Add('\'', 1.5f, "M1 10 L1 7");
-            Add('*', 4, "M2 4 L2 9 M0 7 L4 6.2 M0.6 4.6 L3.4 8.4 M3.4 4.6 L0.6 8.4");
-            Add('%', 7, "A1.5 8.5 1.2 1.5 0 360 A5.5 1.5 1.2 1.5 0 360 M6 10 L1 0");
-            Add('<', 5, "M5 8.5 L0.5 5 L5 1.5");
-            Add('>', 5, "M0.5 8.5 L5 5 L0.5 1.5");
-            Add('#', 6, "M2 0 L1.5 10 M4.5 0 L4 10 M0.5 3 L5.5 3 M0 7 L5 7");
-            Add('&', 6.5f, "M6 0 L2 6 A2.2 2.2 2.2 2.2 60 360 L1 0 L6 4.5");
-            Add('@', 8, "A4 5 4 5 45 360 M4 4 A1.8 2 1.8 2 360 90");
-
-            // ---- Latin look-alikes in Cyrillic (same shapes)
-            Alias('А', 'A'); Alias('В', 'B'); Alias('Е', 'E'); Alias('К', 'K'); Alias('М', 'M'); Alias('Н', 'H');
-            Alias('О', 'O'); Alias('Р', 'P'); Alias('С', 'C'); Alias('Т', 'T'); Alias('Х', 'X');
-            Alias('а', 'a'); Alias('е', 'e'); Alias('о', 'o'); Alias('р', 'p'); Alias('с', 'c'); Alias('у', 'y'); Alias('х', 'x');
-
-            // ---- Cyrillic capitals (drawn)
-            Add('Б', 6, "M6 0 L0 0 L0 10 L6 10 M0 5 L4 5");
-            Add('Г', 5, "M0 0 L0 10 L5 10");
-            Add('Д', 6.5f, "M0 0 L0 9 L1 10 L5.5 10 L6.5 9 L6.5 0 M-0.5 0 L7 0");
-            Add('Ж', 8, "M0 10 L4 5 L8 10 M0 0 L4 5 L8 0");
-            Add('З', 5.5f, "A2.75 7.5 2.75 2.5 160 -90 A2.75 2.5 2.75 2.5 90 -160");
-            Add('И', 6, "M0 0 L0 10 L6 0 L6 10");
-            Add('Й', 6, "M0 0 L0 10 L6 0 L6 10 M2 11.5 L4 11.5");
-            Add('Л', 6, "M0 0 L1.2 10 L4.8 10 L6 0 M1.2 4 L4.8 4");
-            Add('П', 6, "M0 0 L0 10 L6 10 L6 0");
-            Add('Ф', 7, "A3.5 5 3.5 4.9 0 360 M3.5 -0.5 L3.5 10.5");
-            Add('Ц', 6.5f, "M0 10 L0 0 L5.5 0 M5.5 10 L5.5 -2.5 L6.8 -2.5");
-            Add('Ч', 6, "M0 10 L0 6 L6 6 M6 10 L6 0");
-            Add('Ш', 8, "M0 0 L0 10 M4 0 L4 10 M8 0 L8 10 M0 0 L8 0");
-            Add('Щ', 9, "M0 0 L0 10 M4 0 L4 10 M8 0 L8 10 M0 0 L8 0 M8 0 L8.5 -2.5 L9.5 -2.5");
-            Add('Ъ', 6.5f, "M0 10 L2.5 10 M1 10 L1 0 M1 5 L3 5 A3 2.5 1.5 2.5 90 -90 M1 0 L4 0");
-            Add('Ы', 7, "M0 0 L0 10 M0 5 L3 5 M3 0 L3 10 M3 0 L6 0 L6 10");
-            Add('Ь', 5.5f, "M0 10 L0 0 L3 0 A3.2 2.5 3.2 2.5 -90 90 L0 5 L3 5");
-            Add('Э', 5.5f, "M5.5 10 L1.5 10 L0 5 L1.5 0 L5.5 0 M1.5 5 L4 5");
-            Add('Ю', 8, "M0 0 L0 10 M0 5 L2.5 5 M2.5 0 L2.5 10 M3 5 A5.5 5 2.5 5 180 540");
-            Add('Я', 6, "M0 0 L0 10 L3 10 A3 7.5 3 2.5 90 -90 L0 5 M3 5 L6 0");
-            Add('Ё', 5, "M5 0 L0 0 L0 10 L5 10 M0 5 L4 5 A1.5 11.2 0.6 0.6 0 360 A3.5 11.2 0.6 0.6 0 360");
-
-            // ---- Cyrillic lower case (drawn)
-            Add('б', 5, "A2.5 3.25 2.5 3.25 0 360 M0 3.25 L0 9.5 L5 9.5");
-            Add('в', 5, "M0 0 L0 6.5 L2.5 6.5 A2.5 1.6 2.5 1.6 90 -90 L0 3.25 M0 3.25 L2.5 3.25");
-            Add('г', 4.5f, "M0 0 L0 6.5 M0 6.5 L4.5 6.5");
-            Add('д', 5.5f, "M0 0 L0.8 6.5 L4.8 6.5 L5.5 0 M-0.5 0 L6 0");
-            Add('ж', 7.5f, "M0 6.5 L3.75 3.25 L7.5 6.5 M0 0 L3.75 3.25 L7.5 0");
-            Add('з', 4.5f, "A2.25 4.9 2.25 1.6 160 -90 A2.25 1.6 2.25 1.6 90 -160");
-            Add('и', 5, "M0 0 L0 6.5 L5 0 L5 6.5");
-            Add('й', 5, "M0 0 L0 6.5 L5 0 L5 6.5 M1.5 8.2 L3.5 8.2");
-            Add('к', 4.8f, "M0 0 L0 6.5 M4.8 6.5 L0 2.5 M1.8 3.6 L4.8 0");
-            Add('л', 5, "M0 0 L1 6 L4 6 L5 0");
-            Add('м', 6.5f, "M0 0 L0 6.5 L3.25 0 L6.5 6.5 L6.5 0");
-            Add('н', 5, "M0 0 L0 6.5 L5 6.5 L5 0");
-            Add('п', 5, "M0 0 L0 6.5 L5 6.5 L5 0");
-            Add('т', 5, "M0 6.5 L5 6.5 M2.5 6.5 L2.5 0");
-            Add('ф', 5, "A2.5 3.25 2.5 3.25 0 360 M2.5 -2.5 L2.5 9");
-            Add('ц', 5.5f, "M0 6.5 L0 0 L4.5 0 M4.5 6.5 L4.5 -2 L5.6 -2");
-            Add('ч', 5, "M0 6.5 L0 3.5 L5 3.5 M5 6.5 L5 0");
-            Add('ш', 5.5f, "M0 0 L0 6.5 M2.5 0 L2.5 6.5 M5 0 L5 6.5 M0 0 L5 0");
-            Add('щ', 6.5f, "M0 0 L0 6.5 M2.5 0 L2.5 6.5 M5 0 L5 6.5 M0 0 L5 0 M5 0 L5.5 -2 L6.5 -2");
-            Add('ъ', 5.5f, "M0 6.5 L2 6.5 M1 6.5 L1 3 L3.5 3 A2 1.6 1.2 1.6 90 -90 M1 0 L3.5 0");
-            Add('ы', 5.5f, "M0 0 L0 6.5 M0 3.25 L2.5 3.25 M2.5 0 L2.5 6.5 M2.5 0 L4.5 0 L4.5 6.5");
-            Add('ь', 4, "M0 0 L0 6.5 M0 3.25 L3 3.25 A2.5 1.6 2.5 1.6 90 -90");
-            Add('э', 5, "M0.5 3.25 L4.5 3.25 A2.5 3.25 2.5 3.25 0 330");
-            Add('ю', 7, "M0 0 L0 6.5 M0 3.25 L2 3.25 M2 0 L2 6.5 M2.5 3.25 A4.5 3.25 2 3.25 180 540");
-            Add('я', 5.5f, "M5 0 L5 6.5 L1.5 6.5 A1.8 3.25 1.8 3.25 90 -90 L5 3.25 M3.5 3.25 L0 0");
-            Add('ё', 5, "M0.5 3.25 L4.5 3.25 A2.5 3.25 2.5 3.25 0 330 A1.5 8.4 0.6 0.6 0 360 A3.5 8.4 0.6 0.6 0 360");
-
-            return g;
         }
     }
 }

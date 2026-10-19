@@ -89,6 +89,27 @@ static class VectorTextChecks
         var up = AllPoints(under);
         Chk(up.Min(p => p.Y) >= 98.5f && up.Max(p => p.Y) <= 111f, "below the path: letters hang under the line");
 
+        // below the path the glyphs stay upright: an H at size 70 on y = 100 spans y 100..170 (top on the line)
+        var hangLine = new List<PointF> { new PointF(0, 100), new PointF(300, 100) };
+        var hang = AllPoints(Sr2d64CSport.VectorText.OnPath("H", hangLine, 70f, new Sr2d64CSport.VectorTextPathOptions { Above = false }));
+        Chk(MathF.Abs(hang.Min(p => p.Y) - 100f) < 0.01f && MathF.Abs(hang.Max(p => p.Y) - 170f) < 0.01f, $"below the path: glyphs stay upright (H spans y {hang.Min(p => p.Y):0.0}..{hang.Max(p => p.Y):0.0})");
+
+        // rounding: radius 12 adds curve points to the angular glyph; radius 0 keeps the vertices only
+        var angularO = AllPoints(Sr2d64CSport.VectorText.Create("O", 70f, new Sr2d64CSport.VectorTextStyle { Radius = 0f }));
+        var roundO = AllPoints(Sr2d64CSport.VectorText.Create("O", 70f, new Sr2d64CSport.VectorTextStyle { Radius = 12f }));
+        Chk(roundO.Count > angularO.Count + 20, $"radius 12 rounds the O's corners ({angularO.Count} -> {roundO.Count} points)");
+
+        // tip limit: the apex of A is exactly at cap height with TipDrop 0, and lowered by at most TipDrop with 3
+        float apexSharp = AllPoints(Sr2d64CSport.VectorText.Create("A", 70f, new Sr2d64CSport.VectorTextStyle { Radius = 12f, TipDrop = 0f })).Min(p => p.Y);
+        float apexDrop = AllPoints(Sr2d64CSport.VectorText.Create("A", 70f, new Sr2d64CSport.VectorTextStyle { Radius = 12f, TipDrop = 3f })).Min(p => p.Y);
+        Chk(MathF.Abs(apexSharp + 70f) < 0.01f, $"tip drop 0: A keeps its apex at cap height (y {apexSharp:0.00})");
+        Chk(apexDrop > -70f + 0.5f && apexDrop <= -66.9f, $"tip drop 3: A's apex is lowered by 3 units at most (y {apexDrop:0.00})");
+
+        // monospace: W is squeezed to 46 units, I is centred in a 60-unit advance
+        float wMono = Sr2d64CSport.VectorText.Width("W", 70f, new Sr2d64CSport.VectorTextStyle { Monospace = true });
+        float wProp = Sr2d64CSport.VectorText.Width("W", 70f);
+        Chk(MathF.Abs(wMono - 46f) < 0.01f && MathF.Abs(wProp - 56f) < 0.01f, $"monospace squeezes W to 46 (proportional {wProp:0.0})");
+
         // render: plain, bold, italic, and text on the arc (picture to look at)
         var canvas = new Sr2d64CSport.Sprite(800, 600);
         canvas.ClearBuffer(unchecked((int)0xFFFFFFFF));
@@ -102,6 +123,22 @@ static class VectorTextChecks
         int dark = 0; foreach (var px in canvas.Pixels) if (((px >> 16) & 255) < 128 && ((px >> 8) & 255) < 128 && (px & 255) < 128) dark++;
         Chk(dark > 500, $"the picture has ink ({dark} dark pixels)");
         SaveSprite(canvas, "vectortext.png");
+
+        // the demo's curve test, on its paper background (dark ink, not black on grey)
+        var paper = new Sr2d64CSport.Sprite(800, 600);
+        paper.ClearBuffer(unchecked((int)0xFFF7F4EC));
+        var ink = unchecked((int)0xFF1B2A41); var accent = unchecked((int)0xFFB0432A);
+        var upper = new List<PointF>();
+        for (int i = 0; i <= 96; i++) { double a = Math.PI - Math.PI * i / 96.0; upper.Add(new PointF(400 + 220 * (float)Math.Cos(a), 300 - 220 * (float)Math.Sin(a))); }
+        Sr2d64CSport.VectorText.OnPath("The quick brown fox jumps over the lazy dog", upper, 14f,
+            new Sr2d64CSport.VectorTextPathOptions { Style = new Sr2d64CSport.VectorTextStyle { Bold = true, Color = ink }, Align = Sr2d64CSport.VectorTextAlign.Center }).Draw(paper, System.Numerics.Matrix3x2.Identity);
+        var inner = new List<PointF>();
+        for (int i = 0; i <= 96; i++) { double a = Math.PI - Math.PI * i / 96.0; inner.Add(new PointF(400 + 150 * (float)Math.Cos(a), 300 - 150 * (float)Math.Sin(a))); }
+        Sr2d64CSport.VectorText.OnPath("Lorem ipsum dolor sit amet, consectetur", inner, 11.2f,
+            new Sr2d64CSport.VectorTextPathOptions { Style = new Sr2d64CSport.VectorTextStyle { Bold = true, Color = accent }, Align = Sr2d64CSport.VectorTextAlign.Center, Above = false }).Draw(paper, System.Numerics.Matrix3x2.Identity);
+        var fitLine = new List<PointF> { new PointF(200, 500), new PointF(600, 500) };
+        Sr2d64CSport.VectorText.OnPath("Fit to the path", fitLine, 14f, new Sr2d64CSport.VectorTextPathOptions { Style = new Sr2d64CSport.VectorTextStyle { Color = ink }, FitToPath = true }).Draw(paper, System.Numerics.Matrix3x2.Identity);
+        SaveSprite(paper, "vectortext_curve_demo.png");
     }
 
     static float Dist(PointF p, float cx, float cy) => MathF.Sqrt((p.X - cx) * (p.X - cx) + (p.Y - cy) * (p.Y - cy));

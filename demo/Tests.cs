@@ -264,6 +264,18 @@ namespace Sr2d64CSport
         public const string GVoxel = "Voxels (VoxelGrid.cs)";
         public const string GMaps = "Maps (MBTiles vector tiles, VectorImage)";
         public const string GVText = "Vector text (VectorText.cs, no font files)";
+        // VectorText demo palette: dark ink on a light paper (not black on grey)
+        const int VtPaper = unchecked((int)0xFFF7F4EC), VtInk = unchecked((int)0xFF1B2A41), VtAccent = unchecked((int)0xFFB0432A), VtMuted = unchecked((int)0xFF6B6F7A);
+        static List<PointF> ArcPoints(float cx, float cy, float r, double a0, double a1, int steps)
+        {
+            var pts = new List<PointF>(steps + 1);
+            for (int i = 0; i <= steps; i++)
+            {
+                double a = a0 + (a1 - a0) * i / steps;
+                pts.Add(new PointF(cx + r * (float)Math.Cos(a), cy - r * (float)Math.Sin(a)));
+            }
+            return pts;
+        }
         public const string GAnim = "Animation keys (Animation.cs)";
         static readonly TangentMode[] starts = { TangentMode.Smooth, TangentMode.Fast, TangentMode.Slow, TangentMode.Linear };
         static readonly TangentMode[] ends = { TangentMode.Smooth, TangentMode.Slow, TangentMode.Fast, TangentMode.Linear };
@@ -1218,33 +1230,108 @@ T(GControls, "SpriteLabel / GroupBox / Tabs / TextBox / Numeric / Combo / ListBo
             L[L.Count - 1].FileFilter = "Vector files|*.svg;*.svgz;*.eps;*.ps;*.ai;*.pdf;*.mbtiles|SVG (*.svg, *.svgz)|*.svg;*.svgz|MBTiles vector tiles (*.mbtiles)|*.mbtiles|PostScript / EPS (*.eps, *.ps, *.ai)|*.eps;*.ps;*.ai|PDF (*.pdf)|*.pdf|All files|*.*";
 
             // ===================================================== VectorText (stroke font)
-            T(GVText, "VectorText: plain, bold, italic (open strokes, no font file)",
-              "VectorText.Create draws text from lines and arcs (Latin, digits, basic punctuation, Cyrillic). Bold widens the stroke, Italic skews it. Size = cap height in pixels.",
+            T(GVText, "VectorText: alphabet (Latin, Cyrillic, digits, punctuation) from the VectorAngular font",
+              "Every glyph is straight strokes from the font's own data, with the corners rounded (Radius 6 font units, the font's default). Size = cap height in pixels. No font file is loaded.",
               c =>
               {
-                  float size = 14f * MathF.Max(0.1f, c.Scale);
-                  VectorText.Create("Plain: Hello Челябинск 2026", size).Draw(c.Canvas, c.X, c.Y);
-                  VectorText.Create("Bold: Жёлтый шарик", size, new VectorTextStyle { Bold = true }).Draw(c.Canvas, c.X, c.Y + (int)(size * 2));
-                  VectorText.Create("Italic: улица Кирова", size, new VectorTextStyle { Italic = true }).Draw(c.Canvas, c.X, c.Y + (int)(size * 4));
-              }).Ui(Param.Mouse, "Move the text (the mouse)", Param.Scale, "Size (x14 px cap height)");
-
-            T(GVText, "VectorText on a curve: text along a path, centred, or fitted to the whole path",
-              "VectorText.OnPath places each glyph by its distance along a polyline and its height above it, so the letters follow the curve. The bottom line is stretched to span its path (FitToPath).",
-              c =>
-              {
-                  float size = 14f * MathF.Max(0.1f, c.Scale);
-                  var arc = new List<PointF>();
-                  for (int i = 0; i <= 96; i++)
+                  float size = 12f * MathF.Max(0.1f, c.Scale);
+                  c.Canvas.ClearBuffer(VtPaper);
+                  var ink = new VectorTextStyle { Color = VtInk };
+                  float y = c.Y;
+                  foreach (var line in new[]
                   {
-                      double a = Math.PI - Math.PI * i / 96.0;
-                      arc.Add(new PointF(c.X + 220f * (float)Math.Cos(a), c.Y - 220f * (float)Math.Sin(a)));
+                      "ABCDEFGHIJKLMNOPQRSTUVWXYZ",
+                      "abcdefghijklmnopqrstuvwxyz",
+                      "0123456789 .,:;!?-_+=/()\"'",
+                      "АБВГДЕЁЖЗИЙКЛМНОПРСТУФХЦЧШЩЪЫЬЭЮЯІЇЄҐ",
+                      "абвгдеёжзийклмнопрстуфхцчшщъыьэюяіїєґ",
+                  })
+                  {
+                      VectorText.Create(line, size, ink).Draw(c.Canvas, c.X, (int)y);
+                      y += size * 1.9f;
                   }
-                  VectorText.OnPath("ул. Кирова - проспект Ленина", arc, size,
-                      new VectorTextPathOptions { Style = new VectorTextStyle { Bold = true }, Align = VectorTextAlign.Center })
+              }).Ui(Param.Mouse, "Move the text (the mouse)", Param.Scale, "Size (x12 px cap height)");
+
+            T(GVText, "VectorText styles: plain, bold, italic, bold italic, monospace, corner radius, tip limit",
+              "Bold = wider stroke. Italic = skew. Monospace = one advance for every glyph (wide ones squeezed). Radius = corner rounding in font units (0 = angular). TipDrop = how far an acute tip may be cut (0 = sharp). The captions on the left are plain.",
+              c =>
+              {
+                  float size = 16f * MathF.Max(0.1f, c.Scale);
+                  float cap = 9f * MathF.Max(0.1f, c.Scale);
+                  c.Canvas.ClearBuffer(VtPaper);
+                  var ink = new VectorTextStyle { Color = VtInk };
+                  var bold = new VectorTextStyle { Color = VtInk, Bold = true };
+                  var italic = new VectorTextStyle { Color = VtInk, Italic = true };
+                  var boldItalic = new VectorTextStyle { Color = VtInk, Bold = true, Italic = true };
+                  var mono = new VectorTextStyle { Color = VtInk, Monospace = true };
+                  var angular = new VectorTextStyle { Color = VtInk, Radius = 0f };
+                  var rounded = new VectorTextStyle { Color = VtAccent, Radius = 12f };
+                  var tipped = new VectorTextStyle { Color = VtAccent, Radius = 12f, TipDrop = 3f };
+                  var rows = new (string Caption, string Text, VectorTextStyle Style)[]
+                  {
+                      ("plain", "The quick brown fox 2026", ink),
+                      ("bold", "Bold: lazy dog 0123456789", bold),
+                      ("italic", "Italic: lorem ipsum dolor", italic),
+                      ("bold italic", "Bold italic: Съешь ещё", boldItalic),
+                      ("monospace", "iiii WWWW MMMM 0000", mono),
+                      ("radius 0", "Angular AVWXYZ", angular),
+                      ("radius 12", "Rounded AVWXYZ", rounded),
+                      ("radius 12, tip 3", "Tips AVWXYZ", tipped),
+                  };
+                  float y = c.Y;
+                  foreach (var (caption, text, style) in rows)
+                  {
+                      VectorText.Create(caption, cap, new VectorTextStyle { Color = VtMuted }).Draw(c.Canvas, c.X, (int)(y + cap * 0.6f));
+                      VectorText.Create(text, size, style).Draw(c.Canvas, c.X + 170, (int)y);
+                      y += size * 1.9f;
+                  }
+              }).Ui(Param.Mouse, "Move the text (the mouse)", Param.Scale, "Size (x16 px cap height)");
+
+            T(GVText, "VectorText on a curve: arc, text below a path, fitted to a path and to a wave, alignment",
+              "VectorText.OnPath places each glyph by its distance along a polyline and its height above it, so the letters follow the curve. FitToPath stretches the text so its ink spans the whole path. Below the path (Above = false) the text hangs under the line. Start / Center / End set the place on the path.",
+              c =>
+              {
+                  float size = 14f * MathF.Max(0.1f, c.Scale);
+                  c.Canvas.ClearBuffer(VtPaper);
+                  var bold = new VectorTextStyle { Color = VtInk, Bold = true };
+                  var plain = new VectorTextStyle { Color = VtInk };
+                  var accent = new VectorTextStyle { Color = VtAccent, Bold = true };
+                  const string Sentence = "The quick brown fox jumps over the lazy dog";
+
+                  // 1. upper arc, centred, bold: the letters stand on the arc
+                  var upper = ArcPoints(c.X, c.Y, 220f, Math.PI, 0, 96);
+                  VectorText.OnPath(Sentence, upper, size, new VectorTextPathOptions { Style = bold, Align = VectorTextAlign.Center })
                       .Draw(c.Canvas, System.Numerics.Matrix3x2.Identity);
-                  var line = new List<PointF> { new PointF(c.X - 200, c.Y + 260), new PointF(c.X + 200, c.Y + 260) };
-                  VectorText.OnPath("Fit to the path", line, size, new VectorTextPathOptions { FitToPath = true })
+
+                  // 2. inner arc, text below the path (hangs inside the circle)
+                  var inner = ArcPoints(c.X, c.Y, 150f, Math.PI, 0, 96);
+                  VectorText.OnPath("Lorem ipsum dolor sit amet, consectetur", inner, size * 0.8f,
+                      new VectorTextPathOptions { Style = accent, Align = VectorTextAlign.Center, Above = false })
                       .Draw(c.Canvas, System.Numerics.Matrix3x2.Identity);
+
+                  // 3. fitted to a straight line: the ink spans the whole line
+                  var line = new List<PointF> { new PointF(c.X - 200, c.Y + 200), new PointF(c.X + 200, c.Y + 200) };
+                  VectorText.OnPath("Fit to the path", line, size, new VectorTextPathOptions { Style = plain, FitToPath = true })
+                      .Draw(c.Canvas, System.Numerics.Matrix3x2.Identity);
+
+                  // 4. fitted to a wave
+                  var wave = new List<PointF>();
+                  for (int i = 0; i <= 80; i++) wave.Add(new PointF(c.X - 200 + i * 5f, c.Y + 250 + 12f * MathF.Sin(i / 80f * MathF.PI * 2)));
+                  VectorText.OnPath("Fitted to a wave", wave, size, new VectorTextPathOptions { Style = accent, FitToPath = true })
+                      .Draw(c.Canvas, System.Numerics.Matrix3x2.Identity);
+
+                  // 5. alignment on one straight path: Start, Center, End
+                  foreach (var (align, text, dy) in new[]
+                  {
+                      (VectorTextAlign.Start, "start: lazy dog", 300f),
+                      (VectorTextAlign.Center, "center: lazy dog", 330f),
+                      (VectorTextAlign.End, "end: lazy dog", 360f),
+                  })
+                  {
+                      var seg = new List<PointF> { new PointF(c.X - 200, c.Y + dy), new PointF(c.X + 200, c.Y + dy) };
+                      VectorText.OnPath(text, seg, size * 0.7f, new VectorTextPathOptions { Style = plain, Align = align })
+                          .Draw(c.Canvas, System.Numerics.Matrix3x2.Identity);
+                  }
               }).Ui(Param.Mouse, "Move the arc (the mouse)", Param.Scale, "Size (x14 px cap height)");
 
             // ===================================================== Vector map (MBTiles)

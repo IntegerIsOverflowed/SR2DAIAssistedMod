@@ -2234,22 +2234,31 @@ of shapes, so pick a smaller `West/South/East/North` or a lower `Zoom` when you 
 
 ### Text without fonts: `VectorText` (`cs/VectorText.cs`)
 
-Text drawn from open strokes (lines and elliptical arcs), so it needs no font file and stays sharp at any
-scale. Latin, digits, basic punctuation and Cyrillic. `Bold` widens the stroke, `Italic` skews it.
+Text drawn from open straight strokes, so it needs no font file and stays sharp at any scale. The glyph
+data is the "Angular Vector Font" (Latin, Cyrillic, digits, punctuation; 151 glyphs), stored as a string
+table in the file. Size is the cap height in pixels.
+
+- `Bold` widens the stroke, `Italic` skews it.
+- `Radius` (default 6 font units) rounds each interior corner with a quadratic curve. `0` keeps the corners angular.
+- `TipDrop` (default 0) limits how far an acute tip may be cut back. `0` keeps the tips sharp.
+- `Monospace` gives every glyph the same advance; wide glyphs are squeezed to fit.
 
 ```csharp
-var title = VectorText.Create("Hello 2026", 20f, new VectorTextStyle { Bold = true });  // size = cap height
+var title = VectorText.Create("Hello 2026", 20f, new VectorTextStyle { Bold = true, Radius = 6f });
 title.Draw(canvas, 10, 10);
 
 var pts = new List<PointF> { /* a road or river, image coordinates */ };
-var label = VectorText.OnPath("ул. Кирова", pts, 12f,
+var label = VectorText.OnPath("The quick brown fox", pts, 12f,
     new VectorTextPathOptions { Align = VectorTextAlign.Center, Above = true });   // or FitToPath = true
 label.Draw(canvas, System.Numerics.Matrix3x2.Identity);                              // path coordinates
 ```
 
-Limits: some Cyrillic letters are simple approximations; characters without a glyph are left as a gap
-(`VectorText.HasGlyph`). Text on a path places every glyph point by its distance along the path, so long
-straight segments of a glyph are not bent.
+Text on a path places every glyph point by its distance along the path and its height from the path.
+`Above = false` hangs the text under the line with the glyphs upright. `FitToPath = true` stretches the
+ink so it spans the whole path. `Width` and `OnPath` use the ink extent, not the advance.
+
+Limits: characters without a glyph are left as a gap (`VectorText.HasGlyph`). Glyphs are straight-stroked,
+so they are not bent along a curve; long straight segments of a glyph are not bent either.
 
 ## WebP pictures: `cs/WebP.cs` (`Sprite.FromWebP`, automatic in `new Sprite(file)`)
 
