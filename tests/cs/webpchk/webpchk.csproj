@@ -12,7 +12,7 @@
     <Compile Include="../../../cs/Png.cs;../../../cs/Sprite.Stroke.cs" />
     <Compile Include="../../../cs/SpriteTransform.cs" />
     <Compile Include="../../../cs/Vector.Image.cs" />
-    <Compile Include="../../../cs/Vector.cs;../../../cs/MbTiles.cs;../../../cs/Mvt.cs;../../../cs/Vector.MbTiles.cs;../../../cs/VectorText.cs" />
+    <Compile Include="../../../cs/Vector.cs;../../../cs/MbTiles.cs;../../../cs/Mvt.cs;../../../cs/Vector.MbTiles.cs;../../../cs/VectorText.cs;../../../cs/Vector.Index.cs" />
     <Compile Include="../../../cs/Vector.Render.cs" />
     <Compile Include="../../../cs/Vector.Cache.cs" />
     <Compile Include="../../../cs/Vector.Precompose.cs" />

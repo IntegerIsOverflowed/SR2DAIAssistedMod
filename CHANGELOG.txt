@@ -16,6 +16,16 @@ Conventions
   DOCS     README / comments only
 
 
+2026-10-19  Vector map: grid index and culled drawing; road and place names as vector text
+------------------------------------------------------------------------------------------------
+ADDED    VectorImage.BuildIndex(cell) and VectorImage.DrawVisible(dst, matrix, options, minScreenPx): a grid over
+         the shapes' bounds; a frame draws only the shapes that touch the view (z-order kept), and skips shapes
+         smaller than minScreenPx on screen. A 3x view of a city: 7 ms culled against 121 ms for the whole picture.
+ADDED    MbTilesView.Labels (default true): road names are VectorText along the road line (reading left to right,
+         above the line; main roads from zoom 12, minor roads from zoom 14); place names are straight text at the point.
+CHANGED  MBTiles import now draws names (before: geometry only). Compat: MbTilesView.Labels = false gives the old picture.
+CHECKED  ctlrun: culled draw equals full draw pixel for pixel; labels add shapes.
+
 2026-10-19  Fills on transparent canvases; map demo; VectorText (stroke font, text on a path)
 ------------------------------------------------------------------------------------------------
 FIXED    Vector fills drawn onto a sprite with Op.Paint or Op.AlphaBlend (for example a canvas that starts

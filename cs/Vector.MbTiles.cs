@@ -39,6 +39,11 @@ namespace Sr2d64CSport
         /// antialiasing leaves a faint light seam where two pieces meet; this covers it. 0 turns it off.
         /// </summary>
         public float SeamWidth = 0.6f;
+        /// <summary>
+        /// Names as vector text: road names follow the road line (reads left to right), place names are straight at the
+        /// point. Sizes are in image units, not scaled by zoom, so the text keeps a readable size at every level.
+        /// </summary>
+        public bool Labels = true;
     }
 
     /// <summary>Default colours and widths for the OpenMapTiles schema that tilemaker writes.</summary>
@@ -192,6 +197,7 @@ namespace Sr2d64CSport
                     continue;
                 }
                 float ox = (float)((tx - x0) * TileSize), oy = (float)((ty - y0) * TileSize);
+                var labelNames = new HashSet<string>();      // one label per name and tile (no repeats along a long road)
                 foreach (var layer in layers)
                 {
                     float k = (float)(TileSize / layer.Extent);
@@ -201,12 +207,17 @@ namespace Sr2d64CSport
                         if (paint == null) continue;
                         AddFeature(drawn, f, paint.Value, ox, oy, k, zs, view.SeamWidth);
                     }
+                    if (view.Labels)
+                        foreach (var f in layer.Features)
+                            if (layer.Name == "transportation_name" || layer.Name == "place")
+                                AddLabel(drawn, layer.Name, f, ox, oy, k, zoom, labelNames);
                 }
             }
 
             // LINQ OrderBy is stable: features keep their order inside one rank, so roads stay above land across tile borders
             foreach (var d in drawn.OrderBy(d => d.Rank)) img.Shapes.Add(d.Shape);
-            img.Warnings.Add("MBTiles: labels and icons are not drawn (geometry only).");
+            if (!view.Labels) img.Warnings.Add("MBTiles: labels are off (geometry only).");
+            else img.Warnings.Add("MBTiles: road and place names are drawn as vector text; icons are not drawn.");
             img.Touch();
             return img;
         }
@@ -269,6 +280,84 @@ namespace Sr2d64CSport
                 if (!path.IsEmpty) into.Add((p.Rank, new VectorShape(path, new VectorColor(p.Fill), null, 0f)));
             }
         }
+
+        // Labels are drawn above everything (the rank is larger than any paint rank).
+        const int LabelRank = int.MaxValue - 1;
+
+        /// <summary>Road name size (image units) and the first zoom it appears at: main roads first, minor roads when zoomed in.</summary>
+        static float RoadLabelSize(string cls, int zoom, out bool show)
+        {
+            switch (cls)
+            {
+                case "motorway": case "trunk": case "primary": show = zoom >= 12; return 10f;
+                case "secondary": case "tertiary": show = zoom >= 13; return 9f;
+                default: show = zoom >= 14; return 8f;
+            }
+        }
+
+        /// <summary>Place name size (image units) for a place class at a zoom; 0 = not shown at this zoom.</summary>
+        static float PlaceLabelSize(string cls, int zoom)
+        {
+            switch (cls)
+            {
+                case "city": return zoom >= 4 ? 16f : 0f;
+                case "town": return zoom >= 8 ? 13f : 0f;
+                case "village": case "suburb": return zoom >= 11 ? 11f : 0f;
+                case "hamlet": case "neighbourhood": case "isolated_dwelling": return zoom >= 13 ? 10f : 0f;
+                default: return 0f;
+            }
+        }
+
+        static void AddLabel(List<(int Rank, VectorShape Shape)> into, string layer, MvtFeature f, float ox, float oy, float k, int zoom,
+                             HashSet<string> namesInTile)
+        {
+            string? name = f.Name;
+            if (string.IsNullOrWhiteSpace(name)) return;
+            name = name.Normalize(System.Text.NormalizationForm.FormC).Trim();
+            if (!namesInTile.Add(layer + "|" + name)) return;
+
+            if (layer == "transportation_name" && f.GeomType == 2)
+            {
+                float size = RoadLabelSize(f.Class, zoom, out bool show);
+                if (!show) return;
+                float textWidth = VectorText.Width(name, size);
+                foreach (var line in f.Geoms)
+                {
+                    if (line.Count < 2) continue;
+                    var pts = new List<PointF>(line.Count);
+                    float length = 0f;
+                    for (int i = 0; i < line.Count; i++)
+                    {
+                        pts.Add(new PointF(ox + line[i].X * k, oy + line[i].Y * k));
+                        if (i > 0) length += Dist(pts[i - 1], pts[i]);
+                    }
+                    if (length < textWidth * 1.2f + 8f) continue;          // too short for the name: no label
+                    float dx = pts[pts.Count - 1].X - pts[0].X, dy = pts[pts.Count - 1].Y - pts[0].Y;
+                    // reading left to right (vertical roads: bottom to top); the text stays above the line
+                    if (dx < 0 || (Math.Abs(dx) < 1e-3f && dy > 0)) pts.Reverse();
+                    var label = VectorText.OnPath(name, pts, size, new VectorTextPathOptions { Align = VectorTextAlign.Center, Above = true });
+                    foreach (var s in label.Shapes) into.Add((LabelRank, s));
+                }
+            }
+            else if (layer == "place" && f.GeomType == 1)
+            {
+                float size = PlaceLabelSize(f.Class, zoom);
+                if (size <= 0f) return;
+                float textWidth = VectorText.Width(name, size);
+                foreach (var pt in f.Geoms)
+                {
+                    if (pt.Count == 0) continue;
+                    float x = ox + pt[0].X * k, y = oy + pt[0].Y * k;
+                    // straight text: a horizontal path through the point, text centred on it
+                    float py = y + size * 0.5f;
+                    var pts = new List<PointF> { new PointF(x - textWidth * 0.5f - 2f, py), new PointF(x + textWidth * 0.5f + 2f, py) };
+                    var label = VectorText.OnPath(name, pts, size, new VectorTextPathOptions { Align = VectorTextAlign.Center, Above = true });
+                    foreach (var s in label.Shapes) into.Add((LabelRank, s));
+                }
+            }
+        }
+
+        static float Dist(PointF a, PointF b) => MathF.Sqrt((a.X - b.X) * (a.X - b.X) + (a.Y - b.Y) * (a.Y - b.Y));
 
         // Web-Mercator world pixels at zoom z (256 px per tile).
         static double LonToWorld(double lon, int z) => (lon + 180.0) / 360.0 * TileSize * (1 << z);

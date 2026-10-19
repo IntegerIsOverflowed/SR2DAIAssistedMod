@@ -128,7 +128,7 @@ static class MbTilesChecks
         var img = VectorImage.FromMbTiles(b, new MbTilesView { Zoom = 11 });
         Chk(img.Format == VectorFormat.MbTiles && img.Shapes.Count > 0, $"vector image from MBTiles: {img.Shapes.Count} shapes");
         Chk(img.ViewBox.Width % 256 == 0 && img.ViewBox.Height % 256 == 0 && img.ViewBox.Width > 0, "view box is a whole number of tiles");
-        Chk(img.Warnings.Any(w => w.Contains("labels")), "the importer says labels are not drawn");
+        Chk(img.Warnings.Any(w => w.Contains("names are drawn as vector text")), "the importer says names are drawn as vector text");
         var loaded = VectorImage.Load(b);
         Chk(loaded.Format == VectorFormat.MbTiles && loaded.Shapes.Count == img.Shapes.Count, "VectorImage.Load(path) gives the same shapes");
         var fromBytes = VectorImage.Load(File.ReadAllBytes(a));
@@ -192,7 +192,41 @@ static class MbTilesChecks
                     SaveSprite(t, "diag_op_" + op + ".png");
                 }
             }
+            CullChecks(full);
         }
         else Console.WriteLine("  skip full-size sample (set MBTILES_FILE to chelyabinsk.mbtiles)");
+    }
+
+    // The grid index + DrawVisible: culled drawing must equal the full drawing, cull must drop shapes, labels must add shapes.
+    static void CullChecks(string full)
+    {
+        using var mb = MbTiles.Open(full);
+        var noLabels = VectorImage.FromMbTiles(mb, new MbTilesView { Zoom = 14, Labels = false });
+        var img = VectorImage.FromMbTiles(mb, new MbTilesView { Zoom = 14, Labels = true });
+        Chk(img.Shapes.Count > noLabels.Shapes.Count, $"labels add vector shapes ({img.Shapes.Count} with, {noLabels.Shapes.Count} without)");
+        var sw = Stopwatch.StartNew();
+        img.BuildIndex();
+        Console.WriteLine($"  info  z14 grid index: {sw.Elapsed.TotalMilliseconds:0} ms for {img.Shapes.Count} shapes");
+
+        // a view at 3x of the image centre part, 800x500 pixels
+        var half = new System.Numerics.Vector2(400, 250);
+        var c = new System.Numerics.Vector2(img.Width * 0.5f, img.Height * 0.5f);
+        var m = System.Numerics.Matrix3x2.CreateTranslation(-c.X, -c.Y) * System.Numerics.Matrix3x2.CreateScale(3f) * System.Numerics.Matrix3x2.CreateTranslation(half.X, half.Y);
+
+        var full1 = new Sprite(800, 500); full1.ClearBuffer(MbTilesStyle.Background);
+        sw.Restart(); img.Draw(full1, m); long tFull = sw.ElapsedMilliseconds;
+        var cull = new Sprite(800, 500); cull.ClearBuffer(MbTilesStyle.Background);
+        sw.Restart(); img.DrawVisible(cull, m); long tCull = sw.ElapsedMilliseconds;
+        int diff = 0; for (int i = 0; i < full1.Pixels.Length; i++) if (full1.Pixels[i] != cull.Pixels[i]) diff++;
+        Chk(diff == 0, $"culled draw equals full draw ({diff} different pixels)");
+        Console.WriteLine($"  info  view 3x: full draw {tFull} ms, culled draw {tCull} ms");
+
+        var inView = img.ShapesIn(new System.Drawing.RectangleF(c.X - 130, c.Y - 85, 260, 170)).Count;
+        Chk(inView < img.Shapes.Count / 2, $"a small view picks {inView} of {img.Shapes.Count} shapes");
+
+        var lod = new Sprite(800, 500); lod.ClearBuffer(MbTilesStyle.Background);
+        sw.Restart(); img.DrawVisible(lod, m, null, 1.5f); long tLod = sw.ElapsedMilliseconds;
+        Console.WriteLine($"  info  view 3x with 1.5 px minimum size: {tLod} ms");
+        SaveSprite(cull, "cull_view3x.png");
     }
 }

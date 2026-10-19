@@ -2214,14 +2214,23 @@ List<MvtLayer>? layers = tile is null ? null : Mvt.Decode(tile);   // layers →
 var map = VectorImage.FromMbTiles("map.mbtiles", new MbTilesView {
     Zoom = 13,                                       // -1 (default) = DataMaxZoom, the highest zoom with tiles
     West = 61.2, South = 55.05, East = 61.6, North = 55.25,   // default = whole file
-    Style = null                                     // null = MbTilesStyle.Default (OpenMapTiles); or your own MbTilesStyleRule
+    Style = null,                                    // null = MbTilesStyle.Default (OpenMapTiles); or your own MbTilesStyleRule
+    Labels = true                                    // road names along the road, place names straight (vector text, no pixels)
 });
 map.DrawFit(canvas);                                 // or Rasterize(w, h)
+
+// A city is tens of thousands of shapes: build the grid once, then draw only what touches the view.
+map.BuildIndex();                                    // grid over the shapes' bounds (BuildIndex(cell) to change the cell size)
+map.DrawVisible(canvas, matrix, null, 1.5f);         // image -> canvas matrix; shapes smaller than 1.5 px on screen are skipped
 ```
 
-Limits: raster MBTiles (png / jpg) throw `NotSupportedException`; labels and icons are not drawn
-(the importer adds that to `Warnings`). Loading a whole city at zoom 13 is tens of thousands of shapes,
-so pick a smaller `West/South/East/North` or a lower `Zoom` when you only need an overview.
+`DrawVisible` gives the same pixels as `Draw` for the visible part, and it keeps the drawing order. The
+TrackMap map project uses it for every frame: while the zoom changes it draws the vectors into the window,
+and when the zoom is still it bakes a larger bitmap that is moved with the pan.
+
+Limits: raster MBTiles (png / jpg) throw `NotSupportedException`; icons are not drawn. Labels are placed
+without collision checks, so dense streets can overlap. Loading a whole city at zoom 13 is tens of thousands
+of shapes, so pick a smaller `West/South/East/North` or a lower `Zoom` when you only need an overview.
 
 ### Text without fonts: `VectorText` (`cs/VectorText.cs`)
 

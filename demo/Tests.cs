@@ -2568,6 +2568,7 @@ T(GControls, "SpriteLabel / GroupBox / Tabs / TextBox / Numeric / Combo / ListBo
                         using var mb = MbTiles.Open(path);
                         if (double.IsNaN(nx)) { nx = ((mb.West + mb.East) / 2 + 180) / 360; ny = MercY((mb.North + mb.South) / 2); }
                         img = VectorImage.FromMbTiles(mb, new MbTilesView { Zoom = z });
+                        img.BuildIndex();                                  // grid over the shapes: each frame draws only what is in view
                         double world = 256.0 * Math.Pow(2, z);
                         var va = img.VisibleArea ?? img.ViewBox;
                         originX = (mb.West + 180) / 360 * world - va.X;
@@ -2592,7 +2593,7 @@ T(GControls, "SpriteLabel / GroupBox / Tabs / TextBox / Numeric / Combo / ListBo
                 var m = System.Numerics.Matrix3x2.CreateTranslation((float)-cx, (float)-cy)
                       * System.Numerics.Matrix3x2.CreateScale(k)
                       * System.Numerics.Matrix3x2.CreateTranslation(c.W * 0.5f, c.H * 0.5f);
-                img.Draw(c.Canvas, m, new VectorRenderOptions { AA = c.Smooth });
+                img.DrawVisible(c.Canvas, m, new VectorRenderOptions { AA = c.Smooth }, 1.5f);   // only the shapes in view; tiny ones skipped
                 double lon = nx * 360 - 180, lat = Math.Atan(Math.Sinh(Math.PI * (1 - 2 * ny))) * 180 / Math.PI;
                 c.Note = $"{status} | Z{z} x{k:0.00} | centre {lat:F5}, {lon:F5} | drag to pan";
             }
