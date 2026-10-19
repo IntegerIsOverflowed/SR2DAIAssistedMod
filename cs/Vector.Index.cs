@@ -7,6 +7,7 @@ using System.Collections.Generic;
 using System.Drawing;
 using System.Linq;
 using System.Numerics;
+using System.Threading.Tasks;
 
 namespace Sr2d64CSport
 {
@@ -16,9 +17,6 @@ namespace Sr2d64CSport
         List<int>[] _indexCells = Array.Empty<List<int>>();
         int _indexCols, _indexRows, _indexedCount = -1;
         float _indexX0, _indexY0, _indexCell = 256f;
-        int[] _indexStamp = Array.Empty<int>();
-        int _indexGen;
-        VectorImage? _visibleView;
         float[] _indexSize = Array.Empty<float>();      // larger side of each shape's own path (no stroke padding)
 
         /// <summary>True for a map loaded from tiles (MBTiles): only then does <see cref="MapLayerMinPx"/> apply.</summary>
@@ -29,6 +27,9 @@ namespace Sr2d64CSport
         /// The importer sets "building" to 2.5 px: houses vanish when the map is zoomed out and show again when it is closer.
         /// </summary>
         public readonly Dictionary<string, float> MapLayerMinPx = new Dictionary<string, float>();
+
+        /// <summary>True when the grid matches the shape list (so DrawVisible may be called from several threads).</summary>
+        internal bool IndexCurrent => _indexedCount == Shapes.Count;
 
         /// <summary>Builds (or rebuilds) the grid over the shapes' bounds (image units). Call after the shape list changes.</summary>
         public void BuildIndex(float cell = 256f)
@@ -67,8 +68,6 @@ namespace Sr2d64CSport
                     for (int c = c0; c <= c1; c++)
                         (_indexCells[r * _indexCols + c] ??= new List<int>()).Add(i);
             }
-            _indexStamp = new int[n];
-            _indexGen = 0;
             _indexedCount = n;
         }
 
@@ -76,25 +75,27 @@ namespace Sr2d64CSport
         public List<int> ShapesIn(RectangleF r)
         {
             if (_indexedCount != Shapes.Count) BuildIndex(_indexCell);
+            // no shared state here: several threads may query one picture (VectorTileCache draws tiles in parallel)
             var result = new List<int>();
             int c0 = Math.Clamp((int)Math.Floor((r.Left - _indexX0) / _indexCell), 0, _indexCols - 1);
             int c1 = Math.Clamp((int)Math.Floor((r.Right - _indexX0) / _indexCell), 0, _indexCols - 1);
             int r0 = Math.Clamp((int)Math.Floor((r.Top - _indexY0) / _indexCell), 0, _indexRows - 1);
             int r1 = Math.Clamp((int)Math.Floor((r.Bottom - _indexY0) / _indexCell), 0, _indexRows - 1);
-            int gen = ++_indexGen;
             for (int row = r0; row <= r1; row++)
                 for (int col = c0; col <= c1; col++)
                 {
                     var cell = _indexCells[row * _indexCols + col];
                     if (cell == null) continue;
                     foreach (int i in cell)
-                    {
-                        if (_indexStamp[i] == gen) continue;
-                        _indexStamp[i] = gen;
-                        if (_indexBounds[i].IntersectsWith(r)) result.Add(i);
-                    }
+                        if (_indexBounds[i].IntersectsWith(r)) result.Add(i);   // a shape in several cells: removed below
                 }
-            result.Sort();
+            if (result.Count > 1)
+            {
+                result.Sort();
+                int w = 1;
+                for (int k = 1; k < result.Count; k++) if (result[k] != result[w - 1]) result[w++] = result[k];
+                result.RemoveRange(w, result.Count - w);
+            }
             return result;
         }
 
@@ -115,18 +116,16 @@ namespace Sr2d64CSport
             // 2 device pixels around the view: a hairline reaches one device pixel past its path, at any zoom
             float margin = scale > 1e-6f ? 2f / scale : 0f;
             var ids = ShapesIn(RectangleF.Inflate(visible, margin, margin));
-            _visibleView ??= new VectorImage { Format = Format, Title = Title, ViewBox = ViewBox, Width = Width, Height = Height, VisibleArea = VisibleArea, ClipViewport = ClipViewport };
-            _visibleView.Shapes.Clear();
+            var view = new VectorImage { Format = Format, Title = Title, ViewBox = ViewBox, Width = Width, Height = Height, VisibleArea = VisibleArea, ClipViewport = ClipViewport };
             foreach (int i in ids)
             {
                 var sh = Shapes[i];
                 float need = minScreenPx;
                 if (IsMap && sh.Layer != null && MapLayerMinPx.TryGetValue(sh.Layer, out float layerMin)) need = Math.Max(need, layerMin);
                 if (need > 0f && _indexSize[i] * scale < need) continue;
-                _visibleView.Shapes.Add(sh);
+                view.Shapes.Add(sh);
             }
-            _visibleView.Draw(dst, m, o);
-            _visibleView.Shapes.Clear();                 // do not keep the shapes alive through the view
+            view.Draw(dst, m, o);
         }
     }
 
@@ -175,5 +174,205 @@ namespace Sr2d64CSport
         }
 
         public void Dispose() { _bmp?.Dispose(); _bmp = null; _key = ""; }
+    }
+
+    /// <summary>
+    /// Tiles of a picture: the canvas is covered by fixed tiles (TileSize x TileSize device pixels, on a lattice fixed to
+    /// the picture at the current scale), each drawn once with <see cref="VectorImage.DrawVisible"/> and kept in an LRU.
+    /// A pan copies the tiles it already has. The tiles that are missing on screen are drawn at once (in parallel); the
+    /// ring of tiles just outside the view is drawn on a background task, so a pan finds its next tiles ready.
+    /// A change of key or scale drops every tile (zoom frames draw the tiles again). The view centre is rounded to whole
+    /// device pixels, so a tile and its copy line up exactly.
+    /// </summary>
+    internal sealed class VectorTileCache : IDisposable
+    {
+        public const int TileSize = 256;
+        /// <summary>Most tiles kept (a tile is TileSize x TileSize x 4 bytes = 256 KB): 256 tiles = 64 MB.</summary>
+        public int MaxTiles = 256;
+        /// <summary>Draw the ring of tiles around the view on a background task (default true).</summary>
+        public bool Prefetch = true;
+        /// <summary>Width of the background ring, in tiles, around the visible range (default 2).</summary>
+        public int PrefetchRing = 2;
+        /// <summary>Tiles drawn on screen / copied / finished in the background since the previous Draw (statistics).</summary>
+        public int LastDrawn, LastCopied, LastPrefetched;
+
+        sealed class Tile { public int I, J, Frame; public Sprite Pix = null!; public LinkedListNode<Tile> Link = null!; }
+        readonly object _lock = new object();
+        readonly Dictionary<(int, int), Tile> _tiles = new Dictionary<(int, int), Tile>();
+        readonly LinkedList<Tile> _lru = new LinkedList<Tile>();          // most recent first
+        readonly HashSet<(int, int)> _pending = new HashSet<(int, int)>();  // tiles a background task is drawing
+        readonly Stack<Sprite> _free = new Stack<Sprite>();
+        string _key = "";
+        float _k = float.NaN;
+        int _frame, _gen, _prefetched;
+        bool _disposed;
+
+        /// <summary>Forgets every tile (tiles still being drawn in the background are dropped when they finish).</summary>
+        public void Clear() { lock (_lock) ClearLocked(); }
+
+        void ClearLocked()
+        {
+            foreach (var t in _tiles.Values) _free.Push(t.Pix);
+            _tiles.Clear(); _lru.Clear(); _pending.Clear();
+            _gen++;
+        }
+
+        /// <summary>True while background tiles are still being drawn.</summary>
+        public bool Busy { get { lock (_lock) return _pending.Count > 0; } }
+
+        /// <summary>Number of tiles held.</summary>
+        public int Count { get { lock (_lock) return _tiles.Count; } }
+
+        /// <summary>
+        /// Draws the picture onto <paramref name="canvas"/> for the view centred on (cx, cy) (picture units) at scale k.
+        /// key: everything that changes the pixels (file, level, options, minimum size, antialiasing); background: the tile fill.
+        /// </summary>
+        public void Draw(VectorImage img, Sprite canvas, double cx, double cy, float k, string key, VectorRenderOptions o, float minPx, int background)
+        {
+            if (_disposed) return;
+            lock (_lock)
+            {
+                if (key != _key || k != _k) { ClearLocked(); _key = key; _k = k; }
+            }
+            if (!img.IndexCurrent) img.BuildIndex();                       // before any thread reads the index
+            int W = canvas.Width, H = canvas.Height;
+            // whole device pixels: the lattice and the canvas share one grid
+            long N = (long)Math.Round(cx * k), M = (long)Math.Round(cy * k);
+            int ox = W / 2, oy = H / 2;
+            long gx0 = N - ox, gy0 = M - oy;                                // device position of the canvas' left / top pixel
+            int i0 = (int)Math.Floor(gx0 / (double)TileSize), i1 = (int)Math.Floor((gx0 + W - 1) / (double)TileSize);
+            int j0 = (int)Math.Floor(gy0 / (double)TileSize), j1 = (int)Math.Floor((gy0 + H - 1) / (double)TileSize);
+
+            var shown = new List<Tile>((i1 - i0 + 1) * (j1 - j0 + 1));
+            var missing = new List<(int i, int j)>();
+            int gen, frame, prefetched;
+            lock (_lock)
+            {
+                _frame++;
+                frame = _frame; gen = _gen;
+                prefetched = _prefetched; _prefetched = 0;
+                for (int j = j0; j <= j1; j++)
+                    for (int i = i0; i <= i1; i++)
+                    {
+                        if (_tiles.TryGetValue((i, j), out var t))
+                        {
+                            _lru.Remove(t.Link); _lru.AddFirst(t.Link); t.Frame = frame; shown.Add(t);
+                        }
+                        else missing.Add((i, j));
+                    }
+            }
+            LastCopied = shown.Count; LastDrawn = missing.Count; LastPrefetched = prefetched;
+
+            // the tiles on screen that are missing: drawn now, in parallel
+            var fresh = new Tile[missing.Count];
+            var sprites = new Sprite[missing.Count];
+            lock (_lock) for (int q = 0; q < missing.Count; q++) sprites[q] = FreeSpriteLocked();
+            for (int q = 0; q < missing.Count; q++) fresh[q] = new Tile { I = missing[q].i, J = missing[q].j, Frame = frame, Pix = sprites[q] };
+            if (missing.Count > 0) RenderTiles(img, fresh, k, o, minPx, background);
+            lock (_lock)
+            {
+                foreach (var t in fresh)
+                {
+                    if (_gen != gen || _tiles.ContainsKey((t.I, t.J))) { _free.Push(t.Pix); continue; }
+                    _pending.Remove((t.I, t.J));
+                    _tiles[(t.I, t.J)] = t;
+                    t.Link = _lru.AddFirst(t);
+                    shown.Add(t);
+                }
+            }
+
+            // the ring of tiles just outside the view: drawn in the background for the next frames
+            if (Prefetch) Ring(img, i0, j0, i1, j1, k, o, minPx, background, gen);
+
+            // copy the tiles onto the canvas
+            foreach (var t in shown)
+                canvas.Draw(t.Pix, (int)(t.I * (long)TileSize - N + ox), (int)(t.J * (long)TileSize - M + oy), SR2D.Op.Paint);
+
+            lock (_lock) EvictLocked(frame);
+        }
+
+        Sprite FreeSpriteLocked() => _free.Count > 0 ? _free.Pop() : new Sprite(TileSize, TileSize);
+
+        void EvictLocked(int frame)
+        {
+            var node = _lru.Last;
+            while (_tiles.Count > MaxTiles && node != null)
+            {
+                var prev = node.Previous;
+                if (node.Value.Frame != frame)
+                {
+                    _tiles.Remove((node.Value.I, node.Value.J));
+                    _lru.Remove(node);
+                    _free.Push(node.Value.Pix);
+                }
+                node = prev;
+            }
+        }
+
+        /// <summary>Draws the tiles: each into its own sprite, in parallel. Pure: reads the picture, writes only the sprites.</summary>
+        static void RenderTiles(VectorImage img, Tile[] tiles, float k, VectorRenderOptions o, float minPx, int background)
+        {
+            Parallel.For(0, tiles.Length, new ParallelOptions { MaxDegreeOfParallelism = Math.Max(1, Environment.ProcessorCount) }, q =>
+            {
+                var t = tiles[q];
+                t.Pix.ClearBuffer(background);
+                // picture -> tile pixels: the tile's top-left is device (I * TileSize, J * TileSize) on the picture lattice
+                var m = Matrix3x2.CreateTranslation((float)(-t.I * (double)TileSize / k), (float)(-t.J * (double)TileSize / k)) * Matrix3x2.CreateScale(k);
+                img.DrawVisible(t.Pix, m, o, minPx);
+            });
+        }
+
+        /// <summary>Starts a background task for the tiles around the visible range that are neither held nor being drawn.</summary>
+        void Ring(VectorImage img, int i0, int j0, int i1, int j1, float k, VectorRenderOptions o, float minPx, int background, int gen)
+        {
+            var want = new List<(int i, int j)>();
+            lock (_lock)
+            {
+                if (_gen != gen) return;
+                int r = PrefetchRing;
+                for (int j = j0 - r; j <= j1 + r; j++)
+                    for (int i = i0 - r; i <= i1 + r; i++)
+                    {
+                        if (i >= i0 && i <= i1 && j >= j0 && j <= j1) continue;     // on screen: drawn in Draw
+                        if (_tiles.ContainsKey((i, j)) || _pending.Contains((i, j))) continue;
+                        want.Add((i, j));
+                        _pending.Add((i, j));
+                    }
+                if (want.Count == 0) return;
+            }
+            Task.Run(() =>
+            {
+                var fresh = new Tile[want.Count];
+                lock (_lock) for (int q = 0; q < want.Count; q++) fresh[q] = new Tile { I = want[q].i, J = want[q].j, Frame = 0, Pix = FreeSpriteLocked() };
+                try { RenderTiles(img, fresh, k, o, minPx, background); }
+                catch
+                {
+                    lock (_lock) foreach (var w in want) _pending.Remove(w);     // a failed tile is asked for again later
+                    throw;
+                }
+                lock (_lock)
+                {
+                    foreach (var t in fresh)
+                    {
+                        if (_gen != gen || _disposed) { _free.Push(t.Pix); continue; }    // the scale, the key or the picture changed meanwhile
+                        _pending.Remove((t.I, t.J));
+                        if (_tiles.ContainsKey((t.I, t.J))) { _free.Push(t.Pix); continue; }
+                        _tiles[(t.I, t.J)] = t;
+                        t.Link = _lru.AddFirst(t);
+                        _prefetched++;
+                    }
+                }
+            });
+        }
+
+        public void Dispose()
+        {
+            lock (_lock)
+            {
+                _disposed = true;
+                ClearLocked();
+                while (_free.Count > 0) _free.Pop().Dispose();
+            }
+        }
     }
 }

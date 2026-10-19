@@ -2111,6 +2111,7 @@ static class P {
     MbTilesChecks.Run();
     MbTilesChecks.SimplifyAndHairlines();
     MbTilesChecks.BakeCache();
+    MbTilesChecks.TileCache();
     VectorTextChecks.Run();
     VectorTextChecks.DotsAndSimplify();
     MouseClickEvents();

@@ -124,6 +124,73 @@ static class MbTilesChecks
         Console.WriteLine("  info  a 0.4 px pan is rounded to whole pixels (the blit is not sub-pixel)");
     }
 
+    /// <summary>The tile cache: a frame equals a direct draw at the same whole-pixel centre, pans and zoom included.</summary>
+    public static void TileCache()
+    {
+        var dir = FindDataDir();
+        Chk(dir != null, "tests/data/mbtiles found (tile checks)");
+        using var mb = MbTiles.Open(Path.Combine(dir!, "chel-z11-smallpages.mbtiles"));
+        var img = Sr2d64CSport.VectorImage.FromMbTiles(mb, new Sr2d64CSport.MbTilesView { Zoom = 11, Labels = false, Threads = 1 });
+        img.BuildIndex();
+        const int W = 800, H = 500, bg = unchecked((int)0xFFF4F1E8);
+        const string key = "tile-check";
+        var o = Sr2d64CSport.VectorRenderOptions.Default;
+        double cx0 = img.Width * 0.5, cy0 = img.Height * 0.5;
+        var tiles = new Sr2d64CSport.VectorTileCache();
+
+        double MeanDiff(Sr2d64CSport.Sprite a, Sr2d64CSport.Sprite b, out int diff)
+        {
+            diff = 0; long sum = 0;
+            for (int i = 0; i < a.Pixels.Length; i++)
+            {
+                if (a.Pixels[i] == b.Pixels[i]) continue;
+                diff++;
+                for (int sh = 0; sh < 32; sh += 8) sum += Math.Abs(((a.Pixels[i] >>> sh) & 255) - ((b.Pixels[i] >>> sh) & 255));
+            }
+            return sum / (double)a.Pixels.Length / 4;
+        }
+
+        // cold frame, then pans (whole and fractional, the fraction is rounded to whole device pixels)
+        var first = new Sr2d64CSport.Sprite(W, H); first.ClearBuffer(bg);
+        tiles.Draw(img, first, cx0, cy0, 1f, key, o, 1.5f, bg);
+        foreach (var (dx, dy) in new[] { (0.0, 0.0), (37.0, -21.0), (-120.4, 64.6), (300.0, 10.0) })
+        {
+            double cx = cx0 + dx, cy = cy0 + dy;
+            var tile = new Sr2d64CSport.Sprite(W, H); tile.ClearBuffer(bg);
+            tiles.Draw(img, tile, cx, cy, 1f, key, o, 1.5f, bg);
+            var direct = new Sr2d64CSport.Sprite(W, H); direct.ClearBuffer(bg);
+            img.DrawVisible(direct, Sr2d64CSport.VectorViewCache.ViewMatrix(Math.Round(cx), Math.Round(cy), 1f, W / 2f, H / 2f), o, 1.5f);
+            double mean = MeanDiff(tile, direct, out int diff);
+            Chk(mean < 0.05, $"tile frame at pan {dx},{dy} equals the direct draw (mean difference {mean:0.0000}, {diff} pixels differ)");
+        }
+        Chk(tiles.LastCopied > 0, $"a pan copies tiles it already holds ({tiles.LastCopied} copied, {tiles.LastDrawn} drawn)");
+
+        // a warm frame equals the cold frame of the same view
+        var again = new Sr2d64CSport.Sprite(W, H); again.ClearBuffer(bg);
+        tiles.Draw(img, again, cx0, cy0, 1f, key, o, 1.5f, bg);
+        Chk(MeanDiff(again, first, out _) == 0, "a warm frame equals the cold frame (copies are exact)");
+
+        // the background ring fills in: wait for it, then a pan needs no tile on screen
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+        while (tiles.Busy && sw.Elapsed.TotalSeconds < 60) System.Threading.Thread.Sleep(5);
+        Chk(!tiles.Busy, "the background ring finishes");
+        var ringed = new Sr2d64CSport.Sprite(W, H); ringed.ClearBuffer(bg);
+        tiles.Draw(img, ringed, cx0 + 260, cy0, 1f, key, o, 1.5f, bg);
+        Chk(tiles.LastDrawn == 0, $"a pan into the ring draws no tile on screen ({tiles.LastDrawn} drawn, {tiles.LastPrefetched} from background)");
+
+        // a zoom drops the tiles and draws the zoomed view
+        const float zk = 2f;
+        var z = new Sr2d64CSport.Sprite(W, H); z.ClearBuffer(bg);
+        tiles.Draw(img, z, cx0, cy0, zk, key, o, 1.5f, bg);
+        var zd = new Sr2d64CSport.Sprite(W, H); zd.ClearBuffer(bg);
+        double qz = Math.Round(cx0 * zk) / zk, qy = Math.Round(cy0 * zk) / zk;
+        img.DrawVisible(zd, Sr2d64CSport.VectorViewCache.ViewMatrix(qz, qy, zk, W / 2f, H / 2f), o, 1.5f);
+        double zmean = MeanDiff(z, zd, out int zdiff);
+        Chk(zmean < 0.05, $"tile frame at zoom x2 equals the direct draw (mean difference {zmean:0.0000}, {zdiff} pixels differ)");
+        Chk(tiles.Count <= tiles.MaxTiles, $"the cache holds at most {tiles.MaxTiles} tiles ({tiles.Count} now)");
+        tiles.Dispose();
+    }
+
     public static void Run()
     {
         var dir = FindDataDir();

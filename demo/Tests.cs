@@ -2720,11 +2720,12 @@ T(GControls, "SpriteLabel / GroupBox / Tabs / TextBox / Numeric / Combo / ListBo
             static double homeX = double.NaN, homeY;     // the file's centre, normalised world (0..1): reset goes here
             static double nx = double.NaN, ny;           // centre, normalised world (0..1)
             static int lastX, lastY; static bool haveLast;
-            // bitmap cache: while the view is still, the picture is drawn once into a bitmap with a margin; pans within the
-            // margin copy it (whole pixels), and a zoom, a pan past the margin, or a changed key draws the vectors again
-            static readonly VectorViewCache cache = new VectorViewCache();
-            static double lastK = double.NaN;
+            // bitmap cache (on by default): the picture is kept as 256 px tiles on a lattice. A pan copies the tiles it has,
+            // draws the ones on screen that are missing (in parallel), and draws the ring around the view in the background.
+            // A zoom or a changed key drops the tiles. Off: every frame draws the vectors of the view directly.
+            static readonly VectorTileCache tiles = new VectorTileCache();
             static string cacheInfo = "";
+            static double lastK = double.NaN;               // the zoom of the last frame: a changed zoom draws the vectors directly
 
             static double MercY(double lat) { double r = lat * Math.PI / 180.0; return (1.0 - Math.Log(Math.Tan(r) + 1.0 / Math.Cos(r)) / Math.PI) / 2.0; }
 
@@ -2757,7 +2758,7 @@ T(GControls, "SpriteLabel / GroupBox / Tabs / TextBox / Numeric / Combo / ListBo
                     status = $"z{z}, {img.Shapes.Count} shapes";
                 }
                 catch (Exception ex) { img = null; status = ex.Message; }
-                cache.Clear();
+                tiles.Clear();
             }
 
             /// <summary>Reset (the Reset button): the map goes back to the file's centre, at the level, without a drag.</summary>
@@ -2765,7 +2766,6 @@ T(GControls, "SpriteLabel / GroupBox / Tabs / TextBox / Numeric / Combo / ListBo
             {
                 if (!double.IsNaN(homeX)) { nx = homeX; ny = homeY; }
                 haveLast = false;                                  // the next frame is not a move
-                cache.Clear();
             }
 
             public static void Draw(Ctx c, string? path)
@@ -2792,33 +2792,23 @@ T(GControls, "SpriteLabel / GroupBox / Tabs / TextBox / Numeric / Combo / ListBo
                     nx = Math.Clamp(nx, 0, 1); ny = Math.Clamp(ny, 0, 1);
                 }
                 lastX = c.X; lastY = c.Y; haveLast = true;
-                bool zoomed = lastK != k;                 // the zoom changed since the last frame
-                lastK = k;
 
                 double cx = nx * 256.0 * Math.Pow(2, z) - originX, cy = ny * 256.0 * Math.Pow(2, z) - originY;
                 var opts = new VectorRenderOptions { AA = c.Smooth };
                 int minPx = Math.Max(1, c.Count);                     // "hide by zoom": shapes whose larger side is under this many px are left out
-                // everything that changes the drawn pixels is in the cache key, so the bitmap is never stale
+                // everything that changes the drawn pixels is in the tile key (a change drops the tiles)
                 string vkey = key + "|" + minPx + "|" + c.Smooth;
-                if (!c.NotMask)
+                bool zooming = !double.IsNaN(lastK) && lastK != k;      // every zoom step would draw all its tiles again: draw directly
+                lastK = k;
+                if (!c.NotMask || zooming)
                 {
                     DrawDirect(c, cx, cy, k, opts, minPx);
-                    cacheInfo = "bitmap cache off";
+                    cacheInfo = c.NotMask ? "vectors (zooming)" : "bitmap cache off";
                 }
                 else
                 {
-                    if (!cache.Covers(vkey, c.W, c.H, cx, cy, k) && !moved && !zoomed)
-                        cache.Bake(img, vkey, c.W, c.H, cx, cy, k, opts, minPx, MbTilesStyle.Background);   // still: bake with a margin
-                    if (cache.Covers(vkey, c.W, c.H, cx, cy, k))
-                    {
-                        cache.Blit(c.Canvas, cx, cy);
-                        cacheInfo = "bitmap cache: drawn from the picture";
-                    }
-                    else
-                    {
-                        DrawDirect(c, cx, cy, k, opts, minPx);
-                        cacheInfo = "bitmap cache: vectors (zooming or moving)";
-                    }
+                    tiles.Draw(img, c.Canvas, cx, cy, k, vkey, opts, minPx, MbTilesStyle.Background);
+                    cacheInfo = $"tiles: {tiles.LastCopied} copied, {tiles.LastDrawn} drawn on screen, {tiles.LastPrefetched} ready from background";
                 }
                 double lon = nx * 360 - 180, lat = Math.Atan(Math.Sinh(Math.PI * (1 - 2 * ny))) * 180 / Math.PI;
                 c.Note = $"Open File Time {openMs:0} ms ({openShapes} shapes) | {status} | Z{z} x{k:0.00} | centre {lat:F5}, {lon:F5} | {cacheInfo}";

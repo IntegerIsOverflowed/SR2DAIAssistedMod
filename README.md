@@ -2236,6 +2236,17 @@ everything that changes the pixels (file, level, simplification, minimum size, a
 the margin needs a new bake; while the view moves, draw directly. ctlrun `BakeCache` checks that an integer pan of a baked
 view equals the direct draw.
 
+`VectorTileCache` (`cs/Vector.Index.cs`, internal) is the cache the demo's map uses (its bitmap-cache flag). The canvas is
+covered by 256 px tiles on a lattice fixed to the picture at the current scale; each tile is drawn once with `DrawVisible`
+and kept in an LRU (`MaxTiles` = 256, about 64 MB). `Draw(img, canvas, cx, cy, k, key, opts, minPx, background)`
+copies the tiles it has, draws the missing tiles on screen in parallel, and starts a background task for the ring of
+tiles two tiles wide around the view (`PrefetchRing`, `Prefetch`), so the next pan finds its tiles ready. The view centre
+is rounded to whole device pixels. A changed key or scale drops every tile, so zoom frames draw all their tiles again
+(parallel). `Busy` says whether the background is still drawing. Threads: `DrawVisible` and `ShapesIn` may be called from
+several threads at once (the shape index is read only, and the visible view is made per call). ctlrun `TileCache` checks
+that a tile frame equals the direct draw at the same whole-pixel centre (pans and a zoom), that a warm frame equals a cold
+one, and that the cache stays within `MaxTiles`.
+
 **Outlines are hairlines.** Building outlines (`MbPaint.Hairline`) are one device pixel at every zoom, not a width in
 map units. Any shape can do this: `VectorShape.Hairline = true` (the `StrokeWidth` is then ignored; SVG export writes
 `vector-effect="non-scaling-stroke"`).
