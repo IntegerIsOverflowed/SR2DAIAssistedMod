@@ -16,6 +16,22 @@ Conventions
   DOCS     README / comments only
 
 
+2026-10-19  VectorText: joins, caps and outline position (as in the font file)
+------------------------------------------------------------------------------------------------
+ADDED    VectorTextStyle.Join (VectorJoin, default Bevel): the corner shape of the strokes. Bevel is the font file's
+         default; Miter and Round are also available. The renderer's stroker already supported all three; VectorText
+         now passes the join through. With Radius 0 an A or V has beveled corners.
+ADDED    VectorTextStyle.Cap (VectorCap, default Butt): the end of open strokes (Butt, Round, Square).
+ADDED    VectorTextStyle.OutlinePosition (VectorOutlinePosition: Center, Inside, Outside): the stroke of a closed glyph
+         is moved by half its width inward or outward, so it lies inside or outside the edge. Open strokes stay centred.
+         Corners on the offset line are mitred (limit 4 half-widths), then joined with the Join setting.
+CHANGED  The default join of VectorText strokes is now Bevel (was Miter). Compat: set Join = VectorJoin.Miter to keep
+         the old corners. This changes the look of map labels (TrackMap, MbTiles) slightly.
+FIXED    OnPath with Above = false drew the glyphs upside down; they now stay upright, hanging under the line.
+CHECKED  ctlrun: 425 ok, 0 FAIL. Miter apex of A is 7 px taller than bevel; square caps add 6 px; O spans 5..45 centred,
+         8..42 inside, 2..48 outside. Sheet: vectortext_outlines.png. Demo: "VectorText outlines" test.
+         Not checked on Windows (the demo runs on Windows only).
+
 2026-10-19  VectorText: new stroke font (151 glyphs), corner radius and tip limit; fit to path; below-path fix
 ------------------------------------------------------------------------------------------------
 CHANGED  VectorText glyph data replaced by the "Angular Vector Font" (Latin + Cyrillic, 151 glyphs). Glyphs are open

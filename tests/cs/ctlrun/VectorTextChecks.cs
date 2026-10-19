@@ -110,6 +110,66 @@ static class VectorTextChecks
         float wProp = Sr2d64CSport.VectorText.Width("W", 70f);
         Chk(MathF.Abs(wMono - 46f) < 0.01f && MathF.Abs(wProp - 56f) < 0.01f, $"monospace squeezes W to 46 (proportional {wProp:0.0})");
 
+        // defaults follow the font file: bevel joins, butt caps, outline on the path
+        var dflt = new Sr2d64CSport.VectorTextStyle();
+        Chk(dflt.Join == Sr2d64CSport.VectorJoin.Bevel && dflt.Cap == Sr2d64CSport.VectorCap.Butt && dflt.OutlinePosition == Sr2d64CSport.VectorOutlinePosition.Center,
+            "defaults: bevel joins, butt caps, outline centred");
+        Chk(Sr2d64CSport.VectorText.Create("A", 70f).Shapes[0].Join == Sr2d64CSport.VectorJoin.Bevel, "the text shape carries its join (bevel)");
+
+        // joins: an angular A (radius 0) with a miter has a spike at the apex that a bevel does not
+        // first and last row with dark ink (the picture is drawn at a fixed place, so the span is what matters)
+        (int Top, int Bottom) InkRows(Sr2d64CSport.VectorImage img)
+        {
+            var sp = new Sr2d64CSport.Sprite(200, 200); sp.ClearBuffer(unchecked((int)0xFFFFFFFF));
+            img.Draw(sp, 50, 20);            // Draw puts the picture's top-left corner here; the glyph is ~80 px tall
+            bool Dark(int y) { for (int x = 0; x < sp.Width; x++) { int px = sp.Pixels[y * sp.Width + x]; if (((px >> 16) & 255) < 128 && ((px >> 8) & 255) < 128 && (px & 255) < 128) return true; } return false; }
+            int top = -1, bottom = -1;
+            for (int y = 0; y < sp.Height; y++) if (Dark(y)) { top = y; break; }
+            for (int y = sp.Height - 1; y >= 0; y--) if (Dark(y)) { bottom = y; break; }
+            return (top, bottom);
+        }
+        var aBevel = new Sr2d64CSport.VectorTextStyle { Radius = 0f, Join = Sr2d64CSport.VectorJoin.Bevel };
+        var aMiter = new Sr2d64CSport.VectorTextStyle { Radius = 0f, Join = Sr2d64CSport.VectorJoin.Miter };
+        var (topBevel, botBevel) = InkRows(Sr2d64CSport.VectorText.Create("A", 70f, aBevel));
+        var (topMiter, botMiter) = InkRows(Sr2d64CSport.VectorText.Create("A", 70f, aMiter));
+        int spanBevel = botBevel - topBevel, spanMiter = botMiter - topMiter;
+        Chk(spanBevel > 0 && spanMiter >= spanBevel + 5, $"A radius 0: the miter apex is {spanMiter - spanBevel} px taller than the bevel apex ({spanMiter} vs {spanBevel} px)");
+
+        // caps: a Square cap on the open L/I ends reaches half the stroke past the end
+        var (topButt, botButt) = InkRows(Sr2d64CSport.VectorText.Create("l", 70f, new Sr2d64CSport.VectorTextStyle { Radius = 0f, Cap = Sr2d64CSport.VectorCap.Butt }));
+        var (topSquare, botSquare) = InkRows(Sr2d64CSport.VectorText.Create("l", 70f, new Sr2d64CSport.VectorTextStyle { Radius = 0f, Cap = Sr2d64CSport.VectorCap.Square }));
+        int spanButt = botButt - topButt, spanSquare = botSquare - topSquare;
+        Chk(spanButt > 0 && spanSquare >= spanButt + 4, $"square cap on l: the stroke is {spanSquare - spanButt} px longer than with a butt cap (both ends)");
+
+        // outline position on the closed O (radius 0, octagon x 0..40, stroke 6 = half-width 3, left bearing 5):
+        // centre 5..45, inside 8..42, outside 2..48
+        foreach (var (pos, lo, hi) in new[] {
+            (Sr2d64CSport.VectorOutlinePosition.Center, 5f, 45f),
+            (Sr2d64CSport.VectorOutlinePosition.Inside, 8f, 42f),
+            (Sr2d64CSport.VectorOutlinePosition.Outside, 2f, 48f) })
+        {
+            var oPts = AllPoints(Sr2d64CSport.VectorText.Create("O", 70f, new Sr2d64CSport.VectorTextStyle { Radius = 0f, OutlinePosition = pos }));
+            Chk(MathF.Abs(oPts.Min(p => p.X) - lo) < 0.01f && MathF.Abs(oPts.Max(p => p.X) - hi) < 0.01f,
+                $"outline {pos}: O spans x {oPts.Min(p => p.X):0.00}..{oPts.Max(p => p.X):0.00} (expect {lo}..{hi})");
+        }
+
+        // sheet: joins (rows 1-3), caps (rows 4-6), outline position (rows 7-9), for a look at the shapes
+        var sheet = new Sr2d64CSport.Sprite(800, 900);
+        sheet.ClearBuffer(unchecked((int)0xFFF7F4EC));
+        int sInk = unchecked((int)0xFF1B2A41), sMute = unchecked((int)0xFF6B6F7A);
+        string[] rowNames = { "join bevel", "join miter", "join round", "cap butt", "cap round", "cap square", "outline centre", "outline inside", "outline outside" };
+        for (int row = 0; row < 9; row++)
+        {
+            int y = 90 + row * 90;
+            Sr2d64CSport.VectorText.Create(rowNames[row], 14f, new Sr2d64CSport.VectorTextStyle { Color = sMute }).Draw(sheet, 20, y + 14);
+            Sr2d64CSport.VectorTextStyle st; string sample;
+            if (row < 3) { st = new Sr2d64CSport.VectorTextStyle { Color = sInk, Radius = 0f, Join = new[] { Sr2d64CSport.VectorJoin.Bevel, Sr2d64CSport.VectorJoin.Miter, Sr2d64CSport.VectorJoin.Round }[row] }; sample = "AVNWK"; }
+            else if (row < 6) { st = new Sr2d64CSport.VectorTextStyle { Color = sInk, Radius = 0f, Cap = new[] { Sr2d64CSport.VectorCap.Butt, Sr2d64CSport.VectorCap.Round, Sr2d64CSport.VectorCap.Square }[row - 3] }; sample = "IlLT"; }
+            else { st = new Sr2d64CSport.VectorTextStyle { Color = sInk, Radius = 0f, Bold = true, OutlinePosition = new[] { Sr2d64CSport.VectorOutlinePosition.Center, Sr2d64CSport.VectorOutlinePosition.Inside, Sr2d64CSport.VectorOutlinePosition.Outside }[row - 6] }; sample = "OBD"; }
+            Sr2d64CSport.VectorText.Create(sample, 56f, st).Draw(sheet, 240, y);
+        }
+        SaveSprite(sheet, "vectortext_outlines.png");
+
         // render: plain, bold, italic, and text on the arc (picture to look at)
         var canvas = new Sr2d64CSport.Sprite(800, 600);
         canvas.ClearBuffer(unchecked((int)0xFFFFFFFF));

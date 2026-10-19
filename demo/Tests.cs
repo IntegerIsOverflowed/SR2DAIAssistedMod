@@ -1287,6 +1287,34 @@ T(GControls, "SpriteLabel / GroupBox / Tabs / TextBox / Numeric / Combo / ListBo
                   }
               }).Ui(Param.Mouse, "Move the text (the mouse)", Param.Scale, "Size (x16 px cap height)");
 
+            T(GVText, "VectorText outlines: joins (bevel, miter, round), caps (butt, round, square), outline position (centre, inside, outside)",
+              "Joins are the corner shapes of the strokes (Radius 0 shows them best); caps are the ends of open strokes. Outline position puts the stroke of a closed glyph centred on its edge, inside it or outside it; open strokes stay centred. The outline rows are bold so the difference shows.",
+              c =>
+              {
+                  float size = 28f * MathF.Max(0.1f, c.Scale);
+                  float cap = 9f * MathF.Max(0.1f, c.Scale);
+                  c.Canvas.ClearBuffer(VtPaper);
+                  var rows = new (string Caption, string Text, VectorTextStyle Style)[]
+                  {
+                      ("join bevel", "AVNWK", new VectorTextStyle { Color = VtInk, Radius = 0f, Join = VectorJoin.Bevel }),
+                      ("join miter", "AVNWK", new VectorTextStyle { Color = VtInk, Radius = 0f, Join = VectorJoin.Miter }),
+                      ("join round", "AVNWK", new VectorTextStyle { Color = VtInk, Radius = 0f, Join = VectorJoin.Round }),
+                      ("cap butt", "IlLT", new VectorTextStyle { Color = VtInk, Radius = 0f, Cap = VectorCap.Butt }),
+                      ("cap round", "IlLT", new VectorTextStyle { Color = VtInk, Radius = 0f, Cap = VectorCap.Round }),
+                      ("cap square", "IlLT", new VectorTextStyle { Color = VtInk, Radius = 0f, Cap = VectorCap.Square }),
+                      ("outline centre", "OBD", new VectorTextStyle { Color = VtInk, Bold = true, OutlinePosition = VectorOutlinePosition.Center }),
+                      ("outline inside", "OBD", new VectorTextStyle { Color = VtAccent, Bold = true, OutlinePosition = VectorOutlinePosition.Inside }),
+                      ("outline outside", "OBD", new VectorTextStyle { Color = VtInk, Bold = true, OutlinePosition = VectorOutlinePosition.Outside }),
+                  };
+                  float y = c.Y;
+                  foreach (var (caption, text, style) in rows)
+                  {
+                      VectorText.Create(caption, cap, new VectorTextStyle { Color = VtMuted }).Draw(c.Canvas, c.X, (int)(y + size * 0.5f - cap * 0.5f));
+                      VectorText.Create(text, size, style).Draw(c.Canvas, c.X + 170, (int)y);
+                      y += size * 1.7f;
+                  }
+              }).Ui(Param.Mouse, "Move the text (the mouse)", Param.Scale, "Size (x28 px cap height)");
+
             T(GVText, "VectorText on a curve: arc, text below a path, fitted to a path and to a wave, alignment",
               "VectorText.OnPath places each glyph by its distance along a polyline and its height above it, so the letters follow the curve. FitToPath stretches the text so its ink spans the whole path. Below the path (Above = false) the text hangs under the line. Start / Center / End set the place on the path.",
               c =>

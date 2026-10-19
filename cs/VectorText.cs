@@ -3,6 +3,7 @@
 // cap height 70, x-height 50, descender -20). The data is the font's own table, exported from its page
 // (Latin, digits, punctuation, Cyrillic). Drawing rounds each interior corner with a quadratic curve
 // (Radius), can keep acute tips sharp (TipDrop), and can use one advance per glyph (Monospace).
+// Strokes take a join (Bevel by default, as in the font file), a cap, and an outline position (centre, inside or outside).
 // Bold = a wider stroke, Italic = a skew (x += 0.2 * y). Curves are flattened to short segments, so the text
 // can be bent along a path (map labels along roads and rivers) with the same code as straight text.
 using System;
@@ -32,9 +33,20 @@ namespace Sr2d64CSport
         public float TipDrop;
         /// <summary>One advance (60 units) for every glyph, wide glyphs squeezed to 46 units, glyphs centred.</summary>
         public bool Monospace;
+        /// <summary>Corner join of the strokes. Bevel is the font's default; Miter and Round are also available.
+        /// Angular corners (Radius 0) show it most.</summary>
+        public VectorJoin Join = VectorJoin.Bevel;
+        /// <summary>Cap at the ends of open strokes. Butt is the font's default; Round and Square are also available.</summary>
+        public VectorCap Cap = VectorCap.Butt;
+        /// <summary>Where a closed outline's stroke sits: Center (on the outline, the default), Inside or Outside.
+        /// Open strokes (the bars of A, the stem of T) are always centred.</summary>
+        public VectorOutlinePosition OutlinePosition = VectorOutlinePosition.Center;
 
         internal float StrokeFraction => Weight > 0 ? Weight : (Bold ? 0.16f : 6f / 70f);
     }
+
+    /// <summary>Where the stroke of a closed outline sits relative to the outline.</summary>
+    public enum VectorOutlinePosition { Center, Inside, Outside }
 
     /// <summary>Text along a path.</summary>
     public sealed class VectorTextPathOptions
@@ -181,10 +193,10 @@ namespace Sr2d64CSport
         {
             var img = new VectorImage { Title = text };
             float sw = Math.Max(0.5f, size * style.StrokeFraction);
-            var shape = new VectorShape(path, null, new VectorColor(style.Color), sw);
+            var shape = new VectorShape(path, null, new VectorColor(style.Color), sw) { Join = style.Join, Cap = style.Cap, MiterLimit = 4f };
             img.Shapes.Add(shape);
             var b = path.IsEmpty ? new RectangleF(0, 0, 1, 1) : path.ControlBounds();
-            float pad = sw * 0.5f;
+            float pad = sw * 0.5f * (style.Join == VectorJoin.Miter ? 4f : 1f);   // a miter can reach 4 half-widths out
             img.ViewBox = new RectangleF(b.Left - pad, b.Top - pad, Math.Max(1f, b.Width + 2 * pad), Math.Max(1f, b.Height + 2 * pad));
             img.Width = img.ViewBox.Width;
             img.Height = img.ViewBox.Height;
@@ -223,9 +235,53 @@ namespace Sr2d64CSport
             foreach (var raw in g.Strokes)
             {
                 var pts = raw.P.Select(p => new PointF(p.X * kx, p.Y)).ToList();
-                list.Add(new Stroke { P = Round(pts, raw.Closed, style.Radius, style.TipDrop), Closed = raw.Closed });
+                var rounded = Round(pts, raw.Closed, style.Radius, style.TipDrop);
+                if (raw.Closed && style.OutlinePosition != VectorOutlinePosition.Center)
+                    rounded = OffsetOutline(rounded, style.OutlinePosition, style.StrokeFraction * CapHeight / 2f);
+                list.Add(new Stroke { P = rounded, Closed = raw.Closed });
             }
             return list;
+        }
+
+        /// <summary>
+        /// Moves a closed outline by half the stroke width, inward (Inside) or outward (Outside), so the stroke lies
+        /// inside or outside the glyph. Each corner is mitred on the offset line; where the mitre would be longer
+        /// than 4 half-widths, the corner is bevelled there instead.
+        /// </summary>
+        static List<PointF> OffsetOutline(List<PointF> p, VectorOutlinePosition where, float hw)
+        {
+            // drop repeated points (the rounding can repeat the end of a curve)
+            var q = new List<PointF>(p.Count);
+            foreach (var pt in p)
+                if (q.Count == 0 || MathF.Abs(q[^1].X - pt.X) > 1e-4f || MathF.Abs(q[^1].Y - pt.Y) > 1e-4f) q.Add(pt);
+            if (q.Count > 1 && MathF.Abs(q[^1].X - q[0].X) < 1e-4f && MathF.Abs(q[^1].Y - q[0].Y) < 1e-4f) q.RemoveAt(q.Count - 1);
+            int n = q.Count;
+            if (n < 3) return q;
+
+            // glyph space is y up: a positive area runs counter-clockwise, so the inside is on the left of each edge
+            double area = 0;
+            for (int i = 0; i < n; i++) { var a = q[i]; var b = q[(i + 1) % n]; area += (double)a.X * b.Y - (double)b.X * a.Y; }
+            float side = (area > 0 ? 1f : -1f) * (where == VectorOutlinePosition.Inside ? 1f : -1f);
+
+            var o = new List<PointF>(n * 2);
+            for (int i = 0; i < n; i++)
+            {
+                var a = q[(i - 1 + n) % n]; var v = q[i]; var b = q[(i + 1) % n];
+                float d0x = v.X - a.X, d0y = v.Y - a.Y, d1x = b.X - v.X, d1y = b.Y - v.Y;
+                float l0 = MathF.Sqrt(d0x * d0x + d0y * d0y), l1 = MathF.Sqrt(d1x * d1x + d1y * d1y);
+                d0x /= l0; d0y /= l0; d1x /= l1; d1y /= l1;
+                // offset normals (length hw) of the two edges at this corner
+                float n0x = -d0y * hw * side, n0y = d0x * hw * side, n1x = -d1y * hw * side, n1y = d1x * hw * side;
+                float c = d0x * d1x + d0y * d1y;                       // cos of the turn
+                if (1 + c > 1e-3f)
+                {   // intersection of the two offset edges: v + (n0 + n1) / (1 + cos)
+                    float mx = (n0x + n1x) / (1 + c), my = (n0y + n1y) / (1 + c);
+                    if (MathF.Sqrt(mx * mx + my * my) <= 4f * hw) { o.Add(new PointF(v.X + mx, v.Y + my)); continue; }
+                }
+                o.Add(new PointF(v.X + n0x, v.Y + n0y));               // too sharp: bevel the offset corner
+                o.Add(new PointF(v.X + n1x, v.Y + n1y));
+            }
+            return o;
         }
 
         /// <summary>

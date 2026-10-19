@@ -2242,6 +2242,10 @@ table in the file. Size is the cap height in pixels.
 - `Radius` (default 6 font units) rounds each interior corner with a quadratic curve. `0` keeps the corners angular.
 - `TipDrop` (default 0) limits how far an acute tip may be cut back. `0` keeps the tips sharp.
 - `Monospace` gives every glyph the same advance; wide glyphs are squeezed to fit.
+- `Join` (default `Bevel`, as in the font file; `Miter`, `Round`) is the corner shape of the strokes. Radius 0 shows it best.
+- `Cap` (default `Butt`; `Round`, `Square`) is the end of open strokes.
+- `OutlinePosition` (default `Center`; `Inside`, `Outside`) puts the stroke of a closed glyph inside or outside its edge.
+  Open strokes (the bars of A, the stem of T) stay centred. Miter joins use the 4x limit.
 
 ```csharp
 var title = VectorText.Create("Hello 2026", 20f, new VectorTextStyle { Bold = true, Radius = 6f });
