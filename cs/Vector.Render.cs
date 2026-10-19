@@ -20,6 +20,12 @@ namespace Sr2d64CSport
         public bool Strokes = true, Fills = true;
         /// <summary>Thinnest stroke on screen in pixels (hairlines / zero-width PDF lines are widened to this).</summary>
         public float MinStrokeWidth = 0.8f;
+        /// <summary>
+        /// Thin strokes (at most 1 device pixel) are painted without anti-aliasing; their edges are hard. Faster: the
+        /// stroke pass is about 40% less work on the map (bench: 133 ms -> 80 ms for 2,456 strokes). Fills keep the
+        /// AA setting. Default false (the full look).
+        /// </summary>
+        public bool FastLines { get; set; }
         /// <summary>Ignore per-shape clips (faster previews).</summary>
         public bool IgnoreClips { get; set; }
         /// <summary>Replace every paint by this colour (silhouette / shadow rendering); alpha is kept per shape.</summary>
@@ -362,7 +368,7 @@ namespace Sr2d64CSport
             foreach (var s in img.Shapes) DrawOne(s, dst, m, o, clipRect, premul, tol);
         }
         [ThreadStatic] static VectorShape? tWin; [ThreadStatic] static VectorRenderOptions? tWinOpt;
-        static void CopyOpt(VectorRenderOptions a, VectorRenderOptions b) { b.AA = a.AA; b.Opacity = a.Opacity; b.Strokes = a.Strokes; b.Fills = a.Fills; b.MinStrokeWidth = a.MinStrokeWidth; b.ForceColor = a.ForceColor; b.Tolerance = a.Tolerance; b.Premultiplied = a.Premultiplied; }
+        static void CopyOpt(VectorRenderOptions a, VectorRenderOptions b) { b.AA = a.AA; b.FastLines = a.FastLines; b.Opacity = a.Opacity; b.Strokes = a.Strokes; b.Fills = a.Fills; b.MinStrokeWidth = a.MinStrokeWidth; b.ForceColor = a.ForceColor; b.Tolerance = a.Tolerance; b.Premultiplied = a.Premultiplied; }
         static void CopyInto(VectorShape from, VectorShape to)
         {
             to.Path = from.Path; to.Fill = from.Fill; to.Stroke = from.Stroke; to.EvenOdd = from.EvenOdd; to.StrokeWidth = from.StrokeWidth; to.Cap = from.Cap; to.Join = from.Join;
@@ -429,7 +435,7 @@ namespace Sr2d64CSport
                         for (int i = 0; i < op.Count; i++) { var v = Vector2.Transform(new Vector2(op[i].X, op[i].Y), t); op[i] = new PointF(v.X, v.Y); }
                         if (t.M11 * t.M22 - t.M12 * t.M21 < 0) { int st = 0; foreach (var c in opc) { op.Reverse(st, c); st += c; } }   // mirrored: keep positive orientation
                     }
-                    if (opc.Count > 0) PaintPolys(dst, lr, op, opc, s.Stroke, false, opacity, o, premul, softClip, t, shapeBox, s, true);
+                    if (opc.Count > 0) PaintPolys(dst, lr, op, opc, s.Stroke, false, opacity, o, premul, softClip, t, shapeBox, s, true, aa: !(o.FastLines && sw <= 1f) && o.AA);
                 }
             }
         }
@@ -442,8 +448,9 @@ namespace Sr2d64CSport
 
         /// <summary>Paints polygon contours with a paint. Solid + no soft clip = one DRAW_POLY; otherwise coverage mask + per-pixel paint.</summary>
         static void PaintPolys(Sprite dst, Rectangle lr, List<PointF> pts, List<int> cnt, VectorPaint paint, bool evenOdd, float opacity, VectorRenderOptions o, bool premul,
-                               VectorClip? softClip, Matrix3x2 t, RectangleF box, VectorShape shape, bool isStroke)
+                               VectorClip? softClip, Matrix3x2 t, RectangleF box, VectorShape shape, bool isStroke, bool? aa = null)
         {
+            bool aaOn = aa ?? o.AA;      // the stroke of a thin line can ask for no AA (VectorRenderOptions.FastLines)
             int forced = o.ForceColor ?? 0;
             // work on a copy: the caller reuses pts for the stroke of the same shape
             var work = tWork ??= new List<PointF>(1024); work.Clear(); work.AddRange(pts);
@@ -459,11 +466,11 @@ namespace Sr2d64CSport
                     argb = (argb & 0xFFFFFF) | (a << 24);
                     var save = dst.LockRect; dst.SetLockRect(lr);
                     if (premul)   // LineOp.AlphaOver takes a STRAIGHT colour and writes premultiplied source-over (alpha accumulates)
-                        dst.FillPolygons(span, System.Runtime.InteropServices.CollectionsMarshal.AsSpan(cnt), argb, SR2D.LineOp.AlphaOver, o.AA, evenOdd);
+                        dst.FillPolygons(span, System.Runtime.InteropServices.CollectionsMarshal.AsSpan(cnt), argb, SR2D.LineOp.AlphaOver, aaOn, evenOdd);
                     // AlphaOver (not AlphaBlend): source-over that also accumulates the destination alpha. AlphaBlend keeps
                     // the destination alpha, so a fill on a transparent sprite left its colour with alpha 0 (shown as black / blank).
                     // On an opaque destination both give the same colours.
-                    else dst.FillPolygons(span, System.Runtime.InteropServices.CollectionsMarshal.AsSpan(cnt), argb, a == 255 && !o.AA ? SR2D.LineOp.Set : SR2D.LineOp.AlphaOver, o.AA, evenOdd);
+                    else dst.FillPolygons(span, System.Runtime.InteropServices.CollectionsMarshal.AsSpan(cnt), argb, a == 255 && !aaOn ? SR2D.LineOp.Set : SR2D.LineOp.AlphaOver, aaOn, evenOdd);
                     dst.SetLockRect(save);
                     return;
                 }
@@ -473,7 +480,7 @@ namespace Sr2d64CSport
                 var cov = Scratch(ref tCov, r0.Width, r0.Height);
                 cov.SetLockRect(0, r0.Width, 0, r0.Height); cov.ClearRect(0, r0.Width, 0, r0.Height, 0);
                 for (int i = 0; i < span.Length; i++) span[i] = new PointF(span[i].X - r0.X, span[i].Y - r0.Y);
-                cov.FillPolygons(span, System.Runtime.InteropServices.CollectionsMarshal.AsSpan(cnt), unchecked((int)0xFFFFFFFF), SR2D.LineOp.Set, o.AA, evenOdd);
+                cov.FillPolygons(span, System.Runtime.InteropServices.CollectionsMarshal.AsSpan(cnt), unchecked((int)0xFFFFFFFF), SR2D.LineOp.Set, aaOn, evenOdd);
                 Sprite? clip = null;
                 if (softClip != null)
                 {
@@ -488,7 +495,7 @@ namespace Sr2d64CSport
                         for (int i = 0; i < cs.Length; i++) cs[i] = new PointF(cs[i].X - 0.5f - r0.X, cs[i].Y - 0.5f - r0.Y);
                         var target = first ? clip : Scratch(ref tClip2, r0.Width, r0.Height);
                         target.SetLockRect(0, r0.Width, 0, r0.Height); target.ClearRect(0, r0.Width, 0, r0.Height, 0);
-                        if (cc.Count > 0) target.FillPolygons(cs, System.Runtime.InteropServices.CollectionsMarshal.AsSpan(cc), unchecked((int)0xFFFFFFFF), SR2D.LineOp.Set, o.AA, eo);
+                        if (cc.Count > 0) target.FillPolygons(cs, System.Runtime.InteropServices.CollectionsMarshal.AsSpan(cc), unchecked((int)0xFFFFFFFF), SR2D.LineOp.Set, aaOn, eo);
                         if (!first) MulInto(clip, target, r0.Width, r0.Height);
                         first = false;
                     }

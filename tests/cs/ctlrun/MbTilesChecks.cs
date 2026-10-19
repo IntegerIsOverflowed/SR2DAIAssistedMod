@@ -191,6 +191,48 @@ static class MbTilesChecks
         tiles.Dispose();
     }
 
+    /// <summary>FastLines: thin strokes are painted without AA (the output changes only at thin strokes; fills keep AA).</summary>
+    public static void FastLinesCheck()
+    {
+        var dir = FindDataDir();
+        Chk(dir != null, "tests/data/mbtiles found (fast lines)");
+        using var mb = MbTiles.Open(Path.Combine(dir!, "chel-z11-smallpages.mbtiles"));
+        var img = Sr2d64CSport.VectorImage.FromMbTiles(mb, new Sr2d64CSport.MbTilesView { Zoom = 11, Labels = false, Threads = 1 });
+        img.BuildIndex();
+        const int W = 800, H = 500, bg = unchecked((int)0xFFF4F1E8);
+        double cx = img.Width * 0.5, cy = img.Height * 0.5;
+        var full = new Sr2d64CSport.Sprite(W, H); full.ClearBuffer(bg);
+        var fast = new Sr2d64CSport.Sprite(W, H); fast.ClearBuffer(bg);
+        var m = Sr2d64CSport.VectorViewCache.ViewMatrix(cx, cy, 1f, W / 2f, H / 2f);
+        img.DrawVisible(full, m, new Sr2d64CSport.VectorRenderOptions { AA = true, FastLines = false }, 1f);
+        img.DrawVisible(fast, m, new Sr2d64CSport.VectorRenderOptions { AA = true, FastLines = true }, 1f);
+        int diff = 0; long sum = 0;
+        for (int i = 0; i < full.Pixels.Length; i++)
+        {
+            if (full.Pixels[i] == fast.Pixels[i]) continue;
+            diff++;
+            for (int sh = 0; sh < 32; sh += 8) sum += Math.Abs(((full.Pixels[i] >>> sh) & 255) - ((fast.Pixels[i] >>> sh) & 255));
+        }
+        double mean = sum / (double)full.Pixels.Length / 4;
+        Chk(diff > 0, $"FastLines changes thin strokes ({diff} pixels differ)");
+        Chk(mean < 2.0, $"FastLines changes only the edges of thin strokes (mean difference {mean:0.000})");
+        var off = new Sr2d64CSport.VectorRenderOptions { AA = true };
+        Chk(!off.FastLines, "FastLines is off by default");
+        double Ms(Sr2d64CSport.VectorRenderOptions opt)
+        {
+            var times = new List<double>();
+            for (int r = 0; r < 5; r++)
+            {
+                var sp = new Sr2d64CSport.Sprite(W, H); sp.ClearBuffer(bg);
+                var sw = System.Diagnostics.Stopwatch.StartNew();
+                img.DrawVisible(sp, m, opt, 1f);
+                times.Add(sw.Elapsed.TotalMilliseconds); sp.Dispose();
+            }
+            times.Sort(); return times[2];
+        }
+        Console.WriteLine($"  info  FastLines frame (median of 5): full {Ms(new Sr2d64CSport.VectorRenderOptions { AA = true }):0.0} ms, fast lines {Ms(new Sr2d64CSport.VectorRenderOptions { AA = true, FastLines = true }):0.0} ms");
+    }
+
     public static void Run()
     {
         var dir = FindDataDir();

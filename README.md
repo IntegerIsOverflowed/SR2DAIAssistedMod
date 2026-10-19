@@ -2247,6 +2247,11 @@ several threads at once (the shape index is read only, and the visible view is m
 that a tile frame equals the direct draw at the same whole-pixel centre (pans and a zoom), that a warm frame equals a cold
 one, and that the cache stays within `MaxTiles`.
 
+`VectorRenderOptions.FastLines` (default false) paints strokes of at most 1 device pixel without anti-aliasing: their
+edges are hard, the fills keep the AA setting, and the stroke pass is about 40% faster (ctlrun `FastLinesCheck`: a z11 map
+frame 48.6 ms full, 28.8 ms with FastLines, median of 5, 2-core sandbox). A middle level (AA hairlines) needs an
+anti-aliased 1 px line routine in the native code; the engine's `DrawLine2` is not anti-aliased, so it is not built.
+
 **Outlines are hairlines.** Building outlines (`MbPaint.Hairline`) are one device pixel at every zoom, not a width in
 map units. Any shape can do this: `VectorShape.Hairline = true` (the `StrokeWidth` is then ignored; SVG export writes
 `vector-effect="non-scaling-stroke"`).
