@@ -28,6 +28,8 @@ namespace Sr2d64CSport
         OffsetX = 262144,
         /// <summary>The test reads <see cref="Ctx.OffsetY"/> - the Y offset slider (the selection-tool scenario).</summary>
         OffsetY = 524288,
+        /// <summary>The test reads <see cref="Ctx.FastLines"/> - vector drawing: strokes of at most 1 px without anti-aliasing (faster, hard edges).</summary>
+        FastLines = 1048576,
     }
 
     internal sealed class Ctx
@@ -77,7 +79,7 @@ namespace Sr2d64CSport
 
         int x, y, z = 120, blend = 128, count = 1, maskBits = Assets.MaskCircle, dotStep;
         float angle, scale = 1f, scaleY = 1f, brite = 1f, time, yaw, pitch = 0.55f, panX, panY;
-        bool smooth, notMask, xor;
+        bool smooth, notMask, xor, fastLines;
         SR2D.Op op = SR2D.Op.Paint;
 
         /// <summary>Seconds of animation time. Stops advancing while the "Animate" check box is off.</summary>
@@ -127,6 +129,8 @@ namespace Sr2d64CSport
         public SR2D.Op Op { get { Touch(Param.Op); return op; } set => op = value; }
         public int DotStep { get { Touch(Param.DotStep); return dotStep; } set => dotStep = value; }
         public bool Xor { get { Touch(Param.Xor); return xor; } set => xor = value; }
+        /// <summary>Vector tests: 1 px strokes are painted without anti-aliasing (VectorRenderOptions.FastLines).</summary>
+        public bool FastLines { get { Touch(Param.FastLines); return fastLines; } set => fastLines = value; }
 
         public Ctx Clone() => (Ctx)MemberwiseClone();
 
@@ -234,7 +238,7 @@ namespace Sr2d64CSport
         /// </summary>
         public int SlowFrames;
         /// <summary>Slow tests: parameters that trigger a re-run when they change (others are ignored while frozen).</summary>
-        public Param SlowRerunOn = Param.Mouse | Param.Count | Param.Angle | Param.Scale | Param.Op | Param.MaskBits | Param.Smooth | Param.NotMask | Param.Xor | Param.Camera | Param.Z | Param.Brite;
+        public Param SlowRerunOn = Param.Mouse | Param.Count | Param.Angle | Param.Scale | Param.Op | Param.MaskBits | Param.Smooth | Param.NotMask | Param.Xor | Param.FastLines | Param.Camera | Param.Z | Param.Brite;
         /// <summary>Called on the UI thread when the user picks a file for this test (tests that load .vox / .obj); null = no file button.</summary>
         public string? FileFilter;
         public string? FilePath;               // last chosen file (set by the form)
@@ -1195,7 +1199,7 @@ T(GControls, "SpriteLabel / GroupBox / Tabs / TextBox / Numeric / Combo / ListBo
                 var t = L.Find(x => x.Name.StartsWith("Vector import", StringComparison.Ordinal))!;
                 var (img, info) = EnsureVector(t.FilePath, c.DotStep, SvgSimplify(c));
                 RecolorDemo.SetImage(img);                                 // the strip above edits THIS container (Recolor / SwapColors)
-                var o = new VectorRenderOptions { AA = c.Smooth, Opacity = c.Blend / 255f, Strokes = true, Fills = c.Brite >= 0 };
+                var o = new VectorRenderOptions { AA = c.Smooth, Opacity = c.Blend / 255f, Strokes = true, Fills = c.Brite >= 0, FastLines = c.FastLines };
                 var osz = VectorObjectSize(c, img);                        // picture size on the canvas at Scale 1 (longer side = 1.5 x sprite)
                 float fit = osz.Width / MathF.Max(1e-3f, img.Width);
                 float pfx = c.PivotXF < 0 ? 0.5f : c.PivotXF / osz.Width, pfy = c.PivotYF < 0 ? 0.5f : c.PivotYF / osz.Height;   // pivot as view-box fractions
@@ -1220,7 +1224,7 @@ T(GControls, "SpriteLabel / GroupBox / Tabs / TextBox / Numeric / Combo / ListBo
             L[L.Count - 1].MouseRotates = true; L[L.Count - 1].Resizable = true; L[L.Count - 1].AnimSpin = 0f;
             // QGIS-style simplification of the picture (Vector.Simplify.cs): threshold in SVG units, algorithm, provider side
             L[L.Count - 1].Ui(Param.Grid, "Simplification threshold, SVG units (0 = off)", Param.Op, "Simplification algorithm",
-                              Param.GridOn, "Use simplification on provider side if possible (SVG has no tile provider: it is applied once the file is read)")
+                              Param.GridOn, "Use simplification on provider side if possible (SVG has no tile provider: it is applied once the file is read)", Param.FastLines, "Fast thin lines (1 px strokes without AA: faster, hard edges)")
                           .Ops("None", "Linear (Douglas-Peucker)", "Snap To Grid", "Visvalingam").Range(Param.Grid, 0, 20).With(Param.Grid, 0).With(Param.GridOn, true);
             L[L.Count - 1].ObjectSize = c => { var vt = L.Find(x => x.Name.StartsWith("Vector import", StringComparison.Ordinal))!; var (vi, _) = EnsureVector(vt.FilePath, c.DotStep, SvgSimplify(c)); return VectorObjectSize(c, vi); };
             L[L.Count - 1].ControlStrip = RecolorDemo.Build; L[L.Count - 1].StripHeight = RecolorDemo.StripHeight;
@@ -1258,7 +1262,7 @@ T(GControls, "SpriteLabel / GroupBox / Tabs / TextBox / Numeric / Combo / ListBo
                       y += size * 1.9f;
                   }
                   scene.Draw(c, c.Scale);                                  // centred on the canvas; the wheel zooms
-              }).Ui(Param.Count, "Size (cap height, px at zoom 1)", Param.Scale, "Zoom (the slider or the wheel; drag anywhere to move)")
+              }).Ui(Param.Count, "Size (cap height, px at zoom 1)", Param.Scale, "Zoom (the slider or the wheel; drag anywhere to move)", Param.FastLines, "Fast thin lines (1 px strokes without AA: faster, hard edges)")
                 .Also(t => t.DragAnywhere = true).Range(Param.Count, 4, 80).With(Param.Count, 12);
 
             T(GVText, "VectorText styles: plain, bold, italic, bold italic, monospace, corner radius, tip limit",
@@ -1296,7 +1300,7 @@ T(GControls, "SpriteLabel / GroupBox / Tabs / TextBox / Numeric / Combo / ListBo
                       y += size * 1.9f;
                   }
                   scene.Draw(c, c.Scale);
-              }).Ui(Param.Count, "Size (text cap height, px at zoom 1)", Param.Scale, "Zoom (the slider or the wheel; drag anywhere to move)")
+              }).Ui(Param.Count, "Size (text cap height, px at zoom 1)", Param.Scale, "Zoom (the slider or the wheel; drag anywhere to move)", Param.FastLines, "Fast thin lines (1 px strokes without AA: faster, hard edges)")
                 .Also(t => t.DragAnywhere = true).Range(Param.Count, 4, 80).With(Param.Count, 16);
 
             T(GVText, "VectorText outlines: joins (bevel, miter, round), caps (butt, round, square), outline position (centre, inside, outside)",
@@ -1327,7 +1331,7 @@ T(GControls, "SpriteLabel / GroupBox / Tabs / TextBox / Numeric / Combo / ListBo
                       y += size * 1.7f;
                   }
                   scene.Draw(c, c.Scale);
-              }).Ui(Param.Count, "Size (cap height, px at zoom 1)", Param.Scale, "Zoom (the slider or the wheel; drag anywhere to move)")
+              }).Ui(Param.Count, "Size (cap height, px at zoom 1)", Param.Scale, "Zoom (the slider or the wheel; drag anywhere to move)", Param.FastLines, "Fast thin lines (1 px strokes without AA: faster, hard edges)")
                 .Also(t => t.DragAnywhere = true).Range(Param.Count, 4, 80).With(Param.Count, 28);
 
             T(GVText, "VectorText on a curve: arc, text below a path, fitted to a path and to a wave, alignment",
@@ -1372,7 +1376,7 @@ T(GControls, "SpriteLabel / GroupBox / Tabs / TextBox / Numeric / Combo / ListBo
                       scene.Add(VectorText.OnPath(text, seg, size * 0.7f, new VectorTextPathOptions { Style = plain, Align = align }), 0, 0);
                   }
                   scene.Draw(c, c.Scale);                                  // the whole group is centred; the wheel zooms
-              }).Ui(Param.Count, "Size (cap height, px at zoom 1)", Param.Scale, "Zoom (the slider or the wheel; drag anywhere to move)")
+              }).Ui(Param.Count, "Size (cap height, px at zoom 1)", Param.Scale, "Zoom (the slider or the wheel; drag anywhere to move)", Param.FastLines, "Fast thin lines (1 px strokes without AA: faster, hard edges)")
                 .Also(t => t.DragAnywhere = true).Range(Param.Count, 4, 80).With(Param.Count, 14);
 
             // ===================================================== Vector map (MBTiles)
@@ -1384,6 +1388,7 @@ T(GControls, "SpriteLabel / GroupBox / Tabs / TextBox / Numeric / Combo / ListBo
               .Ui(Param.Z, "Zoom level Z (0..14, the level the shapes are imported at)", Param.Scale, "Extra zoom past Z (x1.00 = none; the shapes are vectors, so it stays sharp)",
                   Param.Smooth, "Anti-aliased edges",
                   Param.Xor, "Hide names of streets",
+                  Param.FastLines, "Fast thin lines (1 px strokes without AA: faster, hard edges)",
                   Param.NotMask, "Bitmap cache (on: the map is drawn as a picture while the zoom is still)",
                   Param.Count, "Hide by zoom: leave out features whose larger side is under N px (1 = show all)",
                   Param.DotStep, "Simplification threshold, px at Z (0 = off)",
@@ -1399,7 +1404,7 @@ T(GControls, "SpriteLabel / GroupBox / Tabs / TextBox / Numeric / Combo / ListBo
             {
                 var t = L.Find(x => x.Name.StartsWith("Animated SVG", StringComparison.Ordinal))!;
                 var (img, info) = EnsureAnimVector(t.FilePath);
-                var o = new VectorRenderOptions { AA = c.Smooth, Opacity = c.Blend / 255f, Strokes = true, Fills = c.Brite >= 0 };
+                var o = new VectorRenderOptions { AA = c.Smooth, Opacity = c.Blend / 255f, Strokes = true, Fills = c.Brite >= 0, FastLines = c.FastLines };
                 var osz = VectorObjectSize(c, img);                        // picture size on the canvas at Scale 1 (longer side = 1.5 x sprite)
                 float fit = osz.Width / MathF.Max(1e-3f, img.Width);
                 float pfx = c.PivotXF < 0 ? 0.5f : c.PivotXF / osz.Width, pfy = c.PivotYF < 0 ? 0.5f : c.PivotYF / osz.Height;
@@ -1420,7 +1425,7 @@ T(GControls, "SpriteLabel / GroupBox / Tabs / TextBox / Numeric / Combo / ListBo
                     ? Math.Clamp((int)Math.Floor(tt * playedFrames / img.Duration + 1e-9), 0, playedFrames - 1) + 1
                     : (int)(tt * img.FrameRate) + 1;
                 c.Note = $"{info} | t = {tt:0.###} / {img.Duration:0.###} s = frame {playedIndex}/{playedFrames} | {img.Tracks.Count} tracks, {img.Shapes.Count} shapes | frame {ms:F2} ms | {vs.LayerSummary}{warn}";
-            }, needsPoly: true).Ui(Param.Scale, "Zoom (x0.01; the longer side = 1.5 x sprite size at x1.00); drag the top / bottom edge to squish", Param.Time, "Animate: play the loop (off = stand at frame 0)", Param.Speed, "Playback rate = Speed / 6 (6 = real time, 12 = double speed)", Param.Smooth, "Anti-aliased edges", Param.Blend, "Opacity", Param.Brite, "< 0: strokes only (wireframe)", Param.Xor, "Precompose (first draw bakes the loop; off releases the bitmaps)", Param.Count, "Film budget (MiB; smaller bitmaps if necessary, never fewer fps)", Param.DotStep, "Film fps (default 60; 0 = file rate; higher = smoother motion / more memory)", Param.Z, "Internal film width (px; 0 = SVG intrinsic; fixed while resizing the container)", Param.Mouse, "Drag = move; drag outside = rotate; edges / corners = resize (Shift = keep aspect); right click = pivot").Range(Param.Count, 16, 1024).Range(Param.DotStep, 0, 240).Range(Param.Z, 0, 4096).With(Param.Count, 256).With(Param.DotStep, 60).With(Param.Z, 512).With(Param.Xor, false).With(Param.Smooth, true).With(Param.Speed, 6);
+            }, needsPoly: true).Ui(Param.Scale, "Zoom (x0.01; the longer side = 1.5 x sprite size at x1.00); drag the top / bottom edge to squish", Param.Time, "Animate: play the loop (off = stand at frame 0)", Param.Speed, "Playback rate = Speed / 6 (6 = real time, 12 = double speed)", Param.Smooth, "Anti-aliased edges", Param.FastLines, "Fast thin lines (1 px strokes without AA: faster, hard edges)", Param.Blend, "Opacity", Param.Brite, "< 0: strokes only (wireframe)", Param.Xor, "Precompose (first draw bakes the loop; off releases the bitmaps)", Param.Count, "Film budget (MiB; smaller bitmaps if necessary, never fewer fps)", Param.DotStep, "Film fps (default 60; 0 = file rate; higher = smoother motion / more memory)", Param.Z, "Internal film width (px; 0 = SVG intrinsic; fixed while resizing the container)", Param.Mouse, "Drag = move; drag outside = rotate; edges / corners = resize (Shift = keep aspect); right click = pivot").Range(Param.Count, 16, 1024).Range(Param.DotStep, 0, 240).Range(Param.Z, 0, 4096).With(Param.Count, 256).With(Param.DotStep, 60).With(Param.Z, 512).With(Param.Xor, false).With(Param.Smooth, true).With(Param.Speed, 6);
             L[L.Count - 1].MouseRotates = true; L[L.Count - 1].Resizable = true; L[L.Count - 1].AnimSpin = 0f;
             L[L.Count - 1].ObjectSize = c => { var vt = L.Find(x => x.Name.StartsWith("Animated SVG", StringComparison.Ordinal))!; var (vi, _) = EnsureAnimVector(vt.FilePath); return VectorObjectSize(c, vi); };
             L[L.Count - 1].FileFilter = "Animated SVG|*.svg;*.svgz|SVG (*.svg, *.svgz)|*.svg;*.svgz|All files|*.*";
@@ -2708,7 +2713,7 @@ T(GControls, "SpriteLabel / GroupBox / Tabs / TextBox / Numeric / Combo / ListBo
                 if (!any) return;
                 float cu = (l + r) / 2, cv = (t + b) / 2;
                 foreach (var (pic, dx, dy) in items)
-                    pic.Draw(c.Canvas, System.Numerics.Matrix3x2.CreateTranslation(dx - cu, dy - cv) * System.Numerics.Matrix3x2.CreateScale(zoom) * System.Numerics.Matrix3x2.CreateTranslation(c.X, c.Y));
+                    pic.Draw(c.Canvas, System.Numerics.Matrix3x2.CreateTranslation(dx - cu, dy - cv) * System.Numerics.Matrix3x2.CreateScale(zoom) * System.Numerics.Matrix3x2.CreateTranslation(c.X, c.Y), new VectorRenderOptions { FastLines = c.FastLines });
             }
         }
 
@@ -2794,7 +2799,7 @@ T(GControls, "SpriteLabel / GroupBox / Tabs / TextBox / Numeric / Combo / ListBo
                 lastX = c.X; lastY = c.Y; haveLast = true;
 
                 double cx = nx * 256.0 * Math.Pow(2, z) - originX, cy = ny * 256.0 * Math.Pow(2, z) - originY;
-                var opts = new VectorRenderOptions { AA = c.Smooth };
+                var opts = new VectorRenderOptions { AA = c.Smooth, FastLines = c.FastLines };
                 int minPx = Math.Max(1, c.Count);                     // "hide by zoom": shapes whose larger side is under this many px are left out
                 // everything that changes the drawn pixels is in the tile key (a change drops the tiles)
                 string vkey = key + "|" + minPx + "|" + c.Smooth;
