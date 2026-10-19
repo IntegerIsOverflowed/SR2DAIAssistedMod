@@ -339,7 +339,7 @@ namespace Sr2d64CSport
             var btnRow = new SpriteStackPanel { Orientation = Orientation.Horizontal, Wrap = true, AutoSize = true, Gap = 4, Padding = new Padding(-2, 0, -2, 0), Stretch = false };
             Btn(btnRow, btnReset, "Reset params", (_, _) => ResetParams());
             Btn(btnRow, btnCode, "Code (F2)", (_, _) => ShowCode(!codeShown));
-            Btn(btnRow, btnFile, "Open file...", (_, _) => OpenTestFile()); btnFile.Visible = false;
+            Btn(btnRow, btnFile, "Open File", (_, _) => OpenTestFile()); btnFile.Visible = false;
             testStack.Controls.Add(btnRow);
             // slow tests only
             Btn(testStack, btnMeasure, "Measure fps (render N frames)", (_, _) => StartMeasure()); btnMeasure.Visible = false;
@@ -896,7 +896,7 @@ namespace Sr2d64CSport
             btnFile.Visible = t.FileFilter != null;
             btnMeasure.Visible = chkProgress.Visible = t.SlowFrames > 0;
             ShowStrip(t);
-            btnFile.Text = t.FilePath != null ? "Open file... (" + (t.FilePath.Contains('|') ? t.FilePath.Split('|').Length + " files" : Path.GetFileName(t.FilePath)) + ")" : "Open file...";
+            btnFile.Text = t.FilePath != null ? "Open File (" + (t.FilePath.Contains('|') ? t.FilePath.Split('|').Length + " files" : Path.GetFileName(t.FilePath)) + ")" : "Open File";
             StartSlowRun();
             emaRender = -1;
             fpsFrames = 0; fpsAccumMs = renderAccumMs = presentAccumMs = 0;
@@ -1243,7 +1243,7 @@ namespace Sr2d64CSport
             if (current.FilePath != null) { try { dlg.InitialDirectory = Path.GetDirectoryName(current.FilePath.Split('|')[0]); } catch { } }
             if (dlg.ShowDialog(this) != DialogResult.OK) return;
             current.FilePath = string.Join("|", dlg.FileNames);
-            btnFile.Text = "Open file... (" + (dlg.FileNames.Length > 1 ? dlg.FileNames.Length + " files" : Path.GetFileName(dlg.FileName)) + ")";
+            btnFile.Text = "Open File (" + (dlg.FileNames.Length > 1 ? dlg.FileNames.Length + " files" : Path.GetFileName(dlg.FileName)) + ")";
             Log("file: " + current.FilePath);
             canvas?.ClearBuffer(unchecked((int)0xFF101418));
             StartSlowRun();

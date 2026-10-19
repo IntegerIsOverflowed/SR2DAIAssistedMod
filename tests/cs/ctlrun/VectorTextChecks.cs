@@ -37,6 +37,86 @@ static class VectorTextChecks
         Console.WriteLine($"wrote {file} {s.Width}x{s.Height}");
     }
 
+    static (int w, int h) InkBox(Sr2d64CSport.Sprite sp)
+    {
+        int x0 = int.MaxValue, y0 = int.MaxValue, x1 = -1, y1 = -1;
+        for (int y = 0; y < sp.Height; y++)
+            for (int x = 0; x < sp.Width; x++)
+            {
+                int px = sp.Pixels[y * sp.Width + x];
+                if (((px >> 16) & 255) < 128 && ((px >> 8) & 255) < 128 && (px & 255) < 128)
+                { x0 = Math.Min(x0, x); x1 = Math.Max(x1, x); y0 = Math.Min(y0, y); y1 = Math.Max(y1, y); }
+            }
+        return x1 < 0 ? (0, 0) : (x1 - x0 + 1, y1 - y0 + 1);
+    }
+
+    static int Segments(Sr2d64CSport.VectorImage img) => img.Shapes.Sum(s => s.Path.SegmentCount);
+
+    // dots (. : i ё) are squares of the stroke width; text can be centred on a line; QGIS-style simplification
+    public static void DotsAndSimplify()
+    {
+        // a period at size 70: the stroke is 6 px (regular) and 11.2 px (Bold), so the dot is that square
+        foreach (var (bold, want) in new[] { (false, 6.0), (true, 11.2) })
+        {
+            var sp = new Sr2d64CSport.Sprite(120, 120);
+            sp.ClearBuffer(unchecked((int)0xFFFFFFFF));
+            Sr2d64CSport.VectorText.Create(".", 70f, new Sr2d64CSport.VectorTextStyle { Bold = bold }).Draw(sp, 20, 20);
+            var (w, h) = InkBox(sp);
+            Chk(Math.Abs(w - want) <= 1.5 && Math.Abs(h - want) <= 1.5 && Math.Abs(w - h) <= 1,
+                $"a {(bold ? "Bold " : "")}period is a {w}x{h} px square (stroke {want:0.0} px)");
+        }
+        {
+            var sp = new Sr2d64CSport.Sprite(120, 120);
+            sp.ClearBuffer(unchecked((int)0xFFFFFFFF));
+            Sr2d64CSport.VectorText.Create(":", 70f, new Sr2d64CSport.VectorTextStyle()).Draw(sp, 20, 20);
+            var (w, _) = InkBox(sp);
+            Chk(Math.Abs(w - 6.0) <= 1.5, $"a colon's dots are as wide as the stroke ({w} px)");
+        }
+        // Centred: the middle of the capitals sits on the line
+        var line = new List<PointF> { new PointF(0, 100), new PointF(200, 100) };
+        var centred = Sr2d64CSport.VectorText.OnPath("HHH", line, 20f, new Sr2d64CSport.VectorTextPathOptions { Centred = true });
+        var cp = AllPoints(centred);
+        float mid = (cp.Min(p => p.Y) + cp.Max(p => p.Y)) / 2f;
+        Chk(Math.Abs(mid - 100f) < 0.5f, $"a centred label's middle sits on the line (middle y {mid:0.0}, line 100)");
+        var above = Sr2d64CSport.VectorText.OnPath("HHH", line, 20f, new Sr2d64CSport.VectorTextPathOptions());
+        var ap = AllPoints(above);
+        float amid = (ap.Min(p => p.Y) + ap.Max(p => p.Y)) / 2f;
+        Chk(amid < 100f - 5f, $"an 'Above' label sits over the line (middle y {amid:0.0})");
+
+        // Linear (Douglas-Peucker): a noisy straight line keeps its ends; a corner stays
+        var noisy = Enumerable.Range(0, 100).Select(i => new PointF(i, 0.2f * (float)Math.Sin(i))).ToList();
+        var r1 = Sr2d64CSport.VectorSimplify.Line(noisy, false, new Sr2d64CSport.SimplifySettings { Tolerance = 1 });
+        Chk(r1.Count == 2, $"Linear reduces a noisy straight line to its ends ({r1.Count} of 100 points)");
+        var corner = new List<PointF>();
+        for (int i = 0; i <= 10; i++) corner.Add(new PointF(i, 0));
+        for (int i = 1; i <= 10; i++) corner.Add(new PointF(10, i));
+        var r2 = Sr2d64CSport.VectorSimplify.Line(corner, false, new Sr2d64CSport.SimplifySettings { Tolerance = 0.5 });
+        Chk(r2.Count == 3 && r2[1] == new PointF(10, 0), $"Linear keeps a corner ({r2.Count} points)");
+        // a ring of a square with midpoints: the four corners are kept
+        var ring = new List<PointF> { new PointF(0, 0), new PointF(5, 0), new PointF(10, 0), new PointF(10, 5), new PointF(10, 10), new PointF(5, 10), new PointF(0, 10), new PointF(0, 5) };
+        var r5 = Sr2d64CSport.VectorSimplify.Line(ring, true, new Sr2d64CSport.SimplifySettings { Tolerance = 0.1 });
+        Chk(r5.Count == 4, $"Linear on a closed ring keeps its four corners ({r5.Count} points)");
+        // SnapToGrid with a 5-unit grid
+        var snap = new List<PointF> { new PointF(0, 0), new PointF(1, 1), new PointF(12, 11), new PointF(14, 14) };
+        var r3 = Sr2d64CSport.VectorSimplify.Line(snap, false, new Sr2d64CSport.SimplifySettings { Tolerance = 5, Algorithm = Sr2d64CSport.SimplifyAlgorithm.SnapToGrid });
+        Chk(r3.Count == 3 && r3[1] == new PointF(10, 10) && r3[2] == new PointF(15, 15), $"Snap To Grid moves points to the grid and drops repeats ({r3.Count} points)");
+        // Visvalingam: the point whose triangle is 0.5 square units is removed when the threshold is 1
+        var vis = new List<PointF> { new PointF(0, 0), new PointF(5, 0.1f), new PointF(10, 0), new PointF(10, 10) };
+        var r4 = Sr2d64CSport.VectorSimplify.Line(vis, false, new Sr2d64CSport.SimplifySettings { Tolerance = 1, Algorithm = Sr2d64CSport.SimplifyAlgorithm.Visvalingam });
+        Chk(r4.Count == 3 && r4[1] == new PointF(10, 0), $"Visvalingam removes the smallest triangle first ({r4.Count} points)");
+        // a feature that collapses keeps its geometry
+        var tiny = new List<PointF> { new PointF(0, 0), new PointF(1, 0), new PointF(0, 1) };
+        var r6 = Sr2d64CSport.VectorSimplify.Line(tiny, true, new Sr2d64CSport.SimplifySettings { Tolerance = 100, Algorithm = Sr2d64CSport.SimplifyAlgorithm.SnapToGrid });
+        Chk(r6.Count == 3, "a feature that collapses under the threshold keeps its geometry");
+        // a shape: 50 collinear points become one segment
+        var path = new Sr2d64CSport.VectorPath();
+        path.MoveTo(0, 0);
+        for (int i = 1; i <= 50; i++) path.LineTo(i, 0);
+        var shape = new Sr2d64CSport.VectorShape(path, null, null, 1f);
+        Sr2d64CSport.VectorSimplify.Apply(shape, new Sr2d64CSport.SimplifySettings { Tolerance = 0.5 });
+        Chk(shape.Path.SegmentCount == 2, $"a shape of 50 collinear points keeps {shape.Path.SegmentCount} segments");
+    }
+
     public static void Run()
     {
         Console.WriteLine("VectorText (stroke font, no font files):");

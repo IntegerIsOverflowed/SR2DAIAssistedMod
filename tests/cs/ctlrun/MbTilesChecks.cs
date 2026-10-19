@@ -52,6 +52,38 @@ static class MbTilesChecks
         Console.WriteLine($"wrote {file} {s.Width}x{s.Height}");
     }
 
+    static int PathSegments(Sr2d64CSport.VectorImage img) => img.Shapes.Sum(s => s.Path.SegmentCount);
+
+    // hairline lines by default, street names on or off, and QGIS-style simplification of a whole picture
+    public static void SimplifyAndHairlines()
+    {
+        var dir = FindDataDir();
+        Chk(dir != null, "tests/data/mbtiles found (simplify checks)");
+        using var mb = MbTiles.Open(Path.Combine(dir!, "chel-z11-smallpages.mbtiles"));
+        var plain = Sr2d64CSport.VectorImage.FromMbTiles(mb, new Sr2d64CSport.MbTilesView { Zoom = 11, Labels = false, Threads = 1 });
+        int outlines = plain.Shapes.Count(s => s.Stroke != null && !s.IsText);
+        Chk(outlines > 0 && plain.Shapes.Where(s => s.Stroke != null && !s.IsText).All(s => s.Hairline),
+            $"every outline of the map is a hairline by default ({outlines} outlines)");
+        var simp = Sr2d64CSport.VectorImage.FromMbTiles(mb, new Sr2d64CSport.MbTilesView { Zoom = 11, Labels = false, Threads = 1,
+            Simplify = new Sr2d64CSport.SimplifySettings { Tolerance = 2, Algorithm = Sr2d64CSport.SimplifyAlgorithm.Linear, ProviderSide = true } });
+        int segPlain = PathSegments(plain), segSimp = PathSegments(simp);
+        Chk(segSimp < segPlain, $"simplification at 2 px drops {segPlain - segSimp} of {segPlain} path segments");
+        var late = Sr2d64CSport.VectorImage.FromMbTiles(mb, new Sr2d64CSport.MbTilesView { Zoom = 11, Labels = false, Threads = 1,
+            Simplify = new Sr2d64CSport.SimplifySettings { Tolerance = 2, Algorithm = Sr2d64CSport.SimplifyAlgorithm.Linear, ProviderSide = false } });
+        Chk(PathSegments(late) == segSimp, $"simplifying the built picture gives the same result as per feature ({PathSegments(late)} segments)");
+        // street names need the city file (the small fixture has no road names at its level)
+        string? full = Environment.GetEnvironmentVariable("MBTILES_FILE");
+        if (!string.IsNullOrEmpty(full) && File.Exists(full))
+        {
+            using var big = MbTiles.Open(full);
+            var withNames = Sr2d64CSport.VectorImage.FromMbTiles(big, new Sr2d64CSport.MbTilesView { Zoom = 13, Threads = 1 });
+            var noNames = Sr2d64CSport.VectorImage.FromMbTiles(big, new Sr2d64CSport.MbTilesView { Zoom = 13, Threads = 1, StreetNames = false });
+            int textWith = withNames.Shapes.Count(s => s.Layer == null), textNo = noNames.Shapes.Count(s => s.Layer == null);   // labels have no map layer
+            Chk(textWith > 0 && textNo < textWith, $"Hide names of streets leaves fewer text shapes at z13 ({textWith} -> {textNo})");
+        }
+        else Console.WriteLine("  skip street-name check (set MBTILES_FILE to chelyabinsk.mbtiles)");
+    }
+
     public static void Run()
     {
         var dir = FindDataDir();

@@ -2109,7 +2109,9 @@ static class P {
     Wheels();
     ContainerButtonStyle();
     MbTilesChecks.Run();
+    MbTilesChecks.SimplifyAndHairlines();
     VectorTextChecks.Run();
+    VectorTextChecks.DotsAndSimplify();
     MouseClickEvents();
     Looks();
     Views();

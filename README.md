@@ -104,6 +104,7 @@ SR2D/
 │  ├─ Vector.cs / .Render.cs / .Svg.cs / .Anim.cs / .Ps.cs / .Pdf.cs   VectorImage model, rasteriser, SVG (SMIL animation, alpha masks) / PostScript-EPS-AI / PDF importers
 │  ├─ Vector.MbTiles.cs    MBTiles vector map tiles → VectorImage (+ default OpenMapTiles style)
 │  ├─ MbTiles.cs / Mvt.cs  read-only SQLite reader for .mbtiles (no NuGet) / protobuf MVT decoder
+│  ├─ Vector.Simplify.cs   QGIS-style simplification (Linear / Snap To Grid / Visvalingam)
 │  ├─ Vector.Cache.cs      VectorSprite: static raster cache + animated layer compositor
 │  ├─ Vector.Precompose.cs optional bounded bitmap-loop cache: bake once, DrawAt(t) = bitmap playback without vector evaluation
 │  ├─ Vector.Edit.cs       Container edits: Recolor / SwapColors / Palette (fill, stroke or both), by-name SetFill / SetStroke / Hide / Show / Remove, Merge, Shuffle, order
@@ -2245,6 +2246,29 @@ whole test file took 1.2-1.8 s with 2 threads against 1.4-1.8 s with 1 (the timi
 Limits: raster MBTiles (png / jpg) throw `NotSupportedException`; icons are not drawn. Labels are placed
 without collision checks, so dense streets can overlap. Loading a whole city at zoom 13 is tens of thousands
 of shapes, so pick a smaller `West/South/East/North` or a lower `Zoom` when you only need an overview.
+
+### Simplification and hairlines (`cs/Vector.Simplify.cs`)
+
+QGIS-style "Simplify geometry" for vector pictures. `SimplifySettings { Tolerance, Algorithm, ProviderSide }`:
+
+- `SimplifyAlgorithm.Linear` - Douglas-Peucker: drops points within the threshold of the line.
+- `SimplifyAlgorithm.SnapToGrid` - points move to the grid (the threshold is the cell size); repeats are dropped.
+- `SimplifyAlgorithm.Visvalingam` - removes the point with the smallest triangle first, until every triangle is at least threshold² in area.
+- `ProviderSide = true` (the default) simplifies each feature while the MBTiles tiles are read; `false` simplifies the built picture. The result is the same.
+
+```csharp
+var map = VectorImage.FromMbTiles("map.mbtiles", new MbTilesView {
+    Zoom = 13,
+    Simplify = new SimplifySettings { Tolerance = 1.0, Algorithm = SimplifyAlgorithm.Linear },  // null = off
+    HairlineAll = true,      // every line and outline is one device pixel, as in QGIS (default)
+    StreetNames = false,     // "hide names of streets"
+});
+img.Simplify(settings);      // any VectorImage (for example an SVG), in place
+```
+
+Thresholds are in picture units (for MBTiles, pixels at the zoom read). A shape that would collapse keeps its geometry. Not yet implemented: QGIS's "maximum scale" for simplification (simplification happens once, so there is no switch by drawn scale).
+
+`VectorTextPathOptions.Centred = true` puts the middle of the capitals on the path (road names use it).
 
 ### Text without fonts: `VectorText` (`cs/VectorText.cs`)
 

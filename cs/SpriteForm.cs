@@ -941,6 +941,14 @@ namespace Sr2d64CSport
             for (int i = 0; i < count; i++)
                 cols[i] = ScaleBrightness(BarColorAt(basis, i, d, sgn, steps), BarPercent(i, cycle, d, sgn));
             int left = p.RunX, wide = p.ClipW, x0 = left - shift;
+            if (stripeAnim == StripeAnimationMode.WrapOffset)
+            {
+                // The moving bars are painted into a scratch strip first; only the pixels inside the run's own slanted
+                // silhouette (the /____/ outline the bars make without animation) are copied to the buffer. The pattern
+                // slides inside the skewed edges; clipping to the rectangle would cut the edges square.
+                PaintSilhouette(s, cols, barStep, sk, h, left, wide, x0, p.RunW, stripeStyle == StripeBarsStyle.FullBars ? 0 : line);
+                return;
+            }
             if (stripeStyle == StripeBarsStyle.FullBars)
             {
                 s.SetLockRectXY(left, 0, wide, h);
@@ -953,6 +961,43 @@ namespace Sr2d64CSport
             s.SetLockRectXY(left, Math.Max(0, h - line), wide, line);     // ... and the bottom one
             Bars(s, cols, barStep, sk, h, x0);
             s.SetLockRect();
+        }
+
+        /// <summary>Scratch strip for the wrapped bars (reused between frames while the size stays).</summary>
+        Sprite? barStrip;
+
+        /// <summary>
+        /// Paints the wrapped bars into the scratch strip, then copies the pixels that lie inside the run's slanted
+        /// silhouette: at row centre y the run spans x in [sk*(h-y)/h, RunW - sk + sk*(h-y)/h) relative to the run's left
+        /// edge - the same footprint the bars have without animation. Only the rows of the top and bottom lines are
+        /// copied when the style is Lines (<paramref name="line"/> &gt; 0 means "lines only").
+        /// </summary>
+        void PaintSilhouette(Sprite s, int[] cols, double barStep, int sk, int h, int left, int wide, int x0, int runW, int line)
+        {
+            if (barStrip == null || barStrip.Width != wide || barStrip.Height != h)
+            {
+                barStrip?.Dispose();
+                barStrip = new Sprite(wide, h);
+            }
+            barStrip.ClearBuffer(0);
+            Bars(barStrip, cols, barStep, sk, h, x0 - left);       // bars in strip coordinates (0 = the run's left edge)
+            var src = barStrip.Pixels;
+            var dst = s.Pixels;
+            int stride = s.Width;
+            bool linesOnly = line > 0;
+            for (int y = 0; y < h; y++)
+            {
+                if (linesOnly && y >= line && y < h - line) continue;   // Lines style: only the top and bottom rows
+                double yc = y + 0.5;
+                double lo = sk * (h - yc) / h, hi = runW - sk + sk * (h - yc) / h;
+                int xa = (int)Math.Max(0, Math.Ceiling(lo - 0.5));          // pixel centre x + 0.5 >= lo
+                int xb = (int)Math.Min(wide, Math.Ceiling(hi - 0.5));       // pixel centre x + 0.5 <  hi
+                for (int x = xa; x < xb; x++)
+                {
+                    int c = src[y * wide + x];
+                    if (c != 0) dst[y * stride + left + x] = c;
+                }
+            }
         }
 
         /// <summary>The colours the bars are cut from, before the animation: the frame colours of a Custom handler, else

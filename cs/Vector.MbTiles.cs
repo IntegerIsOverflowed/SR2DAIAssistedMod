@@ -52,6 +52,18 @@ namespace Sr2d64CSport
         /// The style rule is called from several threads at once, so a rule that is not thread-safe needs 1.
         /// </summary>
         public int Threads = 0;
+        /// <summary>
+        /// Every line and outline is a hairline: one device pixel at any zoom, as QGIS draws them. Roads, boundaries and
+        /// building outlines are then thin at every scale. False keeps the widths of the style rule.
+        /// </summary>
+        public bool HairlineAll = true;
+        /// <summary>Street names (road labels). False: no road names; place names are still drawn.</summary>
+        public bool StreetNames = true;
+        /// <summary>
+        /// QGIS-style simplification of the features (null or Tolerance 0 = off). Applied per feature while the tiles are
+        /// read when <see cref="SimplifySettings.ProviderSide"/> is true, else to the built picture.
+        /// </summary>
+        public SimplifySettings? Simplify;
     }
 
     /// <summary>Default colours and widths for the OpenMapTiles schema that tilemaker writes.</summary>
@@ -231,15 +243,17 @@ namespace Sr2d64CSport
                         if (paint == null) continue;
                         int before = shapes.Count;
                         AddFeature(shapes, f, paint.Value, ox, oy, k, zs, view.SeamWidth);
+                        bool simplifyHere = view.Simplify is { On: true, ProviderSide: true };
                         for (int j = before; j < shapes.Count; j++)
                         {
                             shapes[j].Shape.Layer = ln;
-                            shapes[j].Shape.Hairline = paint.Value.Hairline;
+                            shapes[j].Shape.Hairline = paint.Value.Hairline || view.HairlineAll;
+                            if (simplifyHere) VectorSimplify.Apply(shapes[j].Shape, view.Simplify!);
                         }
                     }
                     if (view.Labels)
                         foreach (var f in layer.Features)
-                            if (layer.Name == "transportation_name" || layer.Name == "place")
+                            if (layer.Name == "transportation_name" ? view.StreetNames : layer.Name == "place")
                                 AddLabel(shapes, layer.Name, f, ox, oy, k, zoom, labelNames);
                 }
             }
@@ -254,6 +268,7 @@ namespace Sr2d64CSport
 
             // LINQ OrderBy is stable: features keep their order inside one rank, so roads stay above land across tile borders
             foreach (var d in drawn.OrderBy(d => d.Rank)) img.Shapes.Add(d.Shape);
+            if (view.Simplify is { On: true, ProviderSide: false }) img.Simplify(view.Simplify);
             if (!view.Labels) img.Warnings.Add("MBTiles: labels are off (geometry only).");
             else img.Warnings.Add("MBTiles: road and place names are drawn as vector text; icons are not drawn.");
             img.Touch();
@@ -373,7 +388,8 @@ namespace Sr2d64CSport
                     float dx = pts[pts.Count - 1].X - pts[0].X, dy = pts[pts.Count - 1].Y - pts[0].Y;
                     // reading left to right (vertical roads: bottom to top); the text stays above the line
                     if (dx < 0 || (Math.Abs(dx) < 1e-3f && dy > 0)) pts.Reverse();
-                    var label = VectorText.OnPath(name, pts, size, new VectorTextPathOptions { Align = VectorTextAlign.Center, Above = true });
+                    // centred on the road: the middle of the capitals sits on the line
+                    var label = VectorText.OnPath(name, pts, size, new VectorTextPathOptions { Align = VectorTextAlign.Center, Centred = true });
                     foreach (var s in label.Shapes) into.Add((LabelRank, s));
                 }
             }
