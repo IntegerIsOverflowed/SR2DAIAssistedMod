@@ -200,7 +200,10 @@ namespace Sr2d64CSport
                     float cross = d0x * d1y - d0y * d1x, dot = d0x * d1x + d0y * d1y;
                     float th = MathF.Atan2(MathF.Abs(cross), dot);
                     if (th < 1e-4f) continue;
-                    if (hw * hw * (th - MathF.Sin(th)) * 0.5f < 0.002f && s.Join != VectorJoin.Miter) continue;   // invisible wedge
+                    // Skip a join only when its wedge (the triangle pc, pc+n0, pc+n1 that closes the notch on the outer side)
+                    // is negligible. The old test compared the arc with the triangle and dropped the whole wedge, which left
+                    // a visible notch at every shallow vertex of a stroke (seams, worst at small zooms where hw is a few px).
+                    if (hw * hw * MathF.Sin(th) * 0.5f < 0.01f && s.Join != VectorJoin.Miter) continue;   // negligible wedge
                     float sgn = cross < 0 ? 1f : -1f;                      // outer side
                     float n0x = -d0y * hw * sgn, n0y = d0x * hw * sgn, n1x = -d1y * hw * sgn, n1y = d1x * hw * sgn;
                     int st = o.Count;

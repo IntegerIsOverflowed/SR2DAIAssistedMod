@@ -1,6 +1,9 @@
-// Seam check for the outline text: a direct anti-aliased draw is compared with an 8x supersampled reference,
-// averaged back down to the same pixels. A seam (a thin gap where two pieces of the stroke meet) shows as a dip in the
-// direct draw that the reference does not have.
+// Coverage check for the outline text. Three renders of the same picture are compared per pixel:
+//   direct : the normal anti-aliased draw at device scale (what the user sees)
+//   ref8   : anti-aliased draw at 8x, averaged back down (the old reference)
+//   truth  : NON-anti-aliased draw at 16x, averaged over each device pixel. A non-AA fill tests the pixel centre only,
+//            so 16x16 point samples per pixel give the true coverage with no edge filter in the loop.
+// A seam is a dip in direct that truth does not have. The report says which of direct / ref8 is closer to truth.
 using System;
 using System.IO;
 using System.Numerics;
@@ -28,20 +31,30 @@ static class OutlineSeamChecks
             const int S = 8;
             var big = new Sprite(W * S, H * S); big.ClearBuffer(White);
             pic.Draw(big, Map(S));
-            var bp = big.Pixels;
-            double max = 0; int over = 0;
+
+            const int T = 16;
+            var truthBig = new Sprite(W * T, H * T); truthBig.ClearBuffer(White);
+            pic.Draw(truthBig, Map(T), new VectorRenderOptions { AA = false });
+
+            var bp = big.Pixels; var tp = truthBig.Pixels;
+            double maxD = 0, maxR = 0; int overD = 0, overR = 0;
             for (int y = 0; y < H; y++)
                 for (int x = 0; x < W; x++)
                 {
-                    int sum = 0;
+                    int sum = 0, tsum = 0;
                     for (int j = 0; j < S; j++)
                         for (int i = 0; i < S; i++) sum += bp[(y * S + j) * big.Width + x * S + i] & 0xff;
-                    double refV = sum / (double)(S * S);
-                    double d = Math.Abs((direct.Pixels[y * W + x] & 0xff) - refV) / 255.0;
-                    if (d > max) max = d;
-                    if (d > 0.25) over++;
+                    for (int j = 0; j < T; j++)
+                        for (int i = 0; i < T; i++) tsum += tp[(y * T + j) * truthBig.Width + x * T + i] & 0xff;
+                    double refV = sum / (double)(S * S), truth = tsum / (double)(T * T);
+                    double dd = Math.Abs((direct.Pixels[y * W + x] & 0xff) - truth) / 255.0;
+                    double dr = Math.Abs(refV - truth) / 255.0;
+                    if (dd > maxD) maxD = dd;
+                    if (dr > maxR) maxR = dr;
+                    if (dd > 0.25) overD++;
+                    if (dr > 0.25) overR++;
                 }
-            Console.WriteLine($"  seams {pos} zoom {zoom:0.00} (cap 28): worst pixel {max:0.00} of 1.00, {over} px differ by more than 0.25");
+            Console.WriteLine($"  seams {pos} zoom {zoom:0.00}: direct vs truth worst {maxD:0.00}, {overD} px > 0.25; ref8 vs truth worst {maxR:0.00}, {overR} px > 0.25");
             File.WriteAllBytes(Path.Combine(outDir, $"seam_{pos}_{zoom:0.00}.png"), Png.Encode(direct.Pixels, direct.Width, direct.Height));
         }
     }
