@@ -57,5 +57,18 @@ static class OutlineSeamChecks
             Console.WriteLine($"  seams {pos} zoom {zoom:0.00}: direct vs truth worst {maxD:0.00}, {overD} px > 0.25; ref8 vs truth worst {maxR:0.00}, {overR} px > 0.25");
             File.WriteAllBytes(Path.Combine(outDir, $"seam_{pos}_{zoom:0.00}.png"), Png.Encode(direct.Pixels, direct.Width, direct.Height));
         }
+
+        // VectorRenderOptions.Wireframe: the hairline overlay has the wireframe colour only when the option is on
+        int wire = unchecked((int)0xFFE0245E);
+        var wpic = VectorText.Create("OBD", 40f, new VectorTextStyle { Bold = true, Color = Black });
+        var off = new Sprite(200, 80); off.ClearBuffer(White);
+        var on = new Sprite(200, 80); on.ClearBuffer(White);
+        var mw = Matrix3x2.CreateTranslation(10 - wpic.ViewBox.X, 10 - wpic.ViewBox.Y);
+        wpic.Draw(off, mw, new VectorRenderOptions { Wireframe = false });
+        wpic.Draw(on, mw, new VectorRenderOptions { Wireframe = true });
+        int countOff = 0, countOn = 0;
+        for (int i = 0; i < off.Pixels.Length; i++) { if ((off.Pixels[i] & 0xFFFFFF) == (wire & 0xFFFFFF)) countOff++; if ((on.Pixels[i] & 0xFFFFFF) == (wire & 0xFFFFFF)) countOn++; }
+        Console.WriteLine($"  wireframe: {countOn} overlay pixels with the flag, {countOff} without");
+        if (countOn == 0 || countOff != 0) { Console.WriteLine("FAIL wireframe overlay"); Environment.Exit(1); }
     }
 }

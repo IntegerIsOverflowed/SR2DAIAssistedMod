@@ -278,7 +278,7 @@ namespace Sr2d64CSport
         {
             var wire = new VectorImage { Title = pic.Title, ViewBox = pic.ViewBox, Width = pic.Width, Height = pic.Height };
             foreach (var s in pic.Shapes)
-                wire.Shapes.Add(new VectorShape(s.Path, null, new VectorColor(argb), 1f) { Hairline = true, Transform = s.Transform, BaseTransform = s.BaseTransform });
+                if (s.IsVisible) wire.Shapes.Add(new VectorShape(s.Path, null, new VectorColor(argb), 1f) { Hairline = true, Transform = s.Transform, BaseTransform = s.BaseTransform });
             return wire;
         }
 

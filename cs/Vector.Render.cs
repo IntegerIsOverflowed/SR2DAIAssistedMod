@@ -28,6 +28,10 @@ namespace Sr2d64CSport
         public bool FastLines { get; set; }
         /// <summary>Ignore per-shape clips (faster previews).</summary>
         public bool IgnoreClips { get; set; }
+        /// <summary>Draw the outline of every visible shape on top, as a one-pixel hairline (geometry check; clips are not applied to it).</summary>
+        public bool Wireframe { get; set; }
+        /// <summary>Colour of the wireframe overlay (ARGB).</summary>
+        public int WireframeColor = unchecked((int)0xFFE0245E);
         /// <summary>Replace every paint by this colour (silhouette / shadow rendering); alpha is kept per shape.</summary>
         public int? ForceColor { get; set; }
         public static readonly VectorRenderOptions Default = new VectorRenderOptions();
@@ -332,7 +336,15 @@ namespace Sr2d64CSport
         }
 
         // ------------------------------------------------------------------ drawing
+        /// <summary>Draws a picture. With <see cref="VectorRenderOptions.Wireframe"/> the outline of every visible shape is drawn on top.</summary>
         public static void Draw(VectorImage img, Sprite dst, Matrix3x2 m, VectorRenderOptions o)
+        {
+            DrawShapes(img, dst, m, o);
+            if (o.Wireframe) DrawShapes(VectorText.Wireframe(img, o.WireframeColor), dst, m, WireframeOptions(o));
+        }
+        static VectorRenderOptions WireframeOptions(VectorRenderOptions o) =>
+            new VectorRenderOptions { AA = true, Opacity = o.Opacity, Premultiplied = o.Premultiplied, Tolerance = o.Tolerance };
+        static void DrawShapes(VectorImage img, Sprite dst, Matrix3x2 m, VectorRenderOptions o)
         {
             var clipRect = dst.LockRect; if (clipRect.Width <= 0 || clipRect.Height <= 0) return;
             bool premul = o.Premultiplied ?? dst.Premultiplied;
