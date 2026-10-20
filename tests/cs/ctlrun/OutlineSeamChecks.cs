@@ -141,6 +141,61 @@ static class OutlineSeamChecks
             Console.WriteLine($"  bake nodes (OBD inside): {nodes} segments in {baked.Shapes.Count} shapes");
         }
 
+        // the demo's full SampleSvg drawn like the import test (fit x scale, Draw with the demo options)
+        {
+            const string fsvg = @"<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 200 200'><defs><linearGradient id='g' x1='0' y1='0' x2='1' y2='1'><stop offset='0' stop-color='#ffcc33'/><stop offset='1' stop-color='#ff3366'/></linearGradient><radialGradient id='r'><stop offset='0' stop-color='#fff'/><stop offset='1' stop-color='#3366ff'/></radialGradient></defs><rect x='10' y='10' width='180' height='180' rx='24' fill='url(#g)' stroke='#402' stroke-width='4'/><circle cx='70' cy='70' r='40' fill='url(#r)' fill-opacity='0.9'/><path d='M40 150 C 70 100, 110 190, 160 130' fill='none' stroke='#fff' stroke-width='8' stroke-linecap='round' stroke-dasharray='20 10'/><polygon points='150,30 165,70 205,70 172,95 185,135 150,110 115,135 128,95 95,70 135,70' fill='#33aa55' stroke='#062' stroke-width='3' stroke-linejoin='round' transform='translate(-10 5) scale(0.8) rotate(10 150 80)'/><ellipse cx='100' cy='170' rx='60' ry='14' fill='#202020' fill-opacity='0.35'/><path d='M30 120 h40 v-20 h-40 z M40 110 h20 v0' fill='#ffffff' fill-rule='evenodd' opacity='0.7'/></svg>";
+            var fimg = VectorImage.FromSvg(fsvg);
+            foreach (var fs in fimg.Shapes) if (fs.Dash != null) Console.WriteLine($"  demo-dash: after load dash {string.Join(" ", fs.Dash)}, transform {fs.Transform.M11:0.###}/{fs.Transform.M22:0.###}, width {fs.StrokeWidth}");
+            var fcan = new Sprite(600, 600); fcan.ClearBuffer(Black);
+            var fo = new VectorRenderOptions { AA = true, Opacity = 1f, Strokes = true, Fills = true };
+            fimg.Draw(fcan, 20, 20, 1.2f, 1.2f, 0f, fo, 0.5f, 0.5f);
+            foreach (var fs in fimg.Shapes) if (fs.Dash != null) Console.WriteLine($"  demo-dash: after draw dash {string.Join(" ", fs.Dash)}");
+            int flit = 0; for (int i = 0; i < fcan.Pixels.Length; i++) if ((fcan.Pixels[i] & 0xff) > 0x80) flit++;
+            Console.WriteLine($"  demo-dash: white pixels {flit}");
+            foreach (var aa in new[] { true, false }) foreach (var op in new[] { 1f, 0.5f })
+            {
+                var qcan = new Sprite(600, 600); qcan.ClearBuffer(Black);
+                fimg.Draw(qcan, 20, 20, 1.5f, 1.5f, 0f, new VectorRenderOptions { AA = aa, Opacity = op, Strokes = true, Fills = true }, 0.5f, 0.5f);
+                int qlit = 0; for (int i = 0; i < qcan.Pixels.Length; i++) if ((qcan.Pixels[i] & 0xff) > 0x80) qlit++;
+                Console.WriteLine($"  demo-dash: AA {aa} opacity {op}: white pixels {qlit}");
+            }
+            {
+                var solidImg = VectorImage.FromSvg(fsvg);
+                foreach (var ss in solidImg.Shapes) ss.Dash = null;
+                foreach (var sc in new[] { 1f, 1.5f, 3.4f })
+                {
+                    var dA = new Sprite(900, 900); dA.ClearBuffer(Black); var sA = new Sprite(900, 900); sA.ClearBuffer(Black);
+                    var oo = new VectorRenderOptions { AA = false, Opacity = 1f, Strokes = true, Fills = false };
+                    fimg.Draw(dA, 20, 20, sc, sc, 0f, oo, 0.5f, 0.5f);
+                    solidImg.Draw(sA, 20, 20, sc, sc, 0f, oo, 0.5f, 0.5f);
+                    int ld = 0, ls = 0; for (int i = 0; i < dA.Pixels.Length; i++) { if ((dA.Pixels[i] & 0xff) > 0x80) ld++; if ((sA.Pixels[i] & 0xff) > 0x80) ls++; }
+                    Console.WriteLine($"  demo-dash: scale {sc}: dashed {ld} px, solid {ls} px");
+                    if (sc == 3.4f) { bool gaps = ld < ls * 0.95; Console.WriteLine($"  {(gaps ? "ok  " : "FAIL")} dash gaps at demo scale 3.4 ({ld} dashed vs {ls} solid)"); if (!gaps) Environment.Exit(1); }
+                    if (sc == 3.4f) { Directory.CreateDirectory("/tmp/ctlout"); File.WriteAllBytes("/tmp/ctlout/dash_demo_34.png", Png.Encode(dA.Pixels, dA.Width, dA.Height)); File.WriteAllBytes("/tmp/ctlout/solid_demo_34.png", Png.Encode(sA.Pixels, sA.Width, sA.Height)); }
+                }
+            }
+            var vsc = fimg.Cached; vsc.AA = true; vsc.Opacity = 1f; vsc.Fills = true;
+            var ccan = new Sprite(600, 600); ccan.ClearBuffer(Black);
+            vsc.Draw(ccan, 20, 20, 1.2f, 1.2f, 0f, 0.5f, 0.5f);
+            foreach (var fs in fimg.Shapes) if (fs.Dash != null) Console.WriteLine($"  demo-dash: after cached draw dash {string.Join(" ", fs.Dash)}");
+            int clit = 0; for (int i = 0; i < ccan.Pixels.Length; i++) if ((ccan.Pixels[i] & 0xff) > 0x80) clit++;
+            Console.WriteLine($"  demo-dash: cached white pixels {clit}");
+        }
+        // dashed stroke of the demo's sample SVG (stroke-dasharray 20 10, round caps): must show gaps
+        {
+            const string dsvg = "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 200 200'><path d='M40 150 C 70 100, 110 190, 160 130' fill='none' stroke='#fff' stroke-width='8' stroke-linecap='round' stroke-dasharray='20 10'/></svg>";
+            var dimg = VectorImage.FromSvg(dsvg);
+            foreach (var ds in dimg.Shapes) Console.WriteLine($"  dash: stroke {ds.Stroke != null}, width {ds.StrokeWidth}, dash {(ds.Dash == null ? "null" : string.Join(" ", ds.Dash))}, cap {ds.Cap}");
+            var dsp = new Sprite(200, 200); dsp.ClearBuffer(Black);
+            foreach (var mt in new[] { Matrix3x2.Identity, Matrix3x2.CreateScale(2.5f), Matrix3x2.CreateScale(1.5f) * Matrix3x2.CreateTranslation(20, 10), Matrix3x2.CreateRotation(0.3f) * Matrix3x2.CreateScale(2f, 1.2f) })
+            {
+                var msp = new Sprite(600, 600); msp.ClearBuffer(Black);
+                dimg.Draw(msp, mt * Matrix3x2.CreateTranslation(0, 0), new VectorRenderOptions { AA = true, Opacity = 1f, Strokes = true, Fills = true });
+                int lit = 0; for (int i = 0; i < msp.Pixels.Length; i++) if ((msp.Pixels[i] & 0xff) > 0x80) lit++;
+                Console.WriteLine($"  dash: matrix {mt.M11:0.00},{mt.M12:0.00},{mt.M21:0.00},{mt.M22:0.00}: white pixels {lit}");
+            }
+        }
+
         // sample sheet for the user's SVG editor: the three positions, bold, outlines baked (no clipPath anywhere)
         var sheet = new VectorImage { Title = "Outline positions (baked)" };
         float y = 0; float maxW = 0;

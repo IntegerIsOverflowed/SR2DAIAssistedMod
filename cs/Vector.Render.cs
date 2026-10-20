@@ -157,12 +157,19 @@ namespace Sr2d64CSport
 
         // ------------------------------------------------------------------ stroking (local space, then transformed)
         /// <summary>Builds the outline of a stroke as positively oriented contours (union under non-zero winding).</summary>
-        public static void Stroke(List<PointF> pts, List<(int start, int count, bool closed)> subs, VectorShape s, float width, List<PointF> o, List<int> oCnt)
+        /// <param name="dashScale">Factor from the dash units (the shape's local units) to the points' units: the mean scale when the points are in device space.</param>
+        public static void Stroke(List<PointF> pts, List<(int start, int count, bool closed)> subs, VectorShape s, float width, List<PointF> o, List<int> oCnt, float dashScale = 1f)
         {
             float hw = width / 2;
             var dash = s.Dash != null && s.Dash.Length > 0 && AnyPositive(s.Dash) ? s.Dash : null;
             List<PointF>? dpts = null; List<(int, int, bool)>? dsubs = null;
-            if (dash != null) { dpts = new List<PointF>(); dsubs = new List<(int, int, bool)>(); if (ApplyDash(pts, subs, dash, s.DashOffset, dpts, dsubs)) { pts = dpts; subs = dsubs; } }
+            if (dash != null)
+            {
+                // the dash pattern is in local units; scale it into the points' units (it was ignored before: device-space dashes filled their gaps)
+                var dd = new float[dash.Length]; for (int i = 0; i < dash.Length; i++) dd[i] = dash[i] * dashScale;
+                dpts = new List<PointF>(); dsubs = new List<(int, int, bool)>();
+                if (ApplyDash(pts, subs, dd, s.DashOffset * dashScale, dpts, dsubs)) { pts = dpts; subs = dsubs; }
+            }
             foreach (var (start, count, closed) in subs)
             {
                 if (count == 1 || (count == 2 && Same(pts[start], pts[start + 1])))
@@ -313,7 +320,7 @@ namespace Sr2d64CSport
             if (s.Stroke != null)
             {
                 var o = new List<PointF>(); var oc = new List<int>();
-                Stroke(pts, subs, s, s.Hairline ? 1f : MathF.Max(s.StrokeWidth * MeanScale(s.Transform), 1f), o, oc);
+                Stroke(pts, subs, s, s.Hairline ? 1f : MathF.Max(s.StrokeWidth * MeanScale(s.Transform), 1f), o, oc, MeanScale(s.Transform));
                 var ss = new List<(int, int, bool)>(); int st = 0; foreach (var c in oc) { ss.Add((st, c, true)); st += c; }
                 return Inside(o, ss, p, false);
             }
@@ -440,13 +447,13 @@ namespace Sr2d64CSport
                     op.Clear(); opc.Clear();
                     if (IsUniform(t))
                     {   // uniform scale / rotation: stroke straight in device space
-                        Stroke(pts, subs, s, sw, op, opc);
+                        Stroke(pts, subs, s, sw, op, opc, MeanScale(t));
                     }
                     else
                     {   // squished: stroke in local space (width in local units), then transform the outline
                         var lp = new List<PointF>(); var ls = Flatten(s.Path, Matrix3x2.Identity, tol / scale, lp);
                         float lw = s.Hairline ? 1f / MathF.Max(MeanScale(t), 1e-6f) : MathF.Max(s.StrokeWidth, o.MinStrokeWidth / MeanScale(t));
-                        Stroke(lp, ls, s, lw, op, opc);
+                        Stroke(lp, ls, s, lw, op, opc);   // local points: the dash is already in their units
                         for (int i = 0; i < op.Count; i++) { var v = Vector2.Transform(new Vector2(op[i].X, op[i].Y), t); op[i] = new PointF(v.X, v.Y); }
                         if (t.M11 * t.M22 - t.M12 * t.M21 < 0) { int st = 0; foreach (var c in opc) { op.Reverse(st, c); st += c; } }   // mirrored: keep positive orientation
                     }
