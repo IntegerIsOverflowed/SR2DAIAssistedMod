@@ -15,6 +15,38 @@ using System.Numerics;
 
 namespace Sr2d64CSport
 {
+    /// <summary>
+    /// Vector text for applications: the SR2D outline font (straight segments, corners rounded by style.Radius, 0 = sharp).
+    /// Size is the cap height in pixels. The text is drawn as outlines, so it scales without loss.
+    /// </summary>
+    public unsafe partial class Sprite
+    {
+        /// <summary>
+        /// Draws text as vector outlines. (x, y) = the top-left corner of the text box; capHeight = the cap height in pixels;
+        /// color = the ink colour (ARGB). style = optional font and shape options (its Color is not changed).
+        /// Returns the box drawn: the ink plus the outline padding, in pixels.
+        /// </summary>
+        public RectangleF DrawVectorText(string text, float x, float y, float capHeight, int color, VectorTextStyle? style = null)
+        {
+            var pic = VectorTextPicture(text, capHeight, color, style);
+            pic.Draw(this, System.Numerics.Matrix3x2.CreateTranslation(x - pic.ViewBox.X, y - pic.ViewBox.Y));
+            return new RectangleF(x, y, pic.ViewBox.Width, pic.ViewBox.Height);
+        }
+
+        /// <summary>Width of the box <see cref="DrawVectorText"/> returns for the same text, size and style, in pixels.</summary>
+        public float VectorTextWidth(string text, float capHeight, VectorTextStyle? style = null)
+            => VectorTextPicture(text, capHeight, unchecked((int)0xFF000000), style).ViewBox.Width;
+
+        static VectorImage VectorTextPicture(string text, float capHeight, int color, VectorTextStyle? style)
+        {
+            var st = style ?? new VectorTextStyle();
+            int saved = st.Color;
+            st.Color = color;                       // the colour is read by Create; the caller's style gets it back below
+            try { return VectorText.Create(text, capHeight, st); }
+            finally { st.Color = saved; }
+        }
+    }
+
     /// <summary>How text is drawn. Size is the cap height in image units.</summary>
     public sealed class VectorTextStyle
     {
@@ -113,20 +145,16 @@ namespace Sr2d64CSport
             style ??= new VectorTextStyle();
             float s = size / CapHeight;
             var path = new VectorPath();
+            var sides = new List<(VectorPath Contour, VectorOutlinePosition Side)>();
             float pen = 0;
             foreach (char c in text)
             {
                 float ox = pen + Lsb(c, style);
                 foreach (var st in GlyphStrokes(c, style))
-                {
-                    if (st.P.Count < 2) continue;
-                    path.MoveTo(Map(st.P[0], ox, s, style.Italic));
-                    for (int i = 1; i < st.P.Count; i++) path.LineTo(Map(st.P[i], ox, s, style.Italic));
-                    if (st.Closed) path.Close();
-                }
+                    AddStroke(path, sides, st, p => Map(p, ox, s, style.Italic));
                 pen += Advance(c, style);
             }
-            return Picture(path, size, style, text);
+            return Picture(path, sides, size, style, text);
         }
 
         /// <summary>
@@ -157,30 +185,27 @@ namespace Sr2d64CSport
                 };
             }
             var path = new VectorPath();
+            var sides = new List<(VectorPath Contour, VectorOutlinePosition Side)>();
             float pen = 0;
             foreach (char c in text)
             {
                 float ox = pen + Lsb(c, style);
-                foreach (var st in GlyphStrokes(c, style))
+                PointF Mapped(PointF p)
                 {
-                    if (st.P.Count < 2) continue;
-                    PointF Mapped(PointF p)
-                    {
-                        float gx = p.X + (style.Italic ? p.Y * 0.2f : 0f), gy = p.Y;
-                        float d = start + (ox + gx - inkLo) * s * f;  // distance along the path (image units); the ink starts at start
-                        var (at, tx, ty) = pl.At(d);
-                        // up = (ty, -tx) in y-down screen space. Glyphs stay upright either way;
-                        // below the path the glyph's top sits on the line and the body hangs under it.
-                        float h = (options.Centred ? gy - CapHeight / 2f : options.Above ? gy : gy - CapHeight) * s;
-                        return new PointF(at.X + h * ty, at.Y - h * tx);
-                    }
-                    path.MoveTo(Mapped(st.P[0]));
-                    for (int i = 1; i < st.P.Count; i++) path.LineTo(Mapped(st.P[i]));
-                    if (st.Closed) path.Close();
+                    float gx = p.X + (style.Italic ? p.Y * 0.2f : 0f), gy = p.Y;
+                    float d = start + (ox + gx - inkLo) * s * f;  // distance along the path (image units); the ink starts at start
+                    var (at, tx, ty) = pl.At(d);
+                    // up = (ty, -tx) in y-down screen space. Glyphs stay upright either way;
+                    // below the path the glyph's top sits on the line and the body hangs under it.
+                    float h = (options.Centred ? gy - CapHeight / 2f : options.Above ? gy : gy - CapHeight) * s;
+                    return new PointF(at.X + h * ty, at.Y - h * tx);
                 }
+
+                foreach (var st in GlyphStrokes(c, style))
+                    AddStroke(path, sides, st, Mapped);
                 pen += Advance(c, style);
             }
-            return Picture(path, size, style, text);
+            return Picture(path, sides, size, style, text);
         }
 
         // ------------------------------------------------------------------ internals
@@ -191,18 +216,83 @@ namespace Sr2d64CSport
             return new PointF(x * s, -p.Y * s);                              // flip: glyphs are y-up, the picture is y-down
         }
 
-        static VectorImage Picture(VectorPath path, float size, VectorTextStyle style, string text)
+        /// <summary>
+        /// Adds one glyph stroke. An open stroke, or a closed outline whose stroke is centred, goes into the main path.
+        /// A closed outline with its stroke Inside or Outside becomes its own contour: its nodes stay where the rounded
+        /// glyph puts them, and <see cref="Picture"/> gives it a clip.
+        /// </summary>
+        static void AddStroke(VectorPath path, List<(VectorPath Contour, VectorOutlinePosition Side)> sides, Stroke st, Func<PointF, PointF> map)
+        {
+            if (st.P.Count < 2) return;
+            bool own = st.Closed && st.Side != VectorOutlinePosition.Center;
+            var target = own ? new VectorPath() : path;
+            target.MoveTo(map(st.P[0]));
+            for (int i = 1; i < st.P.Count; i++) target.LineTo(map(st.P[i]));
+            if (st.Closed) target.Close();
+            if (own) sides.Add((target, st.Side));
+        }
+
+        /// <summary>
+        /// The picture. The main path is stroked centred (width = the stroke). Each Inside / Outside contour is stroked
+        /// twice as wide, centred on the unmoved contour, and clipped to its interior (Inside) or to its exterior (Outside),
+        /// so the visible band is one stroke wide on that side, and the curve keeps its exact nodes and corners.
+        /// </summary>
+        static VectorImage Picture(VectorPath path, List<(VectorPath Contour, VectorOutlinePosition Side)> sides, float size, VectorTextStyle style, string text)
         {
             var img = new VectorImage { Title = text };
             float sw = Math.Max(0.5f, size * style.StrokeFraction);
-            var shape = new VectorShape(path, null, new VectorColor(style.Color), sw) { Join = style.Join, Cap = style.Cap, MiterLimit = 4f };
-            img.Shapes.Add(shape);
-            var b = path.IsEmpty ? new RectangleF(0, 0, 1, 1) : path.ControlBounds();
-            float pad = sw * 0.5f * (style.Join == VectorJoin.Miter ? 4f : 1f);   // a miter can reach 4 half-widths out
+            float miter = style.Join == VectorJoin.Miter ? 4f : 1f;   // a miter can reach 4 half-widths out
+            if (!path.IsEmpty)
+                img.Shapes.Add(new VectorShape(path, null, new VectorColor(style.Color), sw) { Join = style.Join, Cap = style.Cap, MiterLimit = 4f });
+            bool anyOutside = false;
+            foreach (var (contour, side) in sides)
+            {
+                var shape = new VectorShape(contour, null, new VectorColor(style.Color), 2 * sw) { Join = style.Join, Cap = style.Cap, MiterLimit = 4f };
+                if (side == VectorOutlinePosition.Inside) shape.Clip = new VectorClip(contour);
+                else { shape.Clip = OutsideClip(contour, sw * miter + 1f); anyOutside = true; }
+                img.Shapes.Add(shape);
+            }
+            RectangleF? box = null;
+            void Grow(VectorPath p)
+            {
+                if (p.IsEmpty) return;
+                var r = p.ControlBounds();
+                box = box.HasValue ? RectangleF.Union(box.Value, r) : r;
+            }
+            Grow(path);
+            foreach (var (contour, _) in sides) Grow(contour);
+            var b = box ?? new RectangleF(0, 0, 1, 1);
+            float pad = sw * 0.5f * miter;
+            if (anyOutside) pad = sw * miter;                          // the outside band reaches a full stroke width out
             img.ViewBox = new RectangleF(b.Left - pad, b.Top - pad, Math.Max(1f, b.Width + 2 * pad), Math.Max(1f, b.Height + 2 * pad));
             img.Width = img.ViewBox.Width;
             img.Height = img.ViewBox.Height;
             return img;
+        }
+
+        /// <summary>
+        /// A wireframe of a picture, for checking the geometry: every shape's path as a one-pixel hairline in colour
+        /// argb, with no fill and no clip. Same ViewBox as the picture, so it can be drawn over it with the same matrix.
+        /// </summary>
+        public static VectorImage Wireframe(VectorImage pic, int argb)
+        {
+            var wire = new VectorImage { Title = pic.Title, ViewBox = pic.ViewBox, Width = pic.Width, Height = pic.Height };
+            foreach (var s in pic.Shapes)
+                wire.Shapes.Add(new VectorShape(s.Path, null, new VectorColor(argb), 1f) { Hairline = true, Transform = s.Transform, BaseTransform = s.BaseTransform });
+            return wire;
+        }
+
+        /// <summary>
+        /// Everything outside a closed contour, within its bounds grown by margin: a rectangle with the contour as a hole
+        /// (even-odd). Used as the clip of an Outside outline.
+        /// </summary>
+        static VectorClip OutsideClip(VectorPath contour, float margin)
+        {
+            var r = contour.ControlBounds();
+            r.Inflate(margin, margin);
+            var p = new VectorPath().Rect(r.Left, r.Top, r.Width, r.Height);
+            p.Append(contour);
+            return new VectorClip(p, true);
         }
 
         /// <summary>Advance of a character in font units, tracking included.</summary>
@@ -226,6 +316,7 @@ namespace Sr2d64CSport
         {
             public List<PointF> P = new List<PointF>();
             public bool Closed;
+            public VectorOutlinePosition Side;
         }
 
         /// <summary>The glyph's strokes in font units (y up), squeezed for Monospace and rounded at the corners.</summary>
@@ -239,18 +330,12 @@ namespace Sr2d64CSport
                 var pts = raw.P.Select(p => new PointF(p.X * kx, p.Y)).ToList();
                 var rounded = Round(pts, raw.Closed, style.Radius, style.TipDrop);
                 if (!raw.Closed) rounded = LengthenOpen(rounded, style.StrokeFraction * CapHeight);   // dots (. : i ё) get the stroke width as length
-                if (raw.Closed && style.OutlinePosition != VectorOutlinePosition.Center)
-                    rounded = OffsetOutline(rounded, style.OutlinePosition, style.StrokeFraction * CapHeight / 2f);
-                list.Add(new Stroke { P = rounded, Closed = raw.Closed });
+                // a closed outline keeps its nodes: Inside / Outside is drawn by a clip in Picture, not by moving the curve
+                list.Add(new Stroke { P = rounded, Closed = raw.Closed, Side = raw.Closed ? style.OutlinePosition : VectorOutlinePosition.Center });
             }
             return list;
         }
 
-        /// <summary>
-        /// Moves a closed outline by half the stroke width, inward (Inside) or outward (Outside), so the stroke lies
-        /// inside or outside the glyph. Each corner is mitred on the offset line; where the mitre would be longer
-        /// than 4 half-widths, the corner is bevelled there instead.
-        /// </summary>
         /// <summary>
         /// An open stroke shorter than the stroke width (a dot, a 0-length period) is extended at both ends, each end
         /// pushed outwards along its own direction, until it is <paramref name="minLen"/> long. With the butt caps the
@@ -275,42 +360,6 @@ namespace Sr2d64CSport
             list[0] = new PointF((float)(p[0].X + sx / sl * need), (float)(p[0].Y + sy / sl * need));
             list[n - 1] = new PointF((float)(p[n - 1].X + ex / el * need), (float)(p[n - 1].Y + ey / el * need));
             return list;
-        }
-
-        static List<PointF> OffsetOutline(List<PointF> p, VectorOutlinePosition where, float hw)
-        {
-            // drop repeated points (the rounding can repeat the end of a curve)
-            var q = new List<PointF>(p.Count);
-            foreach (var pt in p)
-                if (q.Count == 0 || MathF.Abs(q[^1].X - pt.X) > 1e-4f || MathF.Abs(q[^1].Y - pt.Y) > 1e-4f) q.Add(pt);
-            if (q.Count > 1 && MathF.Abs(q[^1].X - q[0].X) < 1e-4f && MathF.Abs(q[^1].Y - q[0].Y) < 1e-4f) q.RemoveAt(q.Count - 1);
-            int n = q.Count;
-            if (n < 3) return q;
-
-            // glyph space is y up: a positive area runs counter-clockwise, so the inside is on the left of each edge
-            double area = 0;
-            for (int i = 0; i < n; i++) { var a = q[i]; var b = q[(i + 1) % n]; area += (double)a.X * b.Y - (double)b.X * a.Y; }
-            float side = (area > 0 ? 1f : -1f) * (where == VectorOutlinePosition.Inside ? 1f : -1f);
-
-            var o = new List<PointF>(n * 2);
-            for (int i = 0; i < n; i++)
-            {
-                var a = q[(i - 1 + n) % n]; var v = q[i]; var b = q[(i + 1) % n];
-                float d0x = v.X - a.X, d0y = v.Y - a.Y, d1x = b.X - v.X, d1y = b.Y - v.Y;
-                float l0 = MathF.Sqrt(d0x * d0x + d0y * d0y), l1 = MathF.Sqrt(d1x * d1x + d1y * d1y);
-                d0x /= l0; d0y /= l0; d1x /= l1; d1y /= l1;
-                // offset normals (length hw) of the two edges at this corner
-                float n0x = -d0y * hw * side, n0y = d0x * hw * side, n1x = -d1y * hw * side, n1y = d1x * hw * side;
-                float c = d0x * d1x + d0y * d1y;                       // cos of the turn
-                if (1 + c > 1e-3f)
-                {   // intersection of the two offset edges: v + (n0 + n1) / (1 + cos)
-                    float mx = (n0x + n1x) / (1 + c), my = (n0y + n1y) / (1 + c);
-                    if (MathF.Sqrt(mx * mx + my * my) <= 4f * hw) { o.Add(new PointF(v.X + mx, v.Y + my)); continue; }
-                }
-                o.Add(new PointF(v.X + n0x, v.Y + n0y));               // too sharp: bevel the offset corner
-                o.Add(new PointF(v.X + n1x, v.Y + n1y));
-            }
-            return o;
         }
 
         /// <summary>

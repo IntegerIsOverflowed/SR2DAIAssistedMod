@@ -30,7 +30,15 @@ namespace Sr2d64CSport
         /// False: the picture is simplified once it is built. The result is the same either way.
         /// </summary>
         public bool ProviderSide = true;
+        /// <summary>
+        /// The view scale (screen pixels per picture unit; 1 = 1:1, the picture's own size) at or below which the
+        /// simplification applies. Zoomed out to 1:1 or further, the picture is simplified; zoomed in past it, the full
+        /// detail is drawn. Default 1 (1:1).
+        /// </summary>
+        public double MaxScale = 1.0;
         public bool On => Tolerance > 0;
+        /// <summary>True when the simplification applies at this view scale (the threshold is on and the view is at or below MaxScale).</summary>
+        public bool AppliesAt(double viewScale) => On && viewScale <= MaxScale;
     }
 
     /// <summary>Point reduction for polylines and rings, and for the shapes of a <see cref="VectorImage"/>.</summary>

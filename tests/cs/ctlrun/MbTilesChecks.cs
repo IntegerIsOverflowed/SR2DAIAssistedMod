@@ -233,6 +233,38 @@ static class MbTilesChecks
         Console.WriteLine($"  info  FastLines frame (median of 5): full {Ms(new Sr2d64CSport.VectorRenderOptions { AA = true }):0.0} ms, fast lines {Ms(new Sr2d64CSport.VectorRenderOptions { AA = true, FastLines = true }):0.0} ms");
     }
 
+    /// <summary>SimplifySettings.MaxScale: simplification at or below 1:1, full detail zoomed in past it; and the public DrawVectorText wrapper.</summary>
+    public static void SimplifyScaleCheck()
+    {
+        var s = new Sr2d64CSport.SimplifySettings { Tolerance = 2, Algorithm = Sr2d64CSport.SimplifyAlgorithm.Linear };
+        Chk(s.MaxScale == 1.0, "MaxScale defaults to 1:1");
+        Chk(s.AppliesAt(1.0), "simplification applies at 1:1");
+        Chk(s.AppliesAt(0.25), "simplification applies zoomed out (0.25)");
+        Chk(!s.AppliesAt(1.5), "no simplification zoomed in past 1:1 (1.5)");
+        Chk(!new Sr2d64CSport.SimplifySettings { Tolerance = 0 }.AppliesAt(0.5), "threshold 0 never simplifies");
+        var path = new Sr2d64CSport.VectorPath();
+        for (int i = 0; i <= 4000; i++)
+        {
+            double t = i / 4000.0 * Math.PI * 2, r = 180 * (1 + 0.04 * Math.Sin(37 * t) + 0.02 * Math.Sin(113 * t));
+            float x = (float)(r * Math.Cos(t)), y = (float)(r * Math.Sin(t));
+            if (i == 0) path.MoveTo(x, y); else path.LineTo(x, y);
+        }
+        path.Close();
+        var img = new Sr2d64CSport.VectorImage();
+        img.Shapes.Add(new Sr2d64CSport.VectorShape(path, null, new Sr2d64CSport.VectorColor(unchecked((int)0xFF000000)), 1f));
+        int before = img.Shapes.Sum(sh => sh.Path.SegmentCount);
+        img.Simplify(s);
+        int after = img.Shapes.Sum(sh => sh.Path.SegmentCount);
+        Chk(after < before / 2, $"Linear 2 px at 1:1 drops points ({before} -> {after})");
+
+        // the public wrapper: draws ink, returns a box, and the width matches the box
+        var sp = new Sr2d64CSport.Sprite(240, 60); sp.ClearBuffer(unchecked((int)0xFFFFFFFF));
+        var box = sp.DrawVectorText("Hi", 10, 10, 30, unchecked((int)0xFF000000));
+        int ink = 0; for (int i = 0; i < sp.Pixels.Length; i++) if (sp.Pixels[i] != unchecked((int)0xFFFFFFFF)) ink++;
+        Chk(ink > 0, $"Sprite.DrawVectorText draws outlines ({ink} px changed)");
+        Chk(Math.Abs(box.Width - sp.VectorTextWidth("Hi", 30)) < 0.01f && box.Width > 0, $"DrawVectorText returns the box ({box.Width:0.0} px wide) and VectorTextWidth agrees");
+    }
+
     public static void Run()
     {
         var dir = FindDataDir();

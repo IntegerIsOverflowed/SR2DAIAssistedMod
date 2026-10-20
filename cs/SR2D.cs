@@ -50,7 +50,7 @@ namespace Sr2d64CSport
             }
         }
         /// <summary>The ABI version the managed layer was built for (see SR2D_ABI in native/sr2d_api.h). Bump both together.</summary>
-        internal const int AbiVersion = 1;
+        internal const int AbiVersion = 2;
         /// <summary>The mirrored struct sizes the native side compiles static_asserts for (sr2d_api.h). A drift means
         /// the native reads garbage pointers - refuse to run instead. Looked up by name: the headless runners
         /// compile subsets of cs/, so a mirror type may legitimately be absent from a given build.</summary>
@@ -519,6 +519,7 @@ namespace Sr2d64CSport
             [DllImport(DllName, EntryPoint = "MASK_BLEND_MODE", ExactSpelling = true)] public static extern void MaskBlendMode(int* pSrc, int* pDest, int* pMask, int W, int H, int MaskEx, int WS, int WD, int WM, int NotMask, int op);
             [DllImport(DllName, EntryPoint = "DRAW_POLY", ExactSpelling = true)] public static extern void DrawPoly(int* pDest, int dw, int clipL, int clipT, int clipR, int clipB, float* xy, int* counts, int ncont, int col, int op, int k, int flags);
             [DllImport(DllName, EntryPoint = "DRAW_LINE2", ExactSpelling = true)] public static extern void DrawLine2(int* pDest, int dw, int clipL, int clipT, int clipR, int clipB, float x0, float y0, float x1, float y1, int col, int op, int k, float dotLen, float gapLen, float phase);
+            [DllImport(DllName, EntryPoint = "DRAW_LINE2_AA", ExactSpelling = true)] public static extern void DrawLine2Aa(int* pDest, int dw, int clipL, int clipT, int clipR, int clipB, float x0, float y0, float x1, float y1, int col, int op, int k);
             [DllImport(DllName, EntryPoint = "DRAW_BLUR", ExactSpelling = true)] public static extern int DrawBlur(int* pSrc, int sw, int sh, int* pDest, int dw, int clipL, int clipT, int clipR, int clipB, int dx, int dy, int r, int op, int k, int flags, int strength);
             [DllImport(DllName, EntryPoint = "DRAW_WARP", ExactSpelling = true)] public static extern void DrawWarp(int* pSrc, int sw, int sh, int* pDest, int dw, int clipL, int clipT, int clipR, int clipB, float* quad, float* poly, int npoly, int op, int flags, int k);
             [DllImport(DllName, EntryPoint = "DRAW_FX", ExactSpelling = true)] public static extern int DrawFx(int* pSrc, int sw, int sh, int* pDest, int dw, int clipL, int clipT, int clipR, int clipB, float* quad, float* poly, int npoly, int op, int flags, int k, Effects.Stage* stages, int nstages);

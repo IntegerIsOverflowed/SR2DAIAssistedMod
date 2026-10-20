@@ -28,6 +28,13 @@ static class VectorTextChecks
 
     static List<PointF> AllPoints(Sr2d64CSport.VectorImage img) => img.Shapes.SelectMany(s => Points(s.Path)).ToList();
 
+    static void SaveText(string text, string name)
+    {
+        string outDir = Environment.GetEnvironmentVariable("CTLRUN_OUT") ?? Path.Combine(Path.GetTempPath(), "ctlrun");
+        Directory.CreateDirectory(outDir);
+        File.WriteAllText(Path.Combine(outDir, name), text, new System.Text.UTF8Encoding(false));
+    }
+
     static void SaveSprite(Sr2d64CSport.Sprite s, string name)
     {
         string outDir = Environment.GetEnvironmentVariable("CTLRUN_OUT") ?? Path.Combine(Path.GetTempPath(), "ctlrun");
@@ -221,19 +228,39 @@ static class VectorTextChecks
         int spanButt = botButt - topButt, spanSquare = botSquare - topSquare;
         Chk(spanButt > 0 && spanSquare >= spanButt + 4, $"square cap on l: the stroke is {spanSquare - spanButt} px longer than with a butt cap (both ends)");
 
-        // outline position on the closed O (radius 0, octagon x 0..40, stroke 6 = half-width 3, left bearing 5):
-        // centre 5..45, inside 8..42, outside 2..48
-        foreach (var (pos, lo, hi) in new[] {
-            (Sr2d64CSport.VectorOutlinePosition.Center, 5f, 45f),
-            (Sr2d64CSport.VectorOutlinePosition.Inside, 8f, 42f),
-            (Sr2d64CSport.VectorOutlinePosition.Outside, 2f, 48f) })
+        // outline position on the closed O (radius 0; the contour spans x 5..45, stroke 6):
+        // (1) the nodes never move: every position has the centre contour's nodes
+        // (2) the ink band lies on its side of the contour, measured on a rendered row through the middle of the O:
+        //     centre  2..8 and 42..48 (3 either side), inside 5..11 and 39..45, outside -1..5 and 45..51
+        var centreNodes = AllPoints(Sr2d64CSport.VectorText.Create("O", 70f, new Sr2d64CSport.VectorTextStyle { Radius = 0f }));
+        foreach (var (pos, l0, l1, r0, r1) in new[] {
+            (Sr2d64CSport.VectorOutlinePosition.Center, 2f, 8f, 42f, 48f),
+            (Sr2d64CSport.VectorOutlinePosition.Inside, 5f, 11f, 39f, 45f),
+            (Sr2d64CSport.VectorOutlinePosition.Outside, -1f, 5f, 45f, 51f) })
         {
-            var oPts = AllPoints(Sr2d64CSport.VectorText.Create("O", 70f, new Sr2d64CSport.VectorTextStyle { Radius = 0f, OutlinePosition = pos }));
-            Chk(MathF.Abs(oPts.Min(p => p.X) - lo) < 0.01f && MathF.Abs(oPts.Max(p => p.X) - hi) < 0.01f,
-                $"outline {pos}: O spans x {oPts.Min(p => p.X):0.00}..{oPts.Max(p => p.X):0.00} (expect {lo}..{hi})");
+            var pic = Sr2d64CSport.VectorText.Create("O", 70f, new Sr2d64CSport.VectorTextStyle { Radius = 0f, OutlinePosition = pos });
+            var nodes = AllPoints(pic);
+            Chk(nodes.Count == centreNodes.Count && nodes.Zip(centreNodes, (a, b) => MathF.Abs(a.X - b.X) + MathF.Abs(a.Y - b.Y)).Max() < 0.001f,
+                $"outline {pos}: the O's nodes are the centre contour's nodes (curve not moved; {nodes.Count} points)");
+
+            var oc = new Sr2d64CSport.Sprite(120, 100);
+            oc.ClearBuffer(unchecked((int)0xFFFFFFFF));
+            pic.Draw(oc, System.Numerics.Matrix3x2.CreateTranslation(10 - pic.ViewBox.X, 10 - pic.ViewBox.Y));
+            float rowY = (nodes.Min(p => p.Y) + nodes.Max(p => p.Y)) / 2 + 10 - pic.ViewBox.Y;
+            int row = (int)MathF.Round(rowY), W = oc.Width;
+            float Cov(int x) => (255 - (oc.Pixels[row * W + x] & 0xff)) / 255f;
+            int mid = (int)MathF.Round((nodes.Min(p => p.X) + nodes.Max(p => p.X)) / 2 + 10 - pic.ViewBox.X);
+            int a0 = -1, a1 = -1, b0 = -1, b1 = -1;
+            for (int x = 0; x < mid; x++) if (Cov(x) > 0.5f) { if (a0 < 0) a0 = x; a1 = x + 1; }
+            for (int x = mid; x < W; x++) if (Cov(x) > 0.5f) { if (b0 < 0) b0 = x; b1 = x + 1; }
+            float Exp(float v) => v + 10 - pic.ViewBox.X;
+            bool okL = a0 >= 0 && MathF.Abs(a0 - Exp(l0)) <= 1f && MathF.Abs(a1 - Exp(l1)) <= 1f;
+            bool okR = b0 >= 0 && MathF.Abs(b0 - Exp(r0)) <= 1f && MathF.Abs(b1 - Exp(r1)) <= 1f;
+            Chk(okL && okR, $"outline {pos}: ink band at row {row}: left {a0}..{a1}, right {b0}..{b1} (expect {Exp(l0):0}..{Exp(l1):0} and {Exp(r0):0}..{Exp(r1):0})");
         }
 
         // sheet: joins (rows 1-3), caps (rows 4-6), outline position (rows 7-9), for a look at the shapes
+        var scene = new Sr2d64CSport.VectorImage { ViewBox = new RectangleF(0, 0, 800, 900), Width = 800, Height = 900 };
         var sheet = new Sr2d64CSport.Sprite(800, 900);
         sheet.ClearBuffer(unchecked((int)0xFFF7F4EC));
         int sInk = unchecked((int)0xFF1B2A41), sMute = unchecked((int)0xFF6B6F7A);
@@ -241,14 +268,28 @@ static class VectorTextChecks
         for (int row = 0; row < 9; row++)
         {
             int y = 90 + row * 90;
-            Sr2d64CSport.VectorText.Create(rowNames[row], 14f, new Sr2d64CSport.VectorTextStyle { Color = sMute }).Draw(sheet, 20, y + 14);
+            var rowName = Sr2d64CSport.VectorText.Create(rowNames[row], 14f, new Sr2d64CSport.VectorTextStyle { Color = sMute });
+            rowName.Draw(sheet, 20, y + 14);
+            scene.Add(rowName, System.Numerics.Matrix3x2.CreateTranslation(20 - rowName.ViewBox.X, y + 14 - rowName.ViewBox.Y));
             Sr2d64CSport.VectorTextStyle st; string sample;
             if (row < 3) { st = new Sr2d64CSport.VectorTextStyle { Color = sInk, Radius = 0f, Join = new[] { Sr2d64CSport.VectorJoin.Bevel, Sr2d64CSport.VectorJoin.Miter, Sr2d64CSport.VectorJoin.Round }[row] }; sample = "AVNWK"; }
             else if (row < 6) { st = new Sr2d64CSport.VectorTextStyle { Color = sInk, Radius = 0f, Cap = new[] { Sr2d64CSport.VectorCap.Butt, Sr2d64CSport.VectorCap.Round, Sr2d64CSport.VectorCap.Square }[row - 3] }; sample = "IlLT"; }
             else { st = new Sr2d64CSport.VectorTextStyle { Color = sInk, Radius = 0f, Bold = true, OutlinePosition = new[] { Sr2d64CSport.VectorOutlinePosition.Center, Sr2d64CSport.VectorOutlinePosition.Inside, Sr2d64CSport.VectorOutlinePosition.Outside }[row - 6] }; sample = "OBD"; }
-            Sr2d64CSport.VectorText.Create(sample, 56f, st).Draw(sheet, 240, y);
+            var rowPic = Sr2d64CSport.VectorText.Create(sample, 56f, st);
+            // placed by the picture's origin (the pen start), not its padded box: rows of different joins line up
+            var rowM = System.Numerics.Matrix3x2.CreateTranslation(240, y);
+            rowPic.Draw(sheet, rowM);
+            scene.Add(rowPic, rowM);
+            // CTLRUN_WIREFRAME=1: a hairline wireframe of the outline rows (red), over the filled glyphs
+            if (row >= 6 && Environment.GetEnvironmentVariable("CTLRUN_WIREFRAME") == "1")
+            {
+                var wire = Sr2d64CSport.VectorText.Wireframe(rowPic, unchecked((int)0xFFE0245E));
+                wire.Draw(sheet, rowM);
+                scene.Add(wire, rowM);
+            }
         }
         SaveSprite(sheet, "vectortext_outlines.png");
+        SaveText(scene.ToSvg(), "vectortext_outlines.svg");
 
         // render: plain, bold, italic, and text on the arc (picture to look at)
         var canvas = new Sr2d64CSport.Sprite(800, 600);

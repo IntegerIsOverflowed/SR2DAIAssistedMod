@@ -86,7 +86,7 @@ SR2D/
 ├─ LICENSE
 ├─ EmptySR2DFormTemplate/  as empty as Visual Studio's own WinForms template (stock Program.cs + a blank Form1) - only the form derives from SpriteForm, so a new app has the SR2D chrome from the start; copy it and start
 ├─ native/                 C++ DLL (Visual Studio 2022 solution, ClangCL toolset + x64 by default, Win32 still available)
-│  ├─ sr2d_api.h           single X-macro list of all exports (54 original + DRAW_WARP, DRAW_LINE2)
+│  ├─ sr2d_api.h           single X-macro list of all exports (54 original + DRAW_WARP, DRAW_LINE2, DRAW_LINE2_AA)
 │  ├─ sr2d_simd.h          SSE2 / AVX2 vector traits
 │  ├─ sr2d_kernels.inl     ALL pixel kernels, written once as a template
 │  ├─ sr2d_fx.inl          DRAW_FX: effect chains (blur / distortion / colour) - included by the above
@@ -750,6 +750,23 @@ Bresenham step is √2 px long, so a 1-px dot could fall entirely between two sa
 vanish. Now every dash is guaranteed at least one pixel (the nearest step) and never
 two adjacent ones from different dashes, in both directions (`linetest` checks this
 at every angle and gap, forward and reversed).
+
+## Anti-aliased hairline: `DRAW_LINE2_AA` (native, not yet in the renderer)
+
+`DrawLine2Aa(dst, dw, clipL, clipT, clipR, clipB, x0, y0, x1, y1, col, op, k)` draws a solid 1 px line with
+anti-aliasing (Wu's algorithm; pixel centres at integers, as in `DRAW_LINE2`). Each step splits the coverage between the
+two pixels either side of the ideal line; a column (or row) always sums to 255. `op` 1 (set) is a coverage-weighted lerp of
+the destination; any other op alpha-blends the colour with its alpha scaled by the coverage. Dashes, caps and blend modes
+are not supported: use `DRAW_LINE2` for those. A->B and B->A paint identical pixels.
+
+- Built into both flavours (`sr2d_kernels.inl` is compiled for SSE2 and AVX2). The code is scalar, not hand-vectorised.
+- Exported and listed in `native/SR2D.def` (the Windows export table). `SR2D_ABI` is 2 (was 1); `cs/SR2D.cs` `AbiVersion` matches.
+  **Rebuild `SR2D64.dll` on Windows** (the native project) after pulling this. A stale DLL is refused with an ABI message.
+- Tests: ctlrun `AaHairlineChecks` (coverage sums, half-pixel split 127/128, symmetry, clip, a lerp over a coloured
+  background against a C# reference) and the timing against `DRAW_LINE2`.
+- Measured (2-core sandbox, AVX2 dispatch, median of 7): 20,000 random segments of about 350 px into 1000×700:
+  `DRAW_LINE2` 14.7 ms, `DRAW_LINE2_AA` 189.5 ms (about 13×). It writes two pixels per step and is scalar, so it is far
+  from free; it is the quality option, not the fast one. The renderer does not use it yet.
 
 ## Shapes: `cs/Sprite.Shapes.cs` (`DRAW_POLY`)
 
@@ -2249,8 +2266,8 @@ one, and that the cache stays within `MaxTiles`.
 
 `VectorRenderOptions.FastLines` (default false) paints strokes of at most 1 device pixel without anti-aliasing: their
 edges are hard, the fills keep the AA setting, and the stroke pass is about 40% faster (ctlrun `FastLinesCheck`: a z11 map
-frame 48.6 ms full, 28.8 ms with FastLines, median of 5, 2-core sandbox). A middle level (AA hairlines) needs an
-anti-aliased 1 px line routine in the native code; the engine's `DrawLine2` is not anti-aliased, so it is not built.
+frame 48.6 ms full, 28.8 ms with FastLines, median of 5, 2-core sandbox). The anti-aliased 1 px line
+routine now exists in the native code (`DRAW_LINE2_AA`, see its section below), but the renderer does not use it yet.
 
 **Outlines are hairlines.** Building outlines (`MbPaint.Hairline`) are one device pixel at every zoom, not a width in
 map units. Any shape can do this: `VectorShape.Hairline = true` (the `StrokeWidth` is then ignored; SVG export writes
@@ -2289,7 +2306,10 @@ var map = VectorImage.FromMbTiles("map.mbtiles", new MbTilesView {
 img.Simplify(settings);      // any VectorImage (for example an SVG), in place
 ```
 
-Thresholds are in picture units (for MBTiles, pixels at the zoom read). A shape that would collapse keeps its geometry. Not yet implemented: QGIS's "maximum scale" for simplification (simplification happens once, so there is no switch by drawn scale).
+Thresholds are in picture units (for MBTiles, pixels at the zoom read). A shape that would collapse keeps its geometry. **Maximum scale (`SimplifySettings.MaxScale`, default 1.0 = 1:1).** `MaxScale` is the view scale (screen pixels per picture unit) at or
+below which simplification applies. Zoomed out to 1:1 or further the picture is simplified; zoomed in past `MaxScale` it shows
+the full detail. `settings.AppliesAt(viewScale)` is the test (`On && viewScale <= MaxScale`). The demo test "Simplify by scale" (group
+GMaps) shows both states and the point counts. ctlrun `SimplifyScaleCheck` covers the rule.
 
 `VectorTextPathOptions.Centred = true` puts the middle of the capitals on the path (road names use it).
 
@@ -2299,6 +2319,10 @@ Text drawn from open straight strokes, so it needs no font file and stays sharp 
 data is the "Angular Vector Font" (Latin, Cyrillic, digits, punctuation; 151 glyphs), stored as a string
 table in the file. Size is the cap height in pixels.
 
+From an app that has a `Sprite` (the public wrapper, `cs/VectorText.cs`): `sprite.DrawVectorText(text, x, y, capHeight, color, style)`
+draws the outlines with (x, y) as the top-left of the box and returns the box; `sprite.VectorTextWidth(text, capHeight, style)`
+returns the width of that same box. `VectorText` and `VectorImage` stay internal.
+
 - `Bold` widens the stroke, `Italic` skews it.
 - `Radius` (default 6 font units) rounds each interior corner with a quadratic curve. `0` keeps the corners angular.
 - `TipDrop` (default 0) limits how far an acute tip may be cut back. `0` keeps the tips sharp.
@@ -2306,6 +2330,11 @@ table in the file. Size is the cap height in pixels.
 - `Join` (default `Bevel`, as in the font file; `Miter`, `Round`) is the corner shape of the strokes. Radius 0 shows it best.
 - `Cap` (default `Butt`; `Round`, `Square`) is the end of open strokes.
 - `OutlinePosition` (default `Center`; `Inside`, `Outside`) puts the stroke of a closed glyph inside or outside its edge.
+  The curve is never moved: the contour keeps its rounded nodes, its stroke is drawn twice as wide and clipped to the
+  inside of the contour (`Inside`) or to a rectangle around it with the contour as a hole, even-odd (`Outside`).
+  The clip is an ordinary `VectorShape.Clip`, so the SVG export writes it as a `clipPath`. Open strokes are always centred.
+  Outside bands can touch the neighbouring letters at the default tracking. ctlrun `VectorTextChecks` checks the nodes and the
+  rendered band position on both sides.
   Open strokes (the bars of A, the stem of T) stay centred. Miter joins use the 4x limit.
 
 ```csharp

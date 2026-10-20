@@ -1410,6 +1410,7 @@ namespace Sr2d64CSport
                 }
             }
             base.WndProc(ref m);
+            if (m.Msg == WM_GETMINMAXINFO) MaximizeOnNearestMonitor(m.LParam);   // after WinForms: its MaximizedBounds may be stale
         }
 
         /// <summary>The frame messages of <see cref="NativeWindowFrame"/>; true when handled here.</summary>
@@ -1498,6 +1499,33 @@ namespace Sr2d64CSport
             Marshal.StructureToPtr(p, lParam, false);
         }
 
+        const int WM_GETMINMAXINFO = 0x0024;
+
+        [StructLayout(LayoutKind.Sequential)]
+        struct WinPoint { public int X, Y; }
+
+        [StructLayout(LayoutKind.Sequential)]
+        struct WinMinMaxInfo { public WinPoint ptReserved, ptMaxSize, ptMaxPosition, ptMinTrackSize, ptMaxTrackSize; }
+
+        /// <summary>
+        /// Maximize goes to the monitor the window is on now. WinForms sizes the maximized window from MaximizedBounds, a
+        /// screen rectangle that was set when the form was last maximized from the menu or button; a double click on the bar
+        /// or the system menu uses it as it was, so the window went to the wrong screen and was then clamped to the current one
+        /// in WM_NCCALCSIZE (the flicker). This answer replaces the size with the work area of the monitor the window is on.
+        /// ptMaxPosition is relative to that monitor's origin. Full screen is not touched.
+        /// </summary>
+        void MaximizeOnNearestMonitor(IntPtr lParam)
+        {
+            if (fullscreen || lParam == IntPtr.Zero) return;
+            var mi = new WinMonitorInfo { cbSize = Marshal.SizeOf<WinMonitorInfo>() };
+            if (!GetMonitorInfo(MonitorFromWindow(Handle, MONITOR_DEFAULTTONEAREST), ref mi)) return;
+            var info = Marshal.PtrToStructure<WinMinMaxInfo>(lParam);
+            info.ptMaxPosition = new WinPoint { X = mi.rcWork.Left - mi.rcMonitor.Left, Y = mi.rcWork.Top - mi.rcMonitor.Top };
+            info.ptMaxSize = new WinPoint { X = mi.rcWork.Right - mi.rcWork.Left, Y = mi.rcWork.Bottom - mi.rcWork.Top };
+            info.ptMaxTrackSize = info.ptMaxSize;
+            Marshal.StructureToPtr(info, lParam, false);
+        }
+
         [StructLayout(LayoutKind.Sequential)]
         struct WinRect { public int Left, Top, Right, Bottom; }
 
@@ -1543,9 +1571,9 @@ namespace Sr2d64CSport
         // ---- dragging / clicking the bar (the bar drives it; see TitleBarStrip) --------------------
         internal void BarDragStart(Point screen)
         {
-            if (WindowState != FormWindowState.Normal && WindowState != FormWindowState.Maximized) return;
+            if (WindowState != FormWindowState.Normal && WindowState != FormWindowState.Maximized && !fullscreen) return;
             dragBar = true;
-            dragRestores = WindowState == FormWindowState.Maximized;
+            dragRestores = fullscreen || WindowState == FormWindowState.Maximized;   // a drag from full screen or maximized restores first
             dragPos = screen;
         }
 
@@ -1558,8 +1586,10 @@ namespace Sr2d64CSport
                 dragRestores = false;
                 // keep the grab point where it was on the caption, relative to the restored width
                 float frac = Math.Clamp((dragPos.X - Left) / (float)Math.Max(1, Width), 0.05f, 0.95f);
-                WindowState = FormWindowState.Normal;
-                Location = new Point(screen.X - (int)(RestoreBounds.Width * frac), screen.Y - bar.Height / 2);
+                int restoredW;
+                if (fullscreen) { ToggleFullScreen(); restoredW = Width; }   // leaves full screen: back to the normal bounds
+                else { WindowState = FormWindowState.Normal; restoredW = RestoreBounds.Width; }
+                Location = new Point(screen.X - (int)(restoredW * frac), screen.Y - bar.Height / 2);
             }
             else Location = new Point(Location.X + screen.X - dragPos.X, Location.Y + screen.Y - dragPos.Y);
             dragPos = screen;

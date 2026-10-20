@@ -1397,6 +1397,13 @@ T(GControls, "SpriteLabel / GroupBox / Tabs / TextBox / Numeric / Combo / ListBo
               .Ops("None", "Linear (Douglas-Peucker)", "Snap To Grid", "Visvalingam")
               .With(Param.NotMask, true).With(Param.Count, 1).With(Param.DotStep, 0).With(Param.GridOn, true)
               .Range(Param.Count, 1, 12).Range(Param.DotStep, 0, 20);
+
+            T(GMaps, "Simplify by scale: a detailed curve, simplified only at or below MaxScale (1:1)",
+              "The same curve on both settings. At a view scale at or below MaxScale (1.00 = 1:1, and further zoomed out) it is simplified with the threshold; zoomed in past it, the full detail is drawn. Scale = view scale, Grid = threshold in px (0 = off), Op = algorithm. The note shows the point count before and after.",
+              c => SimplifyScaleDemo.Draw(c))
+              .Ui(Param.Scale, "View scale (1.00 = 1:1; at or below it the curve is simplified)", Param.Grid, "Simplification threshold, px (0 = off)", Param.Op, "Simplification algorithm")
+              .Ops("None", "Linear (Douglas-Peucker)", "Snap To Grid", "Visvalingam")
+              .Range(Param.Grid, 0, 20).With(Param.Grid, 2);
             L[L.Count - 1].FileFilter = "MBTiles (*.mbtiles)|*.mbtiles|All files|*.*";
 
             // ===================================================== Animated SVG (SMIL)
@@ -2714,6 +2721,64 @@ T(GControls, "SpriteLabel / GroupBox / Tabs / TextBox / Numeric / Combo / ListBo
                 float cu = (l + r) / 2, cv = (t + b) / 2;
                 foreach (var (pic, dx, dy) in items)
                     pic.Draw(c.Canvas, System.Numerics.Matrix3x2.CreateTranslation(dx - cu, dy - cv) * System.Numerics.Matrix3x2.CreateScale(zoom) * System.Numerics.Matrix3x2.CreateTranslation(c.X, c.Y), new VectorRenderOptions { FastLines = c.FastLines });
+            }
+        }
+
+        // Simplification by scale (SimplifySettings.MaxScale / AppliesAt): the curve is simplified only at or below
+        // MaxScale (1:1 by default); zoomed in past it, the full detail is drawn.
+        static class SimplifyScaleDemo
+        {
+            static VectorImage? full, simp; static string simpKey = "";
+
+            static VectorImage Build(int n)
+            {
+                var path = new VectorPath();
+                for (int i = 0; i <= n; i++)
+                {
+                    double t = i / (double)n * Math.PI * 2;
+                    double r = 180 * (1 + 0.04 * Math.Sin(37 * t) + 0.02 * Math.Sin(113 * t));   // a wobbly ring: lots of detail
+                    float x = (float)(r * Math.Cos(t)), y = (float)(r * Math.Sin(t));
+                    if (i == 0) path.MoveTo(x, y); else path.LineTo(x, y);
+                }
+                path.Close();
+                var img = new VectorImage { Width = 520, Height = 520, ViewBox = new RectangleF(-260, -260, 520, 520) };
+                img.Shapes.Add(new VectorShape(path, null, new VectorColor(VtInk), 1f));
+                return img;
+            }
+
+            static int Segments(VectorImage p) { int n = 0; foreach (var s in p.Shapes) n += s.Path.SegmentCount; return n; }
+
+            public static void Draw(Ctx c)
+            {
+                c.Canvas.ClearBuffer(VtPaper);
+                full ??= Build(4000);
+                float k = MathF.Max(0.01f, c.Scale);                    // view scale: screen pixels per picture unit
+                int idx = (int)c.Op - 1;                                 // 0 = None
+                var settings = new SimplifySettings
+                {
+                    Tolerance = idx <= 0 ? 0 : c.Grid,
+                    Algorithm = (SimplifyAlgorithm)Math.Clamp(idx - 1, 0, 2),
+                    ProviderSide = false,
+                    MaxScale = 1.0,
+                };
+                bool on = settings.AppliesAt(k);
+                VectorImage pic = full;
+                if (on)
+                {
+                    string key = settings.Tolerance + "|" + settings.Algorithm;
+                    if (simp == null || simpKey != key)
+                    {
+                        simp = Build(4000);
+                        simp.Simplify(settings);
+                        simpKey = key;
+                    }
+                    pic = simp;
+                }
+                var m = System.Numerics.Matrix3x2.CreateScale(k) * System.Numerics.Matrix3x2.CreateTranslation(c.W / 2f, c.H / 2f);
+                pic.Draw(c.Canvas, m, new VectorRenderOptions { AA = c.Smooth });
+                string alg = idx <= 0 ? "none" : settings.Algorithm.ToString();
+                c.Note = $"MaxScale {settings.MaxScale:0.00} (1:1). View scale {k:0.00}: {(on ? "simplified" : "full detail")}. " +
+                         $"Points {Segments(full)} -> {Segments(pic)} (threshold {settings.Tolerance} px, {alg}).";
             }
         }
 
