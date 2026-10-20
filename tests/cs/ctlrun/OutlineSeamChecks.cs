@@ -71,4 +71,95 @@ static class OutlineSeamChecks
         Console.WriteLine($"  wireframe: {countOn} overlay pixels with the flag, {countOff} without");
         if (countOn == 0 || countOff != 0) { Console.WriteLine("FAIL wireframe overlay"); Environment.Exit(1); }
     }
+
+    // Baked outlines (SVG export without clips): the stroke pieces cut by in-house clipping must render like the clipped picture.
+    public static void BakeRun()
+    {
+        string outDir = Environment.GetEnvironmentVariable("CTLRUN_OUT") ?? Path.Combine(Path.GetTempPath(), "ctlrun");
+        Directory.CreateDirectory(outDir);
+        double worstAll = 0; bool fail = false;
+        foreach (var pos in new[] { VectorOutlinePosition.Inside, VectorOutlinePosition.Outside })
+        foreach (var zoom in new[] { 1f, 2.49f })
+        {
+            var pic = VectorText.Create("OBD", 28f, new VectorTextStyle { Bold = true, Color = Black, OutlinePosition = pos });
+            var baked = BakedCopy(pic);
+            var svgBack = VectorImage.FromSvg(pic.ToSvg(true));
+            const int pad = 4;
+            int W = (int)MathF.Ceiling(pic.ViewBox.Width * zoom) + 2 * pad, H = (int)MathF.Ceiling(pic.ViewBox.Height * zoom) + 2 * pad;
+            Matrix3x2 map = Matrix3x2.CreateScale(zoom) * Matrix3x2.CreateTranslation(pad - pic.ViewBox.X * zoom, pad - pic.ViewBox.Y * zoom);
+            var a = new Sprite(W, H); a.ClearBuffer(White); pic.Draw(a, map);
+            var b = new Sprite(W, H); b.ClearBuffer(White); baked.Draw(b, map);
+            var c = new Sprite(W, H); c.ClearBuffer(White); svgBack.Draw(c, map);
+            double maxB = 0, maxC = 0; int overB = 0;
+            for (int i = 0; i < a.Pixels.Length; i++)
+            {
+                double db = Math.Abs((a.Pixels[i] & 0xff) - (b.Pixels[i] & 0xff)) / 255.0;
+                double dc = Math.Abs((a.Pixels[i] & 0xff) - (c.Pixels[i] & 0xff)) / 255.0;
+                if (db > maxB) maxB = db;
+                if (dc > maxC) maxC = dc;
+                if (db > 0.25) overB++;
+            }
+            worstAll = Math.Max(worstAll, Math.Max(maxB, maxC));
+            Console.WriteLine($"  bake {pos} zoom {zoom:0.00}: baked picture vs clipped worst {maxB:0.000}, {overB} px > 0.25; baked SVG read back vs clipped worst {maxC:0.000}");
+            if (maxB > 0.25 || maxC > 0.25) fail = true;
+            File.WriteAllBytes(Path.Combine(outDir, $"bake_{pos}_{zoom:0.00}.png"), Png.Encode(b.Pixels, b.Width, b.Height));
+        }
+
+        // wireframe overlay: FastLines must change it (1 px hairlines: no AA = hard edges only); WireframeColor must set its colour
+        {
+            var wpic = VectorText.Create("OBD", 40f, new VectorTextStyle { Bold = true, Color = Black });
+            int red = unchecked((int)0xFFE0245E);
+            int partialFast = 0, partialAa = 0, redFast = 0;
+            var m = Matrix3x2.CreateTranslation(10 - wpic.ViewBox.X, 10 - wpic.ViewBox.Y);
+            var plain = new Sprite(200, 80); plain.ClearBuffer(White); wpic.Draw(plain, m, new VectorRenderOptions { Wireframe = false });
+            foreach (bool fast in new[] { true, false })
+            {
+                var sp = new Sprite(200, 80); sp.ClearBuffer(White);
+                wpic.Draw(sp, m, new VectorRenderOptions { Wireframe = true, FastLines = fast, WireframeColor = red });
+                int partial = 0, exact = 0;
+                for (int k = 0; k < sp.Pixels.Length; k++)
+                {
+                    if (sp.Pixels[k] == plain.Pixels[k]) continue;                       // not the overlay
+                    if ((sp.Pixels[k] & 0xFFFFFF) == (red & 0xFFFFFF)) exact++; else partial++;
+                }
+                if (fast) { partialFast = partial; redFast = exact; } else partialAa = partial;
+            }
+            Console.WriteLine($"  wireframe FastLines: overlay pixels not in the wireframe colour {partialFast} (fast) vs {partialAa} (AA); in the colour {redFast} (fast)");
+            if (partialFast != 0 || partialAa == 0 || redFast == 0) { Console.WriteLine("FAIL wireframe FastLines"); Environment.Exit(1); }
+        }
+
+        // sample sheet for the user's SVG editor: the three positions, bold, outlines baked (no clipPath anywhere)
+        var sheet = new VectorImage { Title = "Outline positions (baked)" };
+        float y = 0; float maxW = 0;
+        foreach (var pos in new[] { VectorOutlinePosition.Center, VectorOutlinePosition.Inside, VectorOutlinePosition.Outside })
+        {
+            var row = VectorText.Create("OBD 08", 56f, new VectorTextStyle { Bold = true, Color = Black, OutlinePosition = pos });
+            float dx = 20 - row.ViewBox.X, dy = y + 20 - row.ViewBox.Y;
+            foreach (var s in row.Shapes) { s.Transform = s.Transform * Matrix3x2.CreateTranslation(dx, dy); sheet.Shapes.Add(s); }
+            y += row.ViewBox.Height + 30; maxW = MathF.Max(maxW, row.ViewBox.Width + 40);
+        }
+        sheet.ViewBox = new System.Drawing.RectangleF(0, 0, maxW, y + 20); sheet.Width = maxW; sheet.Height = y + 20;
+        File.WriteAllText(Path.Combine(outDir, "vectortext_outlines_baked.svg"), sheet.ToSvg(true), new System.Text.UTF8Encoding(false));
+        Console.WriteLine($"  bake worst over all: {worstAll:0.000} ({(fail ? "FAIL" : "ok")})");
+        if (fail) { Console.WriteLine("FAIL baked outlines"); Environment.Exit(1); }
+    }
+
+    static VectorImage BakedCopy(VectorImage pic)
+    {
+        var img = new VectorImage { Title = pic.Title, ViewBox = pic.ViewBox, Width = pic.Width, Height = pic.Height };
+        foreach (var s in pic.Shapes)
+        {
+            if (s.BandOf == null || s.Stroke == null) { img.Shapes.Add(s); continue; }
+            var p = new VectorPath();
+            foreach (var poly in VectorBands.Bake(s.BandOf, s, s.StrokeWidth, s.BandSide == VectorOutlinePosition.Inside))
+            {
+                p.MoveTo(poly[0]);
+                for (int i = 1; i < poly.Count; i++) p.LineTo(poly[i]);
+                p.Close();
+            }
+            if (p.IsEmpty) continue;
+            img.Shapes.Add(new VectorShape(p, s.Stroke) { Transform = s.Transform, Opacity = s.Opacity });
+        }
+        return img;
+    }
 }

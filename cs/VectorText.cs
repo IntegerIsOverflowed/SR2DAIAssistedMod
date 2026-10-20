@@ -250,6 +250,7 @@ namespace Sr2d64CSport
                 var shape = new VectorShape(contour, null, new VectorColor(style.Color), 2 * sw) { Join = style.Join, Cap = style.Cap, MiterLimit = 4f };
                 if (side == VectorOutlinePosition.Inside) shape.Clip = new VectorClip(contour);
                 else { shape.Clip = OutsideClip(contour, sw * miter + 1f); anyOutside = true; }
+                shape.BandOf = contour; shape.BandSide = side;
                 img.Shapes.Add(shape);
             }
             RectangleF? box = null;

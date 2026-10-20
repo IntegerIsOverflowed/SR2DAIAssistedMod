@@ -137,6 +137,8 @@ namespace Sr2d64CSport
         readonly SpriteStackPanel bitField = new SpriteStackPanel { AutoSize = true, Gap = 2, Padding = Padding.Empty };
         readonly SpriteLabel lblMask = new SpriteLabel { AutoSize = false, Height = 16 };
         static readonly string[] MaskNames = { "circle", "diamond", "stripes", "checker" };
+        readonly SpriteButton btnWireColor = new SpriteButton();
+        int wireColor = unchecked((int)0xFFE0245E);     // the wireframe overlay colour (ARGB), picked with the Wireframe colour button
         readonly SpriteButton btnSuite = new SpriteButton(), btnCopy = new SpriteButton(), btnSave = new SpriteButton(), btnReset = new SpriteButton(), btnFile = new SpriteButton(), btnMeasure = new SpriteButton(), btnCode = new SpriteButton();
         readonly SpriteToggle chkProgress = Tick();      // slow tests: show phases / partial renders while a frame is being made
         readonly SpriteNumeric numFps = new SpriteNumeric { Minimum = 1, Maximum = 1000, Value = 60, Decimals = 0, Size = new Size(70, 24) };
@@ -336,6 +338,8 @@ namespace Sr2d64CSport
             Check(testStack, chkXor, "XOR lines", false, Param.Xor);
             Check(testStack, chkFast, "Fast thin lines (vectors: 1 px strokes without AA)", false, Param.FastLines);
             Check(testStack, chkWire, "Show wireframe (outlines of vector shapes)", false, Param.Wireframe);
+            Btn(testStack, btnWireColor, "Wireframe colour", (_, _) => PickWireColor()); btnWireColor.Visible = false;
+            titles[btnWireColor] = "Wireframe colour (outline overlay)"; paramMain[Param.WireColor] = btnWireColor; ShowWireColor();
             Check(testStack, chkAnim, "Animate (off = time stands still at 0)", true, Param.Time);
             Check(testStack, chkFollow, "Follow the mouse (off: drag it, right click = jump)", false, Param.Mouse);
             var btnRow = new SpriteStackPanel { Orientation = Orientation.Horizontal, Wrap = true, AutoSize = true, Gap = 4, Padding = new Padding(-2, 0, -2, 0), Stretch = false };
@@ -416,6 +420,19 @@ namespace Sr2d64CSport
         /// (<see cref="StaticUsed"/>) plus what Ctx recorded while it ran (a test may read more once a check box is on), or its
         /// own <see cref="DemoTest.Controls"/> list when it has one. Re-evaluated after each frame; cheap when nothing changed.
         /// </summary>
+        void PickWireColor()
+        {
+            using var dlg = new SpriteColorDialog { Value = Color.FromArgb(wireColor) };
+            if (dlg.ShowDialog(this) != DialogResult.OK) return;
+            wireColor = dlg.Value.ToArgb();
+            ShowWireColor();
+        }
+        void ShowWireColor()
+        {
+            btnWireColor.Text = $"Wireframe colour #{wireColor & 0xFFFFFF:X6}";
+            btnWireColor.Size = new Size(Sprite.MeasureText(btnWireColor.Text).Width + 22, 26);
+        }
+
         void UpdateVisible(Param used)
         {
             if (settingsHost != null && current != null) settingsHost.Visible = current.SettingsControl != null && (current.SettingsVisible?.Invoke(ctx) ?? true);
@@ -439,7 +456,7 @@ namespace Sr2d64CSport
                     "X" or "Y" or "PivotX" or "PivotY" or "PivotXF" or "PivotYF" => Param.Mouse,
                     "Z" => Param.Z, "Angle" => Param.Angle, "Scale" or "ScaleY" => Param.Scale, "Blend" => Param.Blend, "Brite" => Param.Brite,
                     "Count" => Param.Count, "Smooth" => Param.Smooth, "NotMask" => Param.NotMask, "MaskBits" => Param.MaskBits, "Op" => Param.Op,
-                    "DotStep" => Param.DotStep, "Xor" => Param.Xor, "FastLines" => Param.FastLines, "Wireframe" => Param.Wireframe, "Time" => Param.Time, "Yaw" or "Pitch" or "PanX" or "PanY" => Param.Camera,
+                    "DotStep" => Param.DotStep, "Xor" => Param.Xor, "FastLines" => Param.FastLines, "Wireframe" => Param.Wireframe, "WireColor" => Param.WireColor, "Time" => Param.Time, "Yaw" or "Pitch" or "PanX" or "PanY" => Param.Camera,
                     _ => Param.None,
                 };
             }
@@ -1063,6 +1080,7 @@ namespace Sr2d64CSport
             ctx.Xor = chkXor.Checked;
             ctx.FastLines = chkFast.Checked;
             ctx.Wireframe = chkWire.Checked;
+            ctx.WireColor = wireColor;
             ctx.DotStep = tbDot.Value;
             ctx.Grid = tbGrid.Value;
             ctx.Speed = tbSpeed.Value;
@@ -1114,7 +1132,7 @@ namespace Sr2d64CSport
         // (preview while dragging, one full frame when it rests).
         int slowLeft, slowTotal; double slowTotalMs, slowRenderMs, slowFirstMs; string slowSig = ""; bool slowFrozen; double slowChangedAt = -1; bool slowPreviewing, measuring;
         const double SlowIdleMs = 500;   // a slow test starts its real frame this long after the last control change (previews meanwhile)
-        string SlowSignature() => $"{mouseX},{mouseY},{tbZ.Value},{tbAngle.Value},{tbScale.Value},{tbBlend.Value},{tbBrite.Value},{tbCount.Value},{chkSmooth.Checked},{chkNot.Checked},{chkXor.Checked},{chkFast.Checked},{chkWire.Checked},{tbDot.Value},{cbOp.SelectedIndex},{BitMask()},{chkPar.Checked},{canvas?.Width}x{canvas?.Height},{camYaw:F3},{camPitch:F3},{camPanX},{camPanY},{current?.FilePath}";
+        string SlowSignature() => $"{mouseX},{mouseY},{tbZ.Value},{tbAngle.Value},{tbScale.Value},{tbBlend.Value},{tbBrite.Value},{tbCount.Value},{chkSmooth.Checked},{chkNot.Checked},{chkXor.Checked},{chkFast.Checked},{chkWire.Checked},{wireColor},{tbDot.Value},{cbOp.SelectedIndex},{BitMask()},{chkPar.Checked},{canvas?.Width}x{canvas?.Height},{camYaw:F3},{camPitch:F3},{camPanX},{camPanY},{current?.FilePath}";
         void StartSlowRun(int frames = 1)
         {
             if (current == null || current.SlowFrames <= 0) { slowFrozen = false; prog.Visible = false; return; }

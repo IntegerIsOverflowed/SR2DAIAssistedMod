@@ -343,7 +343,7 @@ namespace Sr2d64CSport
             if (o.Wireframe) DrawShapes(VectorText.Wireframe(img, o.WireframeColor), dst, m, WireframeOptions(o));
         }
         static VectorRenderOptions WireframeOptions(VectorRenderOptions o) =>
-            new VectorRenderOptions { AA = true, Opacity = o.Opacity, Premultiplied = o.Premultiplied, Tolerance = o.Tolerance };
+            new VectorRenderOptions { AA = true, FastLines = o.FastLines, Opacity = o.Opacity, Premultiplied = o.Premultiplied, Tolerance = o.Tolerance };
         static void DrawShapes(VectorImage img, Sprite dst, Matrix3x2 m, VectorRenderOptions o)
         {
             var clipRect = dst.LockRect; if (clipRect.Width <= 0 || clipRect.Height <= 0) return;
@@ -745,6 +745,166 @@ namespace Sr2d64CSport
             if (fr + tmax * dr >= 0) return tmax;
             if (fr + tmin * dr >= 0) return tmin;
             valid = false; return 0;
+        }
+    }
+    /// <summary>
+    /// Bakes an outline band (the stroke of one closed contour, cut to its inside or outside) into plain polygons, with
+    /// no clip. Used by the SVG export without clips (<see cref="VectorImage.ToSvg(bool)"/>, bakeOutlines).
+    /// The cut is in-house polygon clipping: the contour is split into trapezoids between the vertex and crossing
+    /// x-positions (inside or outside them), and every stroke piece is clipped against each trapezoid
+    /// (Sutherland-Hodgman, convex clipper). Nothing is rounded beyond the flattening tolerance.
+    /// </summary>
+    internal static class VectorBands
+    {
+        /// <summary>The band as positive-oriented polygons. interior: the part inside the contour (even-odd); else the part outside it, within the contour's bounds grown by the stroke reach.</summary>
+        public static List<List<PointF>> Bake(VectorPath contour, VectorShape style, float width, bool interior)
+        {
+            var pts = new List<PointF>();
+            var subs = VectorRender.Flatten(contour, Matrix3x2.Identity, 0.02f, pts);
+            var sp = new List<PointF>(); var counts = new List<int>();
+            VectorRender.Stroke(pts, subs, style, width, sp, counts);
+            var pieces = new List<List<PointF>>(); int at = 0;
+            foreach (int c in counts)
+            {
+                if (c >= 3) pieces.Add(sp.GetRange(at, c));
+                at += c;
+            }
+            var result = new List<List<PointF>>();
+            if (pieces.Count == 0 || pts.Count < 3) return result;
+            var bounds = contour.ControlBounds();
+            float margin = width * MathF.Max(1f, style.MiterLimit) + 2f;   // a miter reaches MiterLimit half-widths out
+            var r = RectangleF.Inflate(bounds, margin, margin);
+            var traps = Trapezoids(pts, subs, r, interior);
+            foreach (var piece in pieces)
+            {
+                var (pl, pt, pr, pb) = Box(piece);
+                foreach (var trap in traps)
+                {
+                    var (tl, tt, trr, tb) = Box(trap);
+                    if (tl > pr || trr < pl || tt > pb || tb < pt) continue;
+                    var cut = ClipConvex(piece, trap);
+                    if (cut.Count < 3) continue;
+                    if (Area(cut) < 0) cut.Reverse();
+                    if (Math.Abs(Area(cut)) > 1e-9) result.Add(cut);
+                }
+            }
+            return result;
+        }
+
+        static (float l, float t, float r, float b) Box(IList<PointF> p)
+        {
+            float l = float.MaxValue, t = float.MaxValue, r = float.MinValue, b = float.MinValue;
+            foreach (var q in p) { if (q.X < l) l = q.X; if (q.X > r) r = q.X; if (q.Y < t) t = q.Y; if (q.Y > b) b = q.Y; }
+            return (l, t, r, b);
+        }
+
+        static double Area(IList<PointF> p)
+        {
+            double a = 0;
+            for (int i = 0; i < p.Count; i++)
+            {
+                var u = p[i]; var v = p[(i + 1) % p.Count];
+                a += (double)u.X * v.Y - (double)v.X * u.Y;
+            }
+            return a / 2;
+        }
+
+        /// <summary>Trapezoids (vertical sides at neighbouring breakpoints) that tile the inside (or the outside within r) of the contour.</summary>
+        static List<PointF[]> Trapezoids(List<PointF> pts, List<(int start, int count, bool closed)> subs, RectangleF r, bool interior)
+        {
+            var ea = new List<PointF>(); var eb = new List<PointF>();
+            foreach (var (st, n, _) in subs)
+            {
+                if (n < 2) continue;
+                for (int i = 0; i < n; i++)
+                {
+                    var a = pts[st + i]; var b = pts[st + (i + 1) % n];
+                    if (a.X != b.X) { ea.Add(a); eb.Add(b); }
+                }
+            }
+            // breakpoints: every vertex x and every crossing x, so no two edges cross inside a slab
+            var xs = new List<float> { r.Left, r.Right };
+            foreach (var a in ea) xs.Add(a.X);
+            for (int i = 0; i < ea.Count; i++)
+                for (int j = i + 1; j < ea.Count; j++)
+                    if (SegCrossX(ea[i], eb[i], ea[j], eb[j], out float x)) xs.Add(x);
+            xs.Sort();
+            var clipX = new List<float>();
+            foreach (var x in xs)
+                if (x >= r.Left && x <= r.Right && (clipX.Count == 0 || x - clipX[^1] > 1e-5f)) clipX.Add(x);
+
+            var traps = new List<PointF[]>();
+            var rows = new List<(double ym, double y0, double y1)>();
+            for (int k = 0; k + 1 < clipX.Count; k++)
+            {
+                float x0 = clipX[k], x1 = clipX[k + 1], xm = (x0 + x1) / 2;
+                rows.Clear();
+                rows.Add((r.Top, r.Top, r.Top));                           // virtual top: outside
+                for (int e = 0; e < ea.Count; e++)
+                {
+                    var a = ea[e]; var b = eb[e];
+                    if (Math.Min(a.X, b.X) > x0 || Math.Max(a.X, b.X) < x1) continue;   // spans the slab
+                    rows.Add((YAt(a, b, xm), YAt(a, b, x0), YAt(a, b, x1)));
+                }
+                rows.Sort((p, q) => p.ym.CompareTo(q.ym));
+                rows.Add((r.Bottom, r.Bottom, r.Bottom));                  // virtual bottom: outside
+                for (int i = 0; i + 1 < rows.Count; i++)
+                {
+                    bool inside = i % 2 == 1;                              // odd number of edges above: inside
+                    if (inside != interior) continue;
+                    var A = rows[i]; var B = rows[i + 1];
+                    var t = new PointF[] { new((float)x0, (float)A.y0), new((float)x1, (float)A.y1), new((float)x1, (float)B.y1), new((float)x0, (float)B.y0) };
+                    if (Math.Abs(Area(t)) > 1e-9) traps.Add(t);
+                }
+            }
+            return traps;
+        }
+
+        static double YAt(PointF a, PointF b, double x) => a.Y + (x - a.X) * (b.Y - a.Y) / (b.X - a.X);
+
+        static bool SegCrossX(PointF a, PointF b, PointF c, PointF d, out float x)
+        {
+            x = 0;
+            double rr = (b.X - a.X) * (d.Y - c.Y) - (b.Y - a.Y) * (d.X - c.X);
+            if (Math.Abs(rr) < 1e-12) return false;
+            double t = ((c.X - a.X) * (d.Y - c.Y) - (c.Y - a.Y) * (d.X - c.X)) / rr;
+            double u = ((c.X - a.X) * (b.Y - a.Y) - (c.Y - a.Y) * (b.X - a.X)) / rr;
+            if (t <= 0 || t >= 1 || u <= 0 || u >= 1) return false;
+            x = (float)(a.X + t * (b.X - a.X));
+            return true;
+        }
+
+        /// <summary>Sutherland-Hodgman: subject clipped to a convex clipper (either orientation).</summary>
+        static List<PointF> ClipConvex(List<PointF> subject, PointF[] clip)
+        {
+            double sgn = Area(clip) > 0 ? 1 : -1;
+            var cur = subject;
+            for (int e = 0; e < clip.Length && cur.Count > 0; e++)
+            {
+                var c0 = clip[e]; var c1 = clip[(e + 1) % clip.Length];
+                double Side(PointF p) => sgn * ((c1.X - c0.X) * (p.Y - c0.Y) - (c1.Y - c0.Y) * (p.X - c0.X));
+                var output = new List<PointF>(cur.Count + 4);
+                var prev = cur[^1]; double sPrev = Side(prev);
+                foreach (var p in cur)
+                {
+                    double sCur = Side(p);
+                    if (sCur >= 0)
+                    {
+                        if (sPrev < 0) output.Add(Cross(prev, p, sPrev, sCur));
+                        output.Add(p);
+                    }
+                    else if (sPrev >= 0) output.Add(Cross(prev, p, sPrev, sCur));
+                    prev = p; sPrev = sCur;
+                }
+                cur = output;
+            }
+            return cur;
+        }
+
+        static PointF Cross(PointF a, PointF b, double sa, double sb)
+        {
+            double t = sa / (sa - sb);
+            return new PointF((float)(a.X + t * (b.X - a.X)), (float)(a.Y + t * (b.Y - a.Y)));
         }
     }
 }

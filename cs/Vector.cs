@@ -345,6 +345,8 @@ namespace Sr2d64CSport
         public string? Group;
         /// <summary>Hidden shapes stay in the container (with their name) but are not drawn, hit-tested or included in bounds; saved as display:none.</summary>
         public bool Hidden;
+        /// <summary>VectorText outline band (Inside / Outside of a closed glyph contour): the contour it is the stroke of, and the side. Null for other shapes; the SVG export without clips bakes these.</summary>
+        public VectorPath? BandOf; public VectorOutlinePosition BandSide;
         /// <summary>Hairline stroke: the stroke is one device pixel wide at every zoom (map outlines). StrokeWidth is ignored.</summary>
         public bool Hairline;
         /// <summary>Map layer the shape came from (OpenMapTiles name such as "building"); null for other shapes. The map level
@@ -613,7 +615,14 @@ namespace Sr2d64CSport
 
         // ------------------------------------------------------------------ export
         /// <summary>Writes the picture as an SVG document (paths, solid and gradient paints, strokes, dashes, opacity, clips).</summary>
-        public string ToSvg()
+        public string ToSvg() => ToSvg(false);
+
+        /// <summary>
+        /// SVG text. bakeOutlines: the outline bands of VectorText (shapes with BandOf) are written as plain filled
+        /// polygons, cut to their inside or outside by in-house clipping, so no clipPath is needed (for viewers that
+        /// do not handle clips well, e.g. Corel). The geometry is the same as the clipped picture.
+        /// </summary>
+        public string ToSvg(bool bakeOutlines)
         {
             var ci = CultureInfo.InvariantCulture; var sb = new StringBuilder(); var defs = new StringBuilder(); int nid = 0;
             string F(float v) => v.ToString("0.####", ci);
@@ -648,6 +657,25 @@ namespace Sr2d64CSport
             foreach (var s in Shapes)
             {
                 if (!s.IsVisible && !s.Hidden) continue;    // hidden shapes are written (display="none") so a round trip keeps them
+                if (bakeOutlines && s.BandOf != null && s.Stroke != null)
+                {
+                    var d = new StringBuilder();
+                    foreach (var poly in VectorBands.Bake(s.BandOf, s, s.StrokeWidth, s.BandSide == VectorOutlinePosition.Inside))
+                    {
+                        for (int i = 0; i < poly.Count; i++) d.Append(ci, $"{(i == 0 ? "M" : "L")}{F(poly[i].X)} {F(poly[i].Y)}");
+                        d.Append('Z');
+                    }
+                    if (d.Length == 0) continue;
+                    body.Append("<path d=\"").Append(d).Append('"');
+                    Paint(s.Stroke, "fill", body);
+                    if (s.EvenOdd) body.Append(" fill-rule=\"evenodd\"");
+                    if (s.Opacity < 1) body.Append(ci, $" opacity=\"{F(s.Opacity)}\"");
+                    if (s.Hidden) body.Append(" display=\"none\"");
+                    if (!s.Transform.IsIdentity) body.Append(ci, $" transform=\"{Mat(s.Transform)}\"");
+                    if (s.Id != null) body.Append(ci, $" id=\"{System.Security.SecurityElement.Escape(s.Id)}\"");
+                    body.Append("/>");
+                    continue;
+                }
                 string clipAttr = "";
                 if (s.Clip != null && s.Clip.Paths.Count > 0)
                 {
@@ -684,7 +712,7 @@ namespace Sr2d64CSport
             sb.Append(body).Append("</svg>");
             return sb.ToString();
         }
-        public void SaveSvg(string file) => File.WriteAllText(file, ToSvg(), new UTF8Encoding(false));
+        public void SaveSvg(string file, bool bakeOutlines = false) => File.WriteAllText(file, ToSvg(bakeOutlines), new UTF8Encoding(false));
 
         public override string ToString() => $"VectorImage {Width:0.#}x{Height:0.#} ({Shapes.Count} shapes{(Warnings.Count > 0 ? $", {Warnings.Count} warnings" : "")})";
     }

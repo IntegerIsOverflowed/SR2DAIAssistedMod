@@ -32,6 +32,8 @@ namespace Sr2d64CSport
         FastLines = 1048576,
         /// <summary>The test reads <see cref="Ctx.Wireframe"/> - vector drawing: the outline of every shape is drawn on top as a hairline (VectorRenderOptions.Wireframe).</summary>
         Wireframe = 2097152,
+        /// <summary>The test reads <see cref="Ctx.WireColor"/> - the colour of the wireframe overlay (the Wireframe colour control).</summary>
+        WireColor = 4194304,
     }
 
     internal sealed class Ctx
@@ -82,6 +84,7 @@ namespace Sr2d64CSport
         int x, y, z = 120, blend = 128, count = 1, maskBits = Assets.MaskCircle, dotStep;
         float angle, scale = 1f, scaleY = 1f, brite = 1f, time, yaw, pitch = 0.55f, panX, panY;
         bool smooth, notMask, xor, fastLines, wireframe;
+        int wireColor = unchecked((int)0xFFE0245E);
         SR2D.Op op = SR2D.Op.Paint;
 
         /// <summary>Seconds of animation time. Stops advancing while the "Animate" check box is off.</summary>
@@ -135,6 +138,8 @@ namespace Sr2d64CSport
         public bool FastLines { get { Touch(Param.FastLines); return fastLines; } set => fastLines = value; }
         /// <summary>Vector tests: the outline of every shape is drawn on top as a one-pixel hairline (VectorRenderOptions.Wireframe).</summary>
         public bool Wireframe { get { Touch(Param.Wireframe); return wireframe; } set => wireframe = value; }
+        /// <summary>Colour of the wireframe overlay (ARGB), set by the Wireframe colour control.</summary>
+        public int WireColor { get { Touch(Param.WireColor); return wireColor; } set => wireColor = value; }
 
         public Ctx Clone() => (Ctx)MemberwiseClone();
 
@@ -242,7 +247,7 @@ namespace Sr2d64CSport
         /// </summary>
         public int SlowFrames;
         /// <summary>Slow tests: parameters that trigger a re-run when they change (others are ignored while frozen).</summary>
-        public Param SlowRerunOn = Param.Mouse | Param.Count | Param.Angle | Param.Scale | Param.Op | Param.MaskBits | Param.Smooth | Param.NotMask | Param.Xor | Param.FastLines | Param.Wireframe | Param.Camera | Param.Z | Param.Brite;
+        public Param SlowRerunOn = Param.Mouse | Param.Count | Param.Angle | Param.Scale | Param.Op | Param.MaskBits | Param.Smooth | Param.NotMask | Param.Xor | Param.FastLines | Param.Wireframe | Param.WireColor | Param.Camera | Param.Z | Param.Brite;
         /// <summary>Called on the UI thread when the user picks a file for this test (tests that load .vox / .obj); null = no file button.</summary>
         public string? FileFilter;
         public string? FilePath;               // last chosen file (set by the form)
@@ -1203,7 +1208,7 @@ T(GControls, "SpriteLabel / GroupBox / Tabs / TextBox / Numeric / Combo / ListBo
                 var t = L.Find(x => x.Name.StartsWith("Vector import", StringComparison.Ordinal))!;
                 var (img, info) = EnsureVector(t.FilePath, c.DotStep, SvgSimplify(c));
                 RecolorDemo.SetImage(img);                                 // the strip above edits THIS container (Recolor / SwapColors)
-                var o = new VectorRenderOptions { AA = c.Smooth, Opacity = c.Blend / 255f, Strokes = true, Fills = c.Brite >= 0, FastLines = c.FastLines, Wireframe = c.Wireframe };
+                var o = new VectorRenderOptions { AA = c.Smooth, Opacity = c.Blend / 255f, Strokes = true, Fills = c.Brite >= 0, FastLines = c.FastLines, Wireframe = c.Wireframe, WireframeColor = c.WireColor };
                 var osz = VectorObjectSize(c, img);                        // picture size on the canvas at Scale 1 (longer side = 1.5 x sprite)
                 float fit = osz.Width / MathF.Max(1e-3f, img.Width);
                 float pfx = c.PivotXF < 0 ? 0.5f : c.PivotXF / osz.Width, pfy = c.PivotYF < 0 ? 0.5f : c.PivotYF / osz.Height;   // pivot as view-box fractions
@@ -1228,7 +1233,7 @@ T(GControls, "SpriteLabel / GroupBox / Tabs / TextBox / Numeric / Combo / ListBo
             L[L.Count - 1].MouseRotates = true; L[L.Count - 1].Resizable = true; L[L.Count - 1].AnimSpin = 0f;
             // QGIS-style simplification of the picture (Vector.Simplify.cs): threshold in SVG units, algorithm, provider side
             L[L.Count - 1].Ui(Param.Grid, "Simplification threshold, SVG units (0 = off)", Param.Op, "Simplification algorithm",
-                              Param.GridOn, "Use simplification on provider side if possible (SVG has no tile provider: it is applied once the file is read)", Param.Wireframe, "Show wireframe (outlines of the vector shapes)", Param.FastLines, "Fast thin lines (1 px strokes without AA: faster, hard edges)")
+                              Param.GridOn, "Use simplification on provider side if possible (SVG has no tile provider: it is applied once the file is read)", Param.Wireframe, "Show wireframe (outlines of the vector shapes)", Param.WireColor, "Wireframe colour (outline overlay)", Param.FastLines, "Fast thin lines (1 px strokes without AA: faster, hard edges)")
                           .Ops("None", "Linear (Douglas-Peucker)", "Snap To Grid", "Visvalingam").Range(Param.Grid, 0, 20).With(Param.Grid, 0).With(Param.GridOn, true);
             L[L.Count - 1].ObjectSize = c => { var vt = L.Find(x => x.Name.StartsWith("Vector import", StringComparison.Ordinal))!; var (vi, _) = EnsureVector(vt.FilePath, c.DotStep, SvgSimplify(c)); return VectorObjectSize(c, vi); };
             L[L.Count - 1].ControlStrip = RecolorDemo.Build; L[L.Count - 1].StripHeight = RecolorDemo.StripHeight;
@@ -1402,20 +1407,20 @@ T(GControls, "SpriteLabel / GroupBox / Tabs / TextBox / Numeric / Combo / ListBo
               .With(Param.NotMask, true).With(Param.Count, 1).With(Param.DotStep, 0).With(Param.GridOn, true)
               .Range(Param.Count, 1, 12).Range(Param.DotStep, 0, 20);
 
+            L[L.Count - 1].FileFilter = "MBTiles (*.mbtiles)|*.mbtiles|All files|*.*";     // the vector map (its Open File button)
             T(GMaps, "Simplify by scale: a detailed curve, simplified only at or below MaxScale (1:1)",
               "The same curve on both settings. At a view scale at or below MaxScale (1.00 = 1:1, and further zoomed out) it is simplified with the threshold; zoomed in past it, the full detail is drawn. Scale = view scale, Grid = threshold in px (0 = off), Op = algorithm. The note shows the point count before and after.",
               c => SimplifyScaleDemo.Draw(c))
               .Ui(Param.Scale, "View scale (1.00 = 1:1; at or below it the curve is simplified)", Param.Grid, "Simplification threshold, px (0 = off)", Param.Op, "Simplification algorithm")
               .Ops("None", "Linear (Douglas-Peucker)", "Snap To Grid", "Visvalingam")
               .Range(Param.Grid, 0, 20).With(Param.Grid, 2);
-            L[L.Count - 1].FileFilter = "MBTiles (*.mbtiles)|*.mbtiles|All files|*.*";
 
             // ===================================================== Animated SVG (SMIL)
             T(GFiles, "Animated SVG (SMIL + CSS): FrameAt / SeekToTime (button 'Open File')", "VectorImage keeps the animation of a file while importing: SMIL tracks (<animate> of the d attribute, <animateTransform>, <animateMotion>, <set>) AND CSS animations (@keyframes of transform / opacity / stroke-dashoffset with animation-* timing, transform-box / transform-origin - the style AI-generated game art uses). SeekToTime(t) applies every track at time t (paths morph per command, transforms interpolate per function - a 0 to 360 deg spin sweeps), FrameAt(t) returns an independent frame copy, Duration / FrameCount / FrameRate / GetFrame(i) iterate the loop (FrameCount = Duration * 30 fps here). Built-in sample = a small loop when no file was chosen. 'Animate' plays the loop (the clock runs while the check box is ticked; off = frame 0); the playback rate is Speed / 6 (6 = real time). Drag to move; drag outside = rotate; Scale = zoom; Smooth = anti-aliased edges; Blend = opacity; Brite < 0 = wireframe. ClipViewport is on here: decoration the file parks beyond its canvas stays out, like in a browser. The draw goes through the layer compositor (img.Cached): content whose chain only moves is rasterised once per zoom and blitted with the chain's current matrix (slow dollies re-rasterise only when the linear part drifts); morphs / opacity / dashes stay live. Tick 'Precompose' to bake the whole loop into bitmaps once. Playback then evaluates no vector tracks: one bitmap draw per tick. First use and changes to internal resolution / fps / paint settings require a synchronous bake (can take a few seconds). Display zoom / rotation / skew only transform bitmaps and never rebake. The film budget is in MiB; if full-size frames do not fit, smaller bitmaps are baked and enlarged, without silently lowering fps. Film width fixes the internal bitmap grid independently of container size (0 = SVG intrinsic); a higher grid than the display enables area-filtered supersampling. Film fps defaults to 60 here (0 = file FrameRate, usually 30; up to 240 for high-refresh displays). Live vectors sample every render; a 30 fps film holds each sample for 33 ms, so image resolution alone cannot fix temporal choppiness. The note reports actual fps, bitmap size, resolution percentage, memory and bake time. The note shows the track count, the seek + draw cost and the cache stats.", c =>
             {
                 var t = L.Find(x => x.Name.StartsWith("Animated SVG", StringComparison.Ordinal))!;
                 var (img, info) = EnsureAnimVector(t.FilePath);
-                var o = new VectorRenderOptions { AA = c.Smooth, Opacity = c.Blend / 255f, Strokes = true, Fills = c.Brite >= 0, FastLines = c.FastLines, Wireframe = c.Wireframe };
+                var o = new VectorRenderOptions { AA = c.Smooth, Opacity = c.Blend / 255f, Strokes = true, Fills = c.Brite >= 0, FastLines = c.FastLines, Wireframe = c.Wireframe, WireframeColor = c.WireColor };
                 var osz = VectorObjectSize(c, img);                        // picture size on the canvas at Scale 1 (longer side = 1.5 x sprite)
                 float fit = osz.Width / MathF.Max(1e-3f, img.Width);
                 float pfx = c.PivotXF < 0 ? 0.5f : c.PivotXF / osz.Width, pfy = c.PivotYF < 0 ? 0.5f : c.PivotYF / osz.Height;
@@ -1436,7 +1441,7 @@ T(GControls, "SpriteLabel / GroupBox / Tabs / TextBox / Numeric / Combo / ListBo
                     ? Math.Clamp((int)Math.Floor(tt * playedFrames / img.Duration + 1e-9), 0, playedFrames - 1) + 1
                     : (int)(tt * img.FrameRate) + 1;
                 c.Note = $"{info} | t = {tt:0.###} / {img.Duration:0.###} s = frame {playedIndex}/{playedFrames} | {img.Tracks.Count} tracks, {img.Shapes.Count} shapes | frame {ms:F2} ms | {vs.LayerSummary}{warn}";
-            }, needsPoly: true).Ui(Param.Wireframe, "Show wireframe (outlines of the vector shapes)", Param.Scale, "Zoom (x0.01; the longer side = 1.5 x sprite size at x1.00); drag the top / bottom edge to squish", Param.Time, "Animate: play the loop (off = stand at frame 0)", Param.Speed, "Playback rate = Speed / 6 (6 = real time, 12 = double speed)", Param.Smooth, "Anti-aliased edges", Param.FastLines, "Fast thin lines (1 px strokes without AA: faster, hard edges)", Param.Blend, "Opacity", Param.Brite, "< 0: strokes only (wireframe)", Param.Xor, "Precompose (first draw bakes the loop; off releases the bitmaps)", Param.Count, "Film budget (MiB; smaller bitmaps if necessary, never fewer fps)", Param.DotStep, "Film fps (default 60; 0 = file rate; higher = smoother motion / more memory)", Param.Z, "Internal film width (px; 0 = SVG intrinsic; fixed while resizing the container)", Param.Mouse, "Drag = move; drag outside = rotate; edges / corners = resize (Shift = keep aspect); right click = pivot").Range(Param.Count, 16, 1024).Range(Param.DotStep, 0, 240).Range(Param.Z, 0, 4096).With(Param.Count, 256).With(Param.DotStep, 60).With(Param.Z, 512).With(Param.Xor, false).With(Param.Smooth, true).With(Param.Speed, 6);
+            }, needsPoly: true).Ui(Param.Wireframe, "Show wireframe (outlines of the vector shapes)", Param.WireColor, "Wireframe colour (outline overlay)", Param.Scale, "Zoom (x0.01; the longer side = 1.5 x sprite size at x1.00); drag the top / bottom edge to squish", Param.Time, "Animate: play the loop (off = stand at frame 0)", Param.Speed, "Playback rate = Speed / 6 (6 = real time, 12 = double speed)", Param.Smooth, "Anti-aliased edges", Param.FastLines, "Fast thin lines (1 px strokes without AA: faster, hard edges)", Param.Blend, "Opacity", Param.Brite, "< 0: strokes only (wireframe)", Param.Xor, "Precompose (first draw bakes the loop; off releases the bitmaps)", Param.Count, "Film budget (MiB; smaller bitmaps if necessary, never fewer fps)", Param.DotStep, "Film fps (default 60; 0 = file rate; higher = smoother motion / more memory)", Param.Z, "Internal film width (px; 0 = SVG intrinsic; fixed while resizing the container)", Param.Mouse, "Drag = move; drag outside = rotate; edges / corners = resize (Shift = keep aspect); right click = pivot").Range(Param.Count, 16, 1024).Range(Param.DotStep, 0, 240).Range(Param.Z, 0, 4096).With(Param.Count, 256).With(Param.DotStep, 60).With(Param.Z, 512).With(Param.Xor, false).With(Param.Smooth, true).With(Param.Speed, 6);
             L[L.Count - 1].MouseRotates = true; L[L.Count - 1].Resizable = true; L[L.Count - 1].AnimSpin = 0f;
             L[L.Count - 1].ObjectSize = c => { var vt = L.Find(x => x.Name.StartsWith("Animated SVG", StringComparison.Ordinal))!; var (vi, _) = EnsureAnimVector(vt.FilePath); return VectorObjectSize(c, vi); };
             L[L.Count - 1].FileFilter = "Animated SVG|*.svg;*.svgz|SVG (*.svg, *.svgz)|*.svg;*.svgz|All files|*.*";
@@ -2724,7 +2729,7 @@ T(GControls, "SpriteLabel / GroupBox / Tabs / TextBox / Numeric / Combo / ListBo
                 if (!any) return;
                 float cu = (l + r) / 2, cv = (t + b) / 2;
                 foreach (var (pic, dx, dy) in items)
-                    pic.Draw(c.Canvas, System.Numerics.Matrix3x2.CreateTranslation(dx - cu, dy - cv) * System.Numerics.Matrix3x2.CreateScale(zoom) * System.Numerics.Matrix3x2.CreateTranslation(c.X, c.Y), new VectorRenderOptions { FastLines = c.FastLines, Wireframe = c.Wireframe });
+                    pic.Draw(c.Canvas, System.Numerics.Matrix3x2.CreateTranslation(dx - cu, dy - cv) * System.Numerics.Matrix3x2.CreateScale(zoom) * System.Numerics.Matrix3x2.CreateTranslation(c.X, c.Y), new VectorRenderOptions { FastLines = c.FastLines, Wireframe = c.Wireframe, WireframeColor = unchecked((int)0xFFFFFFFF) });   // text: white wireframe
             }
         }
 

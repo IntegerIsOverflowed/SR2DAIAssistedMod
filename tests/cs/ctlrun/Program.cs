@@ -2118,6 +2118,7 @@ static class P {
     VectorTextChecks.Run();
     VectorTextChecks.DotsAndSimplify();
     OutlineSeamChecks.Run();
+    OutlineSeamChecks.BakeRun();
     RasterFuzz.Run();
     MouseClickEvents();
     Looks();
