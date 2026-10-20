@@ -34,7 +34,7 @@ namespace Sr2d64CSport
         static readonly Dictionary<Param, int> GenericDefaults = new Dictionary<Param, int>
         {
             [Param.Count] = 1, [Param.Angle] = 0, [Param.Scale] = 100, [Param.Blend] = 128, [Param.Brite] = 100, [Param.Z] = 120, [Param.DotStep] = 0,
-            [Param.Op] = 0, [Param.Smooth] = 0, [Param.NotMask] = 0, [Param.Xor] = 0, [Param.Mouse] = 0, [Param.MaskBits] = 1, [Param.Time] = 1,
+            [Param.Op] = 0, [Param.Smooth] = 0, [Param.NotMask] = 0, [Param.Xor] = 0, [Param.FastLines] = 0, [Param.Mouse] = 0, [Param.MaskBits] = 1, [Param.Time] = 1,
             [Param.Grid] = 64, [Param.Speed] = 6, [Param.GridOn] = 1, [Param.OffsetX] = 0, [Param.OffsetY] = 0,
         };
         static readonly Dictionary<Param, (int, int)> GenericRanges = new Dictionary<Param, (int, int)>
@@ -129,7 +129,7 @@ namespace Sr2d64CSport
         // SpriteToggle in the check-box style, SpriteRadio / SpriteToggle for the bit boxes
         readonly ParamSlider tbCount = new ParamSlider(), tbAngle = new ParamSlider(), tbScale = new ParamSlider(), tbBlend = new ParamSlider(), tbBrite = new ParamSlider(), tbZ = new ParamSlider(), tbDot = new ParamSlider(), tbGrid = new ParamSlider(), tbSpeed = new ParamSlider(), tbOffX = new ParamSlider(), tbOffY = new ParamSlider();
         readonly SpriteCombo cbOp = new SpriteCombo(), cbCanvas = new SpriteCombo(), cbSprite = new SpriteCombo(), cbSimd = new SpriteCombo(), cbAssets = new SpriteCombo();
-        readonly SpriteToggle chkSmooth = Tick(), chkNot = Tick(), chkXor = Tick(), chkFollow = Tick(), chkAnim = Tick(), chkClear = Tick(), chkVsync = Tick(), chkPresent = Tick(), chkGdi = Tick(), chkPar = Tick(), chkRealFont = Tick(), chkGridLines = Tick();
+        readonly SpriteToggle chkSmooth = Tick(), chkNot = Tick(), chkXor = Tick(), chkFast = Tick(), chkFollow = Tick(), chkAnim = Tick(), chkClear = Tick(), chkVsync = Tick(), chkPresent = Tick(), chkGdi = Tick(), chkPar = Tick(), chkRealFont = Tick(), chkGridLines = Tick();
         static SpriteToggle Tick() => new SpriteToggle { Style = ToggleStyle.CheckBox, Size = new Size(280, 24) };
         // bit boxes (mask bits / lighting tier / projection views ...): rebuilt per test, check boxes or radio buttons
         readonly List<SpriteClickable> bitBoxes = new List<SpriteClickable>();
@@ -334,12 +334,13 @@ namespace Sr2d64CSport
             Check(testStack, chkGridLines, "Grid lines", true, Param.GridOn);
             Check(testStack, chkSmooth, "Smooth (AA / bilinear / point light)", false, Param.Smooth);
             Check(testStack, chkXor, "XOR lines", false, Param.Xor);
+            Check(testStack, chkFast, "Fast thin lines (vectors: 1 px strokes without AA)", false, Param.FastLines);
             Check(testStack, chkAnim, "Animate (off = time stands still at 0)", true, Param.Time);
             Check(testStack, chkFollow, "Follow the mouse (off: drag it, right click = jump)", false, Param.Mouse);
             var btnRow = new SpriteStackPanel { Orientation = Orientation.Horizontal, Wrap = true, AutoSize = true, Gap = 4, Padding = new Padding(-2, 0, -2, 0), Stretch = false };
             Btn(btnRow, btnReset, "Reset params", (_, _) => ResetParams());
             Btn(btnRow, btnCode, "Code (F2)", (_, _) => ShowCode(!codeShown));
-            Btn(btnRow, btnFile, "Open file...", (_, _) => OpenTestFile()); btnFile.Visible = false;
+            Btn(btnRow, btnFile, "Open File", (_, _) => OpenTestFile()); btnFile.Visible = false;
             testStack.Controls.Add(btnRow);
             // slow tests only
             Btn(testStack, btnMeasure, "Measure fps (render N frames)", (_, _) => StartMeasure()); btnMeasure.Visible = false;
@@ -362,6 +363,16 @@ namespace Sr2d64CSport
             lblDesc.TextFontFamily = real ? "Segoe UI" : ""; lblDesc.TextFontSize = 13;
             log.TextFontFamily = codeBox.TextFontFamily = real ? "Consolas" : ""; log.TextFontSize = codeBox.TextFontSize = 12;
         }
+
+        /// <summary>Sets the Open File button text and fits its width to the text. Btn sets the width once, so a longer text would clip.</summary>
+        void SetFileButton(string text)
+        {
+            btnFile.Text = text;
+            btnFile.Size = new Size(Sprite.MeasureText(text).Width + 22, 26);
+            btnFile.Parent?.PerformLayout();
+        }
+        /// <summary>A long file name is shortened on the button (the full path is in the log).</summary>
+        static string FileLabel(string name) => name.Length <= 28 ? name : name.Substring(0, 25) + "...";
 
         static void Btn(Control parent, SpriteButton b, string text, EventHandler onClick)
         {
@@ -427,7 +438,7 @@ namespace Sr2d64CSport
                     "X" or "Y" or "PivotX" or "PivotY" or "PivotXF" or "PivotYF" => Param.Mouse,
                     "Z" => Param.Z, "Angle" => Param.Angle, "Scale" or "ScaleY" => Param.Scale, "Blend" => Param.Blend, "Brite" => Param.Brite,
                     "Count" => Param.Count, "Smooth" => Param.Smooth, "NotMask" => Param.NotMask, "MaskBits" => Param.MaskBits, "Op" => Param.Op,
-                    "DotStep" => Param.DotStep, "Xor" => Param.Xor, "Time" => Param.Time, "Yaw" or "Pitch" or "PanX" or "PanY" => Param.Camera,
+                    "DotStep" => Param.DotStep, "Xor" => Param.Xor, "FastLines" => Param.FastLines, "Time" => Param.Time, "Yaw" or "Pitch" or "PanX" or "PanY" => Param.Camera,
                     _ => Param.None,
                 };
             }
@@ -514,7 +525,7 @@ namespace Sr2d64CSport
         {
             [Param.Count] = tbCount.Value, [Param.Angle] = tbAngle.Value, [Param.Scale] = tbScale.Value, [Param.Blend] = tbBlend.Value, [Param.Brite] = tbBrite.Value,
             [Param.Z] = tbZ.Value, [Param.DotStep] = tbDot.Value, [Param.Op] = cbOp.SelectedIndex, [Param.Smooth] = chkSmooth.Checked ? 1 : 0, [Param.NotMask] = chkNot.Checked ? 1 : 0,
-            [Param.Xor] = chkXor.Checked ? 1 : 0, [Param.Mouse] = chkFollow.Checked ? 1 : 0, [Param.MaskBits] = BitMask(), [Param.Time] = chkAnim.Checked ? 1 : 0, [Param.Grid] = tbGrid.Value, [Param.Speed] = tbSpeed.Value, [Param.GridOn] = chkGridLines.Checked ? 1 : 0, [Param.OffsetX] = tbOffX.Value, [Param.OffsetY] = tbOffY.Value,
+            [Param.Xor] = chkXor.Checked ? 1 : 0, [Param.FastLines] = chkFast.Checked ? 1 : 0, [Param.Mouse] = chkFollow.Checked ? 1 : 0, [Param.MaskBits] = BitMask(), [Param.Time] = chkAnim.Checked ? 1 : 0, [Param.Grid] = tbGrid.Value, [Param.Speed] = tbSpeed.Value, [Param.GridOn] = chkGridLines.Checked ? 1 : 0, [Param.OffsetX] = tbOffX.Value, [Param.OffsetY] = tbOffY.Value,
         };
         void WriteParams(DemoTest t, Dictionary<Param, int> v)
         {
@@ -522,7 +533,7 @@ namespace Sr2d64CSport
             void Tb(ParamSlider tb, Param p) => tb.Value = Math.Clamp(Get(p), tb.Minimum, tb.Maximum);
             Tb(tbCount, Param.Count); Tb(tbAngle, Param.Angle); Tb(tbScale, Param.Scale); Tb(tbBlend, Param.Blend); Tb(tbBrite, Param.Brite); Tb(tbZ, Param.Z); Tb(tbDot, Param.DotStep); Tb(tbGrid, Param.Grid); Tb(tbSpeed, Param.Speed); Tb(tbOffX, Param.OffsetX); Tb(tbOffY, Param.OffsetY);
             cbOp.SelectedIndex = Math.Clamp(Get(Param.Op), 0, cbOp.Items.Count - 1);
-            chkSmooth.Checked = Get(Param.Smooth) != 0; chkNot.Checked = Get(Param.NotMask) != 0; chkXor.Checked = Get(Param.Xor) != 0;
+            chkSmooth.Checked = Get(Param.Smooth) != 0; chkNot.Checked = Get(Param.NotMask) != 0; chkXor.Checked = Get(Param.Xor) != 0; chkFast.Checked = Get(Param.FastLines) != 0;
             chkFollow.Checked = Get(Param.Mouse) != 0; chkAnim.Checked = Get(Param.Time) != 0; chkGridLines.Checked = Get(Param.GridOn) != 0;
             SetBitMask(Get(Param.MaskBits));
             scaleY = tbScale.Value / 100f;
@@ -799,7 +810,8 @@ namespace Sr2d64CSport
             if (current != null) { savedParams.Remove(current); WriteParams(current, new Dictionary<Param, int>()); }
             chkClear.Checked = chkPresent.Checked = true;
             camYaw = 0.8f; camPitch = 0.55f; camPanX = camPanY = 0; animTime = 0; pivotX = pivotY = -1;
-            if (canvas != null) GoHome(current);
+            if (canvas != null) GoHome(current);                 // the pan (the mouse position) back to the centre
+            current?.OnReset?.Invoke();                          // a test with its own view (the map) recentres too
         }
 
         void ReloadTests()
@@ -896,7 +908,7 @@ namespace Sr2d64CSport
             btnFile.Visible = t.FileFilter != null;
             btnMeasure.Visible = chkProgress.Visible = t.SlowFrames > 0;
             ShowStrip(t);
-            btnFile.Text = t.FilePath != null ? "Open file... (" + (t.FilePath.Contains('|') ? t.FilePath.Split('|').Length + " files" : Path.GetFileName(t.FilePath)) + ")" : "Open file...";
+            SetFileButton(t.FilePath != null ? "Open File (" + (t.FilePath.Contains('|') ? t.FilePath.Split('|').Length + " files" : FileLabel(Path.GetFileName(t.FilePath))) + ")" : "Open File");
             StartSlowRun();
             emaRender = -1;
             fpsFrames = 0; fpsAccumMs = renderAccumMs = presentAccumMs = 0;
@@ -1048,6 +1060,7 @@ namespace Sr2d64CSport
             ctx.Smooth = chkSmooth.Checked;
             ctx.NotMask = chkNot.Checked;
             ctx.Xor = chkXor.Checked;
+            ctx.FastLines = chkFast.Checked;
             ctx.DotStep = tbDot.Value;
             ctx.Grid = tbGrid.Value;
             ctx.Speed = tbSpeed.Value;
@@ -1099,7 +1112,7 @@ namespace Sr2d64CSport
         // (preview while dragging, one full frame when it rests).
         int slowLeft, slowTotal; double slowTotalMs, slowRenderMs, slowFirstMs; string slowSig = ""; bool slowFrozen; double slowChangedAt = -1; bool slowPreviewing, measuring;
         const double SlowIdleMs = 500;   // a slow test starts its real frame this long after the last control change (previews meanwhile)
-        string SlowSignature() => $"{mouseX},{mouseY},{tbZ.Value},{tbAngle.Value},{tbScale.Value},{tbBlend.Value},{tbBrite.Value},{tbCount.Value},{chkSmooth.Checked},{chkNot.Checked},{chkXor.Checked},{tbDot.Value},{cbOp.SelectedIndex},{BitMask()},{chkPar.Checked},{canvas?.Width}x{canvas?.Height},{camYaw:F3},{camPitch:F3},{camPanX},{camPanY},{current?.FilePath}";
+        string SlowSignature() => $"{mouseX},{mouseY},{tbZ.Value},{tbAngle.Value},{tbScale.Value},{tbBlend.Value},{tbBrite.Value},{tbCount.Value},{chkSmooth.Checked},{chkNot.Checked},{chkXor.Checked},{chkFast.Checked},{tbDot.Value},{cbOp.SelectedIndex},{BitMask()},{chkPar.Checked},{canvas?.Width}x{canvas?.Height},{camYaw:F3},{camPitch:F3},{camPanX},{camPanY},{current?.FilePath}";
         void StartSlowRun(int frames = 1)
         {
             if (current == null || current.SlowFrames <= 0) { slowFrozen = false; prog.Visible = false; return; }
@@ -1243,7 +1256,7 @@ namespace Sr2d64CSport
             if (current.FilePath != null) { try { dlg.InitialDirectory = Path.GetDirectoryName(current.FilePath.Split('|')[0]); } catch { } }
             if (dlg.ShowDialog(this) != DialogResult.OK) return;
             current.FilePath = string.Join("|", dlg.FileNames);
-            btnFile.Text = "Open file... (" + (dlg.FileNames.Length > 1 ? dlg.FileNames.Length + " files" : Path.GetFileName(dlg.FileName)) + ")";
+            SetFileButton("Open File (" + (dlg.FileNames.Length > 1 ? dlg.FileNames.Length + " files" : FileLabel(Path.GetFileName(dlg.FileName))) + ")");
             Log("file: " + current.FilePath);
             canvas?.ClearBuffer(unchecked((int)0xFF101418));
             StartSlowRun();

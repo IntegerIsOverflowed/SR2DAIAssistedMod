@@ -2108,6 +2108,16 @@ static class P {
     TextViews();
     Wheels();
     ContainerButtonStyle();
+    MbTilesChecks.Run();
+    MbTilesChecks.SimplifyAndHairlines();
+    MbTilesChecks.BakeCache();
+    MbTilesChecks.TileCache();
+    MbTilesChecks.FastLinesCheck();
+    MbTilesChecks.SimplifyScaleCheck();
+    AaHairlineChecks.Run();
+    VectorTextChecks.Run();
+    VectorTextChecks.DotsAndSimplify();
+    OutlineSeamChecks.Run();
     MouseClickEvents();
     Looks();
     Views();

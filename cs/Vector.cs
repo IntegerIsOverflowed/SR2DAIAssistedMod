@@ -345,6 +345,11 @@ namespace Sr2d64CSport
         public string? Group;
         /// <summary>Hidden shapes stay in the container (with their name) but are not drawn, hit-tested or included in bounds; saved as display:none.</summary>
         public bool Hidden;
+        /// <summary>Hairline stroke: the stroke is one device pixel wide at every zoom (map outlines). StrokeWidth is ignored.</summary>
+        public bool Hairline;
+        /// <summary>Map layer the shape came from (OpenMapTiles name such as "building"); null for other shapes. The map level
+        /// of detail (VectorImage.MapLayerMinPx) reads it.</summary>
+        public string? Layer;
         /// <summary>Set by the importers: the shape is glyph outlines of a text run (its Unicode text is in <see cref="Tag"/>) / a placed raster image.</summary>
         public bool IsText, IsImage;
         public object? Tag { get; set; }
@@ -364,7 +369,7 @@ namespace Sr2d64CSport
             var m = extra.HasValue ? Transform * extra.Value : Transform;
             if (m.IsIdentity) return this;
             Path = Path.Transformed(m); Clip = Clip?.Transformed(m);
-            float s = VectorRender.MeanScale(m); StrokeWidth *= s;
+            float s = VectorRender.MeanScale(m); if (!Hairline) StrokeWidth *= s;
             if (Dash != null) for (int i = 0; i < Dash.Length; i++) Dash[i] *= s; DashOffset *= s;
             if (Fill is VectorGradient fg && !fg.ObjectBoundingBox) fg.Matrix *= m;
             if (Stroke is VectorGradient sg && !sg.ObjectBoundingBox) sg.Matrix *= m;
@@ -376,7 +381,7 @@ namespace Sr2d64CSport
     }
 
     /// <summary>Which importer <see cref="VectorImage.Load(string)"/> used.</summary>
-    internal enum VectorFormat { Unknown, Svg, PostScript, Pdf }
+    internal enum VectorFormat { Unknown, Svg, PostScript, Pdf, MbTiles }
 
     /// <summary>
     /// A container of vector shapes with an intrinsic size (<see cref="Width"/> x <see cref="Height"/> = the view box). See the
@@ -412,9 +417,20 @@ namespace Sr2d64CSport
 
         // ------------------------------------------------------------------ loading
         /// <summary>Loads .svg / .svgz, .eps / .ps / .ai (PostScript), .pdf; the content is sniffed when the extension does not tell.</summary>
-        public static VectorImage Load(string file, int page = 0) => Load(File.ReadAllBytes(file), Path.GetExtension(file), page);
+        public static VectorImage Load(string file, int page = 0)
+        {
+            // MBTiles is a SQLite database: read it from the file, not into memory (a map can be hundreds of MB)
+            if (MbTiles.IsSqliteFile(file)) return FromMbTiles(file);
+            return Load(File.ReadAllBytes(file), Path.GetExtension(file), page);
+        }
         public static VectorImage Load(byte[] data, string? hint = null, int page = 0)
         {
+            if (MbTiles.IsSqlite(data))
+            {
+                using var ms = new MemoryStream(data);
+                using var mb = MbTiles.Open(ms);
+                return FromMbTiles(mb);
+            }
             hint = (hint ?? "").Trim().TrimStart('.').ToLowerInvariant();
             if (data.Length >= 2 && data[0] == 0x1F && data[1] == 0x8B)
             {   // gzip (svgz)
@@ -432,6 +448,7 @@ namespace Sr2d64CSport
         }
         public static VectorFormat Sniff(byte[] data, string? hint = null)
         {
+            if (MbTiles.IsSqlite(data)) return VectorFormat.MbTiles;
             if (data.Length >= 4)
             {
                 if (data[0] == '%' && data[1] == 'P' && data[2] == 'D' && data[3] == 'F') return VectorFormat.Pdf;
@@ -442,7 +459,7 @@ namespace Sr2d64CSport
             if (head.Contains("<svg", StringComparison.OrdinalIgnoreCase) || head.TrimStart().StartsWith("<?xml", StringComparison.Ordinal) || head.TrimStart().StartsWith('<')) return VectorFormat.Svg;
             int pdf = head.IndexOf("%PDF", StringComparison.Ordinal); if (pdf >= 0 && pdf < 1024) return VectorFormat.Pdf;
             if (head.Contains("%!PS", StringComparison.Ordinal)) return VectorFormat.PostScript;
-            return hint switch { "svg" or "svgz" => VectorFormat.Svg, "pdf" => VectorFormat.Pdf, "eps" or "ps" or "ai" or "epsf" => VectorFormat.PostScript, _ => VectorFormat.Unknown };
+            return hint switch { "mbtiles" => VectorFormat.MbTiles, "svg" or "svgz" => VectorFormat.Svg, "pdf" => VectorFormat.Pdf, "eps" or "ps" or "ai" or "epsf" => VectorFormat.PostScript, _ => VectorFormat.Unknown };
         }
         public static VectorImage FromSvg(string xml) { var img = SvgReader.Read(xml); img.Format = VectorFormat.Svg; return img; }
         public static VectorImage FromPostScript(byte[] ps) { var img = PsReader.Read(ps); img.Format = VectorFormat.PostScript; return img; }
@@ -649,7 +666,8 @@ namespace Sr2d64CSport
                 if (s.EvenOdd) body.Append(" fill-rule=\"evenodd\"");
                 if (s.Stroke != null)
                 {
-                    body.Append(ci, $" stroke-width=\"{F(s.StrokeWidth)}\"");
+                    if (s.Hairline) body.Append(ci, $" stroke-width=\"1\" vector-effect=\"non-scaling-stroke\"");
+                    else body.Append(ci, $" stroke-width=\"{F(s.StrokeWidth)}\"");
                     if (s.Cap != VectorCap.Butt) body.Append(ci, $" stroke-linecap=\"{s.Cap.ToString().ToLowerInvariant()}\"");
                     if (s.Join != VectorJoin.Miter) body.Append(ci, $" stroke-linejoin=\"{s.Join.ToString().ToLowerInvariant()}\"");
                     if (Math.Abs(s.MiterLimit - 4f) > 1e-3f) body.Append(ci, $" stroke-miterlimit=\"{F(s.MiterLimit)}\"");

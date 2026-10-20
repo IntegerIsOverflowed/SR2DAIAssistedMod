@@ -86,7 +86,7 @@ SR2D/
 ├─ LICENSE
 ├─ EmptySR2DFormTemplate/  as empty as Visual Studio's own WinForms template (stock Program.cs + a blank Form1) - only the form derives from SpriteForm, so a new app has the SR2D chrome from the start; copy it and start
 ├─ native/                 C++ DLL (Visual Studio 2022 solution, ClangCL toolset + x64 by default, Win32 still available)
-│  ├─ sr2d_api.h           single X-macro list of all exports (54 original + DRAW_WARP, DRAW_LINE2)
+│  ├─ sr2d_api.h           single X-macro list of all exports (54 original + DRAW_WARP, DRAW_LINE2, DRAW_LINE2_AA)
 │  ├─ sr2d_simd.h          SSE2 / AVX2 vector traits
 │  ├─ sr2d_kernels.inl     ALL pixel kernels, written once as a template
 │  ├─ sr2d_fx.inl          DRAW_FX: effect chains (blur / distortion / colour) - included by the above
@@ -102,6 +102,9 @@ SR2D/
 │  ├─ Sprite.Rect.cs       partial Sprite: Rectangle (x,y,w,h) overloads of the L/R/T/B methods, Bounds, LockRect
 │  ├─ Sprite.Curves.cs     partial Sprite: splines through points, Béziers, arcs, PathBuilder (DrawPath / FillPath)
 │  ├─ Vector.cs / .Render.cs / .Svg.cs / .Anim.cs / .Ps.cs / .Pdf.cs   VectorImage model, rasteriser, SVG (SMIL animation, alpha masks) / PostScript-EPS-AI / PDF importers
+│  ├─ Vector.MbTiles.cs    MBTiles vector map tiles → VectorImage (+ default OpenMapTiles style)
+│  ├─ MbTiles.cs / Mvt.cs  read-only SQLite reader for .mbtiles (no NuGet) / protobuf MVT decoder
+│  ├─ Vector.Simplify.cs   QGIS-style simplification (Linear / Snap To Grid / Visvalingam)
 │  ├─ Vector.Cache.cs      VectorSprite: static raster cache + animated layer compositor
 │  ├─ Vector.Precompose.cs optional bounded bitmap-loop cache: bake once, DrawAt(t) = bitmap playback without vector evaluation
 │  ├─ Vector.Edit.cs       Container edits: Recolor / SwapColors / Palette (fill, stroke or both), by-name SetFill / SetStroke / Hide / Show / Remove, Merge, Shuffle, order
@@ -747,6 +750,23 @@ Bresenham step is √2 px long, so a 1-px dot could fall entirely between two sa
 vanish. Now every dash is guaranteed at least one pixel (the nearest step) and never
 two adjacent ones from different dashes, in both directions (`linetest` checks this
 at every angle and gap, forward and reversed).
+
+## Anti-aliased hairline: `DRAW_LINE2_AA` (native, not yet in the renderer)
+
+`DrawLine2Aa(dst, dw, clipL, clipT, clipR, clipB, x0, y0, x1, y1, col, op, k)` draws a solid 1 px line with
+anti-aliasing (Wu's algorithm; pixel centres at integers, as in `DRAW_LINE2`). Each step splits the coverage between the
+two pixels either side of the ideal line; a column (or row) always sums to 255. `op` 1 (set) is a coverage-weighted lerp of
+the destination; any other op alpha-blends the colour with its alpha scaled by the coverage. Dashes, caps and blend modes
+are not supported: use `DRAW_LINE2` for those. A->B and B->A paint identical pixels.
+
+- Built into both flavours (`sr2d_kernels.inl` is compiled for SSE2 and AVX2). The code is scalar, not hand-vectorised.
+- Exported and listed in `native/SR2D.def` (the Windows export table). `SR2D_ABI` is 2 (was 1); `cs/SR2D.cs` `AbiVersion` matches.
+  **Rebuild `SR2D64.dll` on Windows** (the native project) after pulling this. A stale DLL is refused with an ABI message.
+- Tests: ctlrun `AaHairlineChecks` (coverage sums, half-pixel split 127/128, symmetry, clip, a lerp over a coloured
+  background against a C# reference) and the timing against `DRAW_LINE2`.
+- Measured (2-core sandbox, AVX2 dispatch, median of 7): 20,000 random segments of about 350 px into 1000×700:
+  `DRAW_LINE2` 14.7 ms, `DRAW_LINE2_AA` 189.5 ms (about 13×). It writes two pixels per step and is scalar, so it is far
+  from free; it is the quality option, not the fast one. The renderer does not use it yet.
 
 ## Shapes: `cs/Sprite.Shapes.cs` (`DRAW_POLY`)
 
@@ -2197,6 +2217,142 @@ feature, a PDF with xref + object streams / shadings / a type-4 function / `Rota
 with a broken `startxref`, an RC4-encrypted PDF, a DOS-EPS with binary header, the Ghostscript
 tiger as SVG and EPS, `golfer.eps`, `colorcir.ps`). `tests/cs/vecrun` loads them headlessly and
 dumps renderings (`vecrun.dll <outdir> <files...>`, then `topng.py`).
+
+### MBTiles map tiles (`cs/MbTiles.cs`, `cs/Mvt.cs`, `cs/Vector.MbTiles.cs`)
+
+An `.mbtiles` file (a SQLite database of tiles) with vector tiles (format `pbf`, MVT) loads as a
+`VectorImage`, so it draws at any scale like an SVG. The SQLite reader is part of the engine: read-only,
+no NuGet package, handles multi-page tables and gzip-compressed tiles.
+
+```csharp
+using var mb = MbTiles.Open("map.mbtiles");          // Name, Format, MinZoom, MaxZoom, DataMaxZoom, West/South/East/North
+byte[]? tile = mb.GetTile(z, x, yXyz);               // null if the tile is not in the file; gzip is removed
+List<MvtLayer>? layers = tile is null ? null : Mvt.Decode(tile);   // layers → features: Props, Geoms (tile units), GeomType 1 point / 2 line / 3 polygon
+
+var map = VectorImage.FromMbTiles("map.mbtiles", new MbTilesView {
+    Zoom = 13,                                       // -1 (default) = DataMaxZoom, the highest zoom with tiles
+    West = 61.2, South = 55.05, East = 61.6, North = 55.25,   // default = whole file
+    Style = null,                                    // null = MbTilesStyle.Default (OpenMapTiles); or your own MbTilesStyleRule
+    Labels = true                                    // road names along the road, place names straight (vector text, no pixels)
+});
+map.DrawFit(canvas);                                 // or Rasterize(w, h)
+
+// A city is tens of thousands of shapes: build the grid once, then draw only what touches the view.
+map.BuildIndex();                                    // grid over the shapes' bounds (BuildIndex(cell) to change the cell size)
+map.DrawVisible(canvas, matrix, null, 1.5f);         // image -> canvas matrix; shapes smaller than 1.5 px on screen are skipped
+```
+
+`DrawVisible` gives the same pixels as `Draw` for the visible part, and it keeps the drawing order. The
+TrackMap map project uses it for every frame: while the zoom changes it draws the vectors into the window,
+and when the zoom is still it bakes a larger bitmap that is moved with the pan.
+
+`VectorViewCache` (`cs/Vector.Index.cs`, internal) is the bitmap cache those maps use: `Bake(img, key, w, h, cx, cy, k, opts, minPx, background)`
+draws the picture into a bitmap twice the canvas, `Covers(key, w, h, cx, cy, k)` says whether a view is still inside
+it, and `Blit(canvas, cx, cy)` copies it at whole pixels (`ViewMatrix` is the view matrix both use). The key must contain
+everything that changes the pixels (file, level, simplification, minimum size, antialiasing). A zoom change or a pan past
+the margin needs a new bake; while the view moves, draw directly. ctlrun `BakeCache` checks that an integer pan of a baked
+view equals the direct draw.
+
+`VectorTileCache` (`cs/Vector.Index.cs`, internal) is the cache the demo's map uses (its bitmap-cache flag). The canvas is
+covered by 256 px tiles on a lattice fixed to the picture at the current scale; each tile is drawn once with `DrawVisible`
+and kept in an LRU (`MaxTiles` = 256, about 64 MB). `Draw(img, canvas, cx, cy, k, key, opts, minPx, background)`
+copies the tiles it has, draws the missing tiles on screen in parallel, and starts a background task for the ring of
+tiles two tiles wide around the view (`PrefetchRing`, `Prefetch`), so the next pan finds its tiles ready. The view centre
+is rounded to whole device pixels. A changed key or scale drops every tile, so zoom frames draw all their tiles again
+(parallel). `Busy` says whether the background is still drawing. Threads: `DrawVisible` and `ShapesIn` may be called from
+several threads at once (the shape index is read only, and the visible view is made per call). ctlrun `TileCache` checks
+that a tile frame equals the direct draw at the same whole-pixel centre (pans and a zoom), that a warm frame equals a cold
+one, and that the cache stays within `MaxTiles`.
+
+`VectorRenderOptions.FastLines` (default false) paints strokes of at most 1 device pixel without anti-aliasing: their
+edges are hard, the fills keep the AA setting, and the stroke pass is about 40% faster (ctlrun `FastLinesCheck`: a z11 map
+frame 48.6 ms full, 28.8 ms with FastLines, median of 5, 2-core sandbox). The anti-aliased 1 px line
+routine now exists in the native code (`DRAW_LINE2_AA`, see its section below), but the renderer does not use it yet.
+
+**Outlines are hairlines.** Building outlines (`MbPaint.Hairline`) are one device pixel at every zoom, not a width in
+map units. Any shape can do this: `VectorShape.Hairline = true` (the `StrokeWidth` is then ignored; SVG export writes
+`vector-effect="non-scaling-stroke"`).
+
+**Map level of detail.** Every shape from a tile keeps its OpenMapTiles layer in `VectorShape.Layer` ("building", "road", ...).
+Only for a map (`VectorImage.IsMap`, set by the importer), `DrawVisible` leaves out a shape whose layer is in
+`MapLayerMinPx` while its larger side is smaller than that many device pixels. The importer sets "building" to 2.5 px,
+so houses disappear when the map is zoomed out. Other pictures are not affected.
+
+**Parallel import.** `MbTilesView.Threads` (default 0 = all processors; 1 = one thread) decodes and builds the tiles in
+parallel. The tiles are read in order and joined in order, so the picture is the same at any thread count. The style rule
+is called from several threads, so use 1 for a rule that is not thread-safe. On a 2-core machine the z14 import of the
+whole test file took 1.2-1.8 s with 2 threads against 1.4-1.8 s with 1 (the timings vary between runs).
+
+Limits: raster MBTiles (png / jpg) throw `NotSupportedException`; icons are not drawn. Labels are placed
+without collision checks, so dense streets can overlap. Loading a whole city at zoom 13 is tens of thousands
+of shapes, so pick a smaller `West/South/East/North` or a lower `Zoom` when you only need an overview.
+
+### Simplification and hairlines (`cs/Vector.Simplify.cs`)
+
+QGIS-style "Simplify geometry" for vector pictures. `SimplifySettings { Tolerance, Algorithm, ProviderSide }`:
+
+- `SimplifyAlgorithm.Linear` - Douglas-Peucker: drops points within the threshold of the line.
+- `SimplifyAlgorithm.SnapToGrid` - points move to the grid (the threshold is the cell size); repeats are dropped.
+- `SimplifyAlgorithm.Visvalingam` - removes the point with the smallest triangle first, until every triangle is at least threshold² in area.
+- `ProviderSide = true` (the default) simplifies each feature while the MBTiles tiles are read; `false` simplifies the built picture. The result is the same.
+
+```csharp
+var map = VectorImage.FromMbTiles("map.mbtiles", new MbTilesView {
+    Zoom = 13,
+    Simplify = new SimplifySettings { Tolerance = 1.0, Algorithm = SimplifyAlgorithm.Linear },  // null = off
+    HairlineAll = true,      // every line and outline is one device pixel, as in QGIS (default)
+    StreetNames = false,     // "hide names of streets"
+});
+img.Simplify(settings);      // any VectorImage (for example an SVG), in place
+```
+
+Thresholds are in picture units (for MBTiles, pixels at the zoom read). A shape that would collapse keeps its geometry. **Maximum scale (`SimplifySettings.MaxScale`, default 1.0 = 1:1).** `MaxScale` is the view scale (screen pixels per picture unit) at or
+below which simplification applies. Zoomed out to 1:1 or further the picture is simplified; zoomed in past `MaxScale` it shows
+the full detail. `settings.AppliesAt(viewScale)` is the test (`On && viewScale <= MaxScale`). The demo test "Simplify by scale" (group
+GMaps) shows both states and the point counts. ctlrun `SimplifyScaleCheck` covers the rule.
+
+`VectorTextPathOptions.Centred = true` puts the middle of the capitals on the path (road names use it).
+
+### Text without fonts: `VectorText` (`cs/VectorText.cs`)
+
+Text drawn from open straight strokes, so it needs no font file and stays sharp at any scale. The glyph
+data is the "Angular Vector Font" (Latin, Cyrillic, digits, punctuation; 151 glyphs), stored as a string
+table in the file. Size is the cap height in pixels.
+
+From an app that has a `Sprite` (the public wrapper, `cs/VectorText.cs`): `sprite.DrawVectorText(text, x, y, capHeight, color, style)`
+draws the outlines with (x, y) as the top-left of the box and returns the box; `sprite.VectorTextWidth(text, capHeight, style)`
+returns the width of that same box. `VectorText` and `VectorImage` stay internal.
+
+- `Bold` widens the stroke, `Italic` skews it.
+- `Radius` (default 6 font units) rounds each interior corner with a quadratic curve. `0` keeps the corners angular.
+- `TipDrop` (default 0) limits how far an acute tip may be cut back. `0` keeps the tips sharp.
+- `Monospace` gives every glyph the same advance; wide glyphs are squeezed to fit.
+- `Join` (default `Bevel`, as in the font file; `Miter`, `Round`) is the corner shape of the strokes. Radius 0 shows it best.
+- `Cap` (default `Butt`; `Round`, `Square`) is the end of open strokes.
+- `OutlinePosition` (default `Center`; `Inside`, `Outside`) puts the stroke of a closed glyph inside or outside its edge.
+  The curve is never moved: the contour keeps its rounded nodes, its stroke is drawn twice as wide and clipped to the
+  inside of the contour (`Inside`) or to a rectangle around it with the contour as a hole, even-odd (`Outside`).
+  The clip is an ordinary `VectorShape.Clip`, so the SVG export writes it as a `clipPath`. Open strokes are always centred.
+  Outside bands can touch the neighbouring letters at the default tracking. ctlrun `VectorTextChecks` checks the nodes and the
+  rendered band position on both sides.
+  Open strokes (the bars of A, the stem of T) stay centred. Miter joins use the 4x limit.
+
+```csharp
+var title = VectorText.Create("Hello 2026", 20f, new VectorTextStyle { Bold = true, Radius = 6f });
+title.Draw(canvas, 10, 10);
+
+var pts = new List<PointF> { /* a road or river, image coordinates */ };
+var label = VectorText.OnPath("The quick brown fox", pts, 12f,
+    new VectorTextPathOptions { Align = VectorTextAlign.Center, Above = true });   // or FitToPath = true
+label.Draw(canvas, System.Numerics.Matrix3x2.Identity);                              // path coordinates
+```
+
+Text on a path places every glyph point by its distance along the path and its height from the path.
+`Above = false` hangs the text under the line with the glyphs upright. `FitToPath = true` stretches the
+ink so it spans the whole path. `Width` and `OnPath` use the ink extent, not the advance.
+
+Limits: characters without a glyph are left as a gap (`VectorText.HasGlyph`). Glyphs are straight-stroked,
+so they are not bent along a curve; long straight segments of a glyph are not bent either.
 
 ## WebP pictures: `cs/WebP.cs` (`Sprite.FromWebP`, automatic in `new Sprite(file)`)
 

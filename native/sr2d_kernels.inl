@@ -2329,6 +2329,94 @@ struct K
         }
     }
 
+    // ================================================================ anti-aliased hairline
+    // DRAW_LINE2_AA: a solid 1 px anti-aliased line (Wu's algorithm). Pixel centres are at integers, as in
+    // DRAW_LINE2. At each step along the major axis the coverage is split between the two pixels either side of
+    // the ideal line in proportion to their distance from it (the two shares of a column always add to 255).
+    // op 1 (set) is a coverage-weighted lerp of the destination; any other op alpha-blends the colour with its
+    // alpha scaled by the coverage (k is unused). Dashes, caps and blend modes are DRAW_LINE2's job, not this one's.
+    // The walk starts from the endpoints sorted along the major axis, so A->B and B->A paint identical pixels.
+    static SR2D_INLINE void aa_put(int* d, int col, int cov, int op)
+    {
+        if ((op & 0xff) == 1)
+        {
+            // the four channels in four 16-bit lanes of one word (B, G, R, A): every lane stays below 65536, so one
+            // multiply-add does the whole lerp, and the /255 is done per lane by floor(v/255) = (v + 1 + (v >> 8)) >> 8
+            // (exact for v <= 65152, the largest value here; checked by brute force)
+            const uint64_t lo = (uint32_t)col, ld = (uint32_t)*d;
+            const uint64_t S = (lo & 0xffu) | ((lo & 0xff00u) << 8) | ((lo & 0xff0000u) << 16) | ((lo >> 24) << 48);
+            const uint64_t T = (ld & 0xffu) | ((ld & 0xff00u) << 8) | ((ld & 0xff0000u) << 16) | ((ld >> 24) << 48);
+            const uint64_t c = (uint64_t)cov, ci = (uint64_t)(255 - cov);
+            const uint64_t K = 0x0001000100010001ull, M = 0x00ff00ff00ff00ffull;
+            const uint64_t v = S * c + T * ci + 127u * K;                   // lane = sc*cov + tc*(255-cov) + 127
+            const uint64_t w = (v + K + ((v >> 8) & M)) >> 8;               // w = floor(v / 255) + garbage above bit 8
+            const uint64_t q = w & M;                                       // one channel per lane, 0..255
+            *d = (int)((q & 0xffu) | ((q >> 8) & 0xff00u) | ((q >> 16) & 0xff0000u) | ((q >> 24) & 0xff000000u));   // lane i -> byte i
+        }
+        else
+        {
+            const uint32_t a = (((uint32_t)col >> 24) * (uint32_t)cov + 127u) / 255u;
+            *d = line_px(3, 0, (int)(((uint32_t)col & 0x00ffffffu) | (a << 24)), *d);
+        }
+    }
+
+    static SR2D_INLINE int aa_floor(double v) { const int i = (int)v; return (double)i > v ? i - 1 : i; }
+
+    static void DRAW_LINE2_AA(int* dst, int dw, int clipL, int clipT, int clipR, int clipB,
+                              float x0, float y0, float x1, float y1, int col, int op, int k)
+    {
+        (void)k;
+        if (clipL >= clipR || clipT >= clipB) return;
+        if (!(x0 > -1e9f && x0 < 1e9f && y0 > -1e9f && y0 < 1e9f && x1 > -1e9f && x1 < 1e9f && y1 > -1e9f && y1 < 1e9f)) return;
+
+        // a = major axis (the larger extent), b = minor axis; a pixel is (a, b) when steep is false, (b, a) when true
+        const double dxd = (double)x1 - x0, dyd = (double)y1 - y0;
+        const bool steep = (dyd < 0 ? -dyd : dyd) > (dxd < 0 ? -dxd : dxd);
+        double a0 = steep ? y0 : x0, b0 = steep ? x0 : y0, a1 = steep ? y1 : x1, b1 = steep ? x1 : y1;
+        if (a1 < a0) { double t = a0; a0 = a1; a1 = t; t = b0; b0 = b1; b1 = t; }   // sorted along the major axis
+        const double dA = a1 - a0, dB = b1 - b0;
+        const double slope = dA > 0 ? dB / dA : 0.0;
+        // valid pixel ranges on each axis (exclusive upper bounds)
+        const double aL = steep ? clipT : clipL, aH = steep ? clipB : clipR;
+        const double bL = steep ? clipL : clipT, bH = steep ? clipR : clipB;
+
+        // Liang-Barsky against [aL-1, aH] x [bL-1, bH]: outside it no pixel can receive coverage
+        double t0 = 0.0, t1 = 1.0;
+        {
+            const double p[4] = { -dA, dA, -dB, dB };
+            const double q[4] = { a0 - (aL - 1), aH - a0, b0 - (bL - 1), bH - b0 };
+            for (int i = 0; i < 4; ++i)
+            {
+                if (p[i] == 0.0) { if (q[i] < 0.0) return; }
+                else
+                {
+                    const double t = q[i] / p[i];
+                    if (p[i] < 0) { if (t > t1) return; if (t > t0) t0 = t; }
+                    else          { if (t < t0) return; if (t < t1) t1 = t; }
+                }
+            }
+        }
+        const double lo = a0 + dA * t0 < aL ? aL : a0 + dA * t0;
+        const double hi = a0 + dA * t1 > aH - 1 ? aH - 1 : a0 + dA * t1;
+        if (hi < lo) return;
+        const int first = aa_floor(lo + 0.5), last = aa_floor(hi + 0.5);
+
+        auto put = [&](int x, int y, int cov)
+        {
+            if (cov <= 0 || x < clipL || x >= clipR || y < clipT || y >= clipB) return;
+            aa_put(dst + (ptrdiff_t)y * dw + x, col, cov, op);
+        };
+        for (int a = first; a <= last; ++a)
+        {
+            const double b = b0 + ((double)a - a0) * slope;   // the ideal line at this step, from the unclipped endpoints
+            const int bi = aa_floor(b);
+            const int c2 = (int)((b - bi) * 255.0 + 0.5);     // share of the pixel below (larger b)
+            const int c1 = 255 - c2;                          // share of the pixel at floor(b)
+            if (steep) { put(bi, a, c1); put(bi + 1, a, c2); }
+            else       { put(a, bi, c1); put(a, bi + 1, c2); }
+        }
+    }
+
     // ================================================================ polygon
     // DRAW_POLY: scanline rasteriser for one or more closed contours.
     //   * winding: non-zero (default) or even-odd (flag 2). Overlapping contours of

@@ -16,6 +16,151 @@ Conventions
   DOCS     README / comments only
 
 
+2026-10-19  Map open test: bitmap-cache drag, hide by zoom, reset; SVG slowdown; vector text centred and zoomed
+------------------------------------------------------------------------------------------------
+ADDED    cs/Vector.Index.cs VectorViewCache (internal): the bitmap cache of a picture (Bake / Covers / Blit).
+         ctlrun BakeCache: an integer-pan blit of a baked view equals the direct draw (mean difference 0.0001).
+FIXED    Vector map test: the bitmap-cache blit had the pan sign reversed (the map drifted or stopped matching
+         the cursor). The cache key now holds the minimum size and antialiasing, so "Hide by zoom" updates the
+         map at once. Reset recentres the map (MapDemo.ResetView through the new DemoTest.OnReset).
+FIXED    SVG import test slow: the size and pick callers passed no simplification, so the single-slot cache key
+         differed from the draw call and the file was re-read and re-simplified every frame. All three callers
+         now pass SvgSimplify(c).
+CHANGED  Simplification algorithm lists (vector map, SVG import) start with "None" (index 0 = off). Existing
+         saved settings shift by one entry.
+CHANGED  Vector text tests (alphabet, styles, outlines, curves): Size is Count (a slider only); Scale is the zoom
+         (slider and wheel); the content is centred on the canvas by TextScene; drag anywhere moves the view.
+         Compat: the saved Scale of these four tests is now zoom, not size.
+FIXED    Open File button: its width follows the text (Btn had set the width once). Long names are shortened.
+DEMO     Reset params also resets the viewport pan and zoom for the map test (DemoTest.OnReset).
+
+
+2026-10-19  Map open test, map project, vector text dots, stripe wrap, simplification
+------------------------------------------------------------------------------------------------
+ADDED    cs/Vector.Simplify.cs: QGIS-style simplification (SimplifySettings, SimplifyAlgorithm: Linear
+         (Douglas-Peucker), SnapToGrid, Visvalingam). VectorImage.Simplify(settings). A shape that would
+         collapse keeps its geometry. Provider side: MbTilesView.Simplify is applied per feature while the
+         tiles are read; ProviderSide = false simplifies the built picture (same result).
+ADDED    MbTilesView.HairlineAll (default true): every line and outline is a hairline, as in QGIS.
+ADDED    MbTilesView.StreetNames (default true): false leaves out road names; place names stay.
+ADDED    VectorTextPathOptions.Centred: the middle of the capitals sits on the path. Road names use it.
+FIXED    VectorText: open strokes shorter than the stroke width (. : i ё dots) are lengthened to the stroke
+         width, so a dot is a square (6 px regular, 11.2 px Bold at size 70). Bold dots no longer look thin.
+FIXED    Stripe WrapOffset (animation on): the moving bars are painted into a scratch strip and only the
+         pixels inside the run's slanted silhouette are copied, so the pattern slides inside the skewed
+         /____/ edges instead of being cut square at the rectangle.
+DEMO     Vector map test: drag anywhere (no bounding box, no "drag the map to pan" flag); flags for
+         Hide names of streets, Bitmap cache (on by default: baked while the zoom is still), Hide by zoom
+         (N px), simplification threshold / algorithm / provider side; "Open File Time" stat. Street
+         names centred on the road. The button is "Open File".
+DEMO     SVG import test: simplification threshold (Grid slider, SVG units), algorithm and provider-side
+         flag. The picture is reloaded when they change (simplification cannot be undone).
+TESTS    ctlrun: dot squares, centred label, Linear / SnapToGrid / Visvalingam, collapse rule, shape
+         simplification, hairline outlines in the MBTiles picture, simplification segment drop and
+         provider-side equality, street-name flag (z13 with MBTILES_FILE).
+compat   Map pictures are now hairline by default (set HairlineAll = false for the old widths).
+         Road names are centred on the line. Simplification is off unless Simplify is set.
+NOT YET  Maximum scale for simplification (QGIS 1:1): not implemented. The picture is simplified once,
+         so there is no switch by drawn scale yet.
+
+2026-10-19  Map: hairline outlines, level of detail for maps, parallel tile import
+------------------------------------------------------------------------------------------------
+ADDED    VectorShape.Hairline: the stroke is one device pixel at every zoom (StrokeWidth is ignored). Drawn, culled
+         and bounded in device pixels; SVG export writes vector-effect="non-scaling-stroke". Compat: none (default off).
+ADDED    VectorShape.Layer: the OpenMapTiles layer of a shape from tiles (null for other pictures). Strings are shared.
+ADDED    VectorImage.IsMap and VectorImage.MapLayerMinPx: for maps only, DrawVisible leaves out a shape whose layer is
+         in MapLayerMinPx while it is smaller on screen than that. The importer sets "building" to 2.5 px. Other
+         pictures are drawn as before.
+CHANGED  MBTiles building outlines are hairlines (before: 0.5 map units, growing with the zoom). Compat: pass a custom
+         MbTilesStyleRule that returns MbPaint(..., hairline: false) to keep the old outlines.
+ADDED    MbTilesView.Threads (default 0 = all processors; 1 = one thread). Tiles are decoded and built in parallel and
+         joined in tile order, so the picture is identical at any count. Compat: a style rule that is not thread-safe
+         needs Threads = 1.
+CHECKED  ctlrun: 435 ok, 0 FAIL. Hairline 1.00 px at scales 0.5, 1, 4 and 10 (a 1-unit stroke: 4.0 px at scale 4);
+         map: a 1 px house left out, a picture that is not a map keeps it; parallel and serial imports draw the same
+         pixels (0 different). Import of the whole test file at zoom 14: 1.2-1.8 s (2 threads and 1 thread alike within
+         the noise on this 2-core machine).
+         Not checked on Windows.
+
+2026-10-19  VectorText: joins, caps and outline position (as in the font file)
+------------------------------------------------------------------------------------------------
+ADDED    VectorTextStyle.Join (VectorJoin, default Bevel): the corner shape of the strokes. Bevel is the font file's
+         default; Miter and Round are also available. The renderer's stroker already supported all three; VectorText
+         now passes the join through. With Radius 0 an A or V has beveled corners.
+ADDED    VectorTextStyle.Cap (VectorCap, default Butt): the end of open strokes (Butt, Round, Square).
+ADDED    VectorTextStyle.OutlinePosition (VectorOutlinePosition: Center, Inside, Outside): the stroke of a closed glyph
+         is moved by half its width inward or outward, so it lies inside or outside the edge. Open strokes stay centred.
+         Corners on the offset line are mitred (limit 4 half-widths), then joined with the Join setting.
+CHANGED  The default join of VectorText strokes is now Bevel (was Miter). Compat: set Join = VectorJoin.Miter to keep
+         the old corners. This changes the look of map labels (TrackMap, MbTiles) slightly.
+FIXED    OnPath with Above = false drew the glyphs upside down; they now stay upright, hanging under the line.
+CHECKED  ctlrun: 425 ok, 0 FAIL. Miter apex of A is 7 px taller than bevel; square caps add 6 px; O spans 5..45 centred,
+         8..42 inside, 2..48 outside. Sheet: vectortext_outlines.png. Demo: "VectorText outlines" test.
+         Not checked on Windows (the demo runs on Windows only).
+
+2026-10-19  VectorText: new stroke font (151 glyphs), corner radius and tip limit; fit to path; below-path fix
+------------------------------------------------------------------------------------------------
+CHANGED  VectorText glyph data replaced by the "Angular Vector Font" (Latin + Cyrillic, 151 glyphs). Glyphs are open
+         straight strokes; the data is a string table in cs/VectorText.cs (no font file). Cap height 70 font units.
+ADDED    VectorTextStyle.Radius (default 6 font units): quadratic rounding of each interior corner, cut at
+         min(radius, half of each adjacent segment). Open stroke ends are not rounded.
+ADDED    VectorTextStyle.TipDrop (default 0): an acute tip may be cut back by at most this many font units.
+ADDED    VectorTextStyle.Monospace: every glyph gets one 60-unit advance; wide glyphs are squeezed to fit.
+CHANGED  Width and OnPath use the ink extent, not the advance, so FitToPath ends exactly at the path ends.
+FIXED    OnPath with Above = false drew the glyphs upside down. They now stay upright, hanging under the line.
+CHECKED  ctlrun: 418 ok, 0 FAIL (rounding adds curve points; apex at cap height with TipDrop 0; monospace W = 46;
+         below-path H spans y 100..170 on a line at y 100). Demo: "VectorText styles" and "VectorText on a curve" tests.
+         The demo text uses generic sample sentences only.
+         Not checked on Windows: the demo runs on Windows only; the curve layout was rendered headlessly (Linux).
+
+2026-10-19  Vector map: grid index and culled drawing; road and place names as vector text
+------------------------------------------------------------------------------------------------
+ADDED    VectorImage.BuildIndex(cell) and VectorImage.DrawVisible(dst, matrix, options, minScreenPx): a grid over
+         the shapes' bounds; a frame draws only the shapes that touch the view (z-order kept), and skips shapes
+         smaller than minScreenPx on screen. A 3x view of a city: 7 ms culled against 121 ms for the whole picture.
+ADDED    MbTilesView.Labels (default true): road names are VectorText along the road line (reading left to right,
+         above the line; main roads from zoom 12, minor roads from zoom 14); place names are straight text at the point.
+CHANGED  MBTiles import now draws names (before: geometry only). Compat: MbTilesView.Labels = false gives the old picture.
+CHECKED  ctlrun: culled draw equals full draw pixel for pixel; labels add shapes.
+
+2026-10-19  Fills on transparent canvases; map demo; VectorText (stroke font, text on a path)
+------------------------------------------------------------------------------------------------
+FIXED    Vector fills drawn onto a sprite with Op.Paint or Op.AlphaBlend (for example a canvas that starts
+         transparent) wrote the colour with alpha 0. A viewer shows those pixels as black or blank: the "black
+         parts" in the vector import demo. Fills now use source-over (LineOp.AlphaOver) for these destinations.
+         On an opaque destination the colours are the same as before. Compat: none for opaque canvases.
+CHANGED  MBTiles import puts a background shape under the map: an area without tiles is no longer transparent.
+ADDED    Demo group "Maps": open a .mbtiles file, Z = level, Scale = extra zoom past the data (vector, stays
+         sharp), drag to pan. Vector import's open dialog lists *.mbtiles.
+ADDED    VectorText (cs/VectorText.cs): text from open strokes, no font files. Latin, digits, punctuation, full
+         Cyrillic (some Cyrillic letters are rough approximations). Bold = wider stroke, Italic = skew.
+         VectorText.Create(text, size, style); VectorText.OnPath(text, points, size, options) bends text along
+         a polyline (Align, Above/below, FitToPath). The OnPath picture is in path coordinates: draw it with
+         Matrix3x2.Identity.
+CHECKED  ctlrun: VectorText metrics, bold / italic, Cyrillic, straight and curved paths, fit (MbTilesChecks,
+         VectorTextChecks); all 410 ok lines, 0 FAIL. Map alpha histogram after the fix: transparent pixels
+         only where no shape covers them. Demo, template and edgechk build with 0 errors. Demo and map views not
+         run on Windows.
+PROJECTS VectorText.cs is listed in demo, webpchk, fontchk, edgechk, vecfuzz and ctlrun.
+
+2026-10-19  MBTiles vector map tiles in the vector container
+------------------------------------------------------------------------------------------------
+ADDED    VectorImage.Load("map.mbtiles") and VectorImage.FromMbTiles(path, view) load vector map tiles (MBTiles,
+         format pbf / MVT) as a shape list, drawn like any other VectorImage (DrawFit, Rasterize ...).
+         The default zoom is the highest zoom that has tiles (DataMaxZoom), because some files say maxzoom 14 in
+         the metadata and only hold tiles to z11.
+         New files: cs/MbTiles.cs (read-only SQLite reader with gzip tiles; no NuGet package), cs/Mvt.cs
+         (protobuf MVT decoder; MvtFeature.Name picks the label), cs/Vector.MbTiles.cs (importer and an
+         OpenMapTiles default style, MbTilesStyleRule for your own style).
+         Changed file: cs/Vector.cs (VectorFormat.MbTiles; SQLite files are routed to the reader in Load and Sniff).
+         Raster MBTiles throw NotSupportedException. Labels and icons are not drawn (geometry only, reported in Warnings).
+COMPAT   None. SVG / PDF / PostScript loading takes the same path as before.
+CHECKED  tests/cs/ctlrun MbTilesChecks.cs: two small fixtures in tests/data/mbtiles (every tile byte-for-byte, digests
+         recorded in tests/data/mbtiles/README.md), MVT decode of all tiles, random bytes do not throw, and with
+         MBTILES_FILE set the full chelyabinsk.mbtiles (2,597 tiles read in 189 ms; z13 city import 47,608 shapes in
+         411 ms; first draw 1.4 s). Measured on a Linux managed run, not on Windows.
+PROJECTS demo, webpchk, fontchk, edgechk and vecfuzz list the three new files in their project files.
+
 2026-10-19  Designer fix: SpritePanel attributes
 ------------------------------------------------------------------------------------------------
 FIXED    SpritePanel had lost its own class attributes. The ContainerButtons helper (2026-10-15) was inserted between

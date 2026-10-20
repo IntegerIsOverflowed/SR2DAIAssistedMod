@@ -28,6 +28,8 @@ namespace Sr2d64CSport
         OffsetX = 262144,
         /// <summary>The test reads <see cref="Ctx.OffsetY"/> - the Y offset slider (the selection-tool scenario).</summary>
         OffsetY = 524288,
+        /// <summary>The test reads <see cref="Ctx.FastLines"/> - vector drawing: strokes of at most 1 px without anti-aliasing (faster, hard edges).</summary>
+        FastLines = 1048576,
     }
 
     internal sealed class Ctx
@@ -77,7 +79,7 @@ namespace Sr2d64CSport
 
         int x, y, z = 120, blend = 128, count = 1, maskBits = Assets.MaskCircle, dotStep;
         float angle, scale = 1f, scaleY = 1f, brite = 1f, time, yaw, pitch = 0.55f, panX, panY;
-        bool smooth, notMask, xor;
+        bool smooth, notMask, xor, fastLines;
         SR2D.Op op = SR2D.Op.Paint;
 
         /// <summary>Seconds of animation time. Stops advancing while the "Animate" check box is off.</summary>
@@ -127,6 +129,8 @@ namespace Sr2d64CSport
         public SR2D.Op Op { get { Touch(Param.Op); return op; } set => op = value; }
         public int DotStep { get { Touch(Param.DotStep); return dotStep; } set => dotStep = value; }
         public bool Xor { get { Touch(Param.Xor); return xor; } set => xor = value; }
+        /// <summary>Vector tests: 1 px strokes are painted without anti-aliasing (VectorRenderOptions.FastLines).</summary>
+        public bool FastLines { get { Touch(Param.FastLines); return fastLines; } set => fastLines = value; }
 
         public Ctx Clone() => (Ctx)MemberwiseClone();
 
@@ -187,6 +191,8 @@ namespace Sr2d64CSport
         public bool ShadowByMouse;
         /// <summary>The whole canvas is the draggable object (a backdrop the test shifts by Ctx.X / Y - canvas centre): open hand everywhere, no pivot marker.</summary>
         public bool DragAnywhere;
+        /// <summary>Reset params also calls this (after the pan goes back to the centre): a test that keeps its own view, like the map, recentres it here.</summary>
+        public Action? OnReset;
         /// <summary>Grabbable checker backdrop: drag anywhere with the hand cursor slides it - without the "follow the mouse" check box (the offset lives in Ctx.BackdropX/Y, not in the Mouse parameter).</summary>
         public bool GrabBackdrop;
         /// <summary>The canvas is a drawing surface: the pen cursor shows and the LEFT button paints (Ctx.PenDown / PenX / PenY), like an image editor.</summary>
@@ -232,7 +238,7 @@ namespace Sr2d64CSport
         /// </summary>
         public int SlowFrames;
         /// <summary>Slow tests: parameters that trigger a re-run when they change (others are ignored while frozen).</summary>
-        public Param SlowRerunOn = Param.Mouse | Param.Count | Param.Angle | Param.Scale | Param.Op | Param.MaskBits | Param.Smooth | Param.NotMask | Param.Xor | Param.Camera | Param.Z | Param.Brite;
+        public Param SlowRerunOn = Param.Mouse | Param.Count | Param.Angle | Param.Scale | Param.Op | Param.MaskBits | Param.Smooth | Param.NotMask | Param.Xor | Param.FastLines | Param.Camera | Param.Z | Param.Brite;
         /// <summary>Called on the UI thread when the user picks a file for this test (tests that load .vox / .obj); null = no file button.</summary>
         public string? FileFilter;
         public string? FilePath;               // last chosen file (set by the form)
@@ -262,6 +268,20 @@ namespace Sr2d64CSport
         public const string GBlend = "Blend modes (Sprite.Blend.cs)";
         public const string GFiles = "Files (Png.cs, WebP.cs, Vector.*.cs)";
         public const string GVoxel = "Voxels (VoxelGrid.cs)";
+        public const string GMaps = "Maps (MBTiles vector tiles, VectorImage)";
+        public const string GVText = "Vector text (VectorText.cs, no font files)";
+        // VectorText demo palette: dark ink on a light paper (not black on grey)
+        const int VtPaper = unchecked((int)0xFFF7F4EC), VtInk = unchecked((int)0xFF1B2A41), VtAccent = unchecked((int)0xFFB0432A), VtMuted = unchecked((int)0xFF6B6F7A);
+        static List<PointF> ArcPoints(float cx, float cy, float r, double a0, double a1, int steps)
+        {
+            var pts = new List<PointF>(steps + 1);
+            for (int i = 0; i <= steps; i++)
+            {
+                double a = a0 + (a1 - a0) * i / steps;
+                pts.Add(new PointF(cx + r * (float)Math.Cos(a), cy - r * (float)Math.Sin(a)));
+            }
+            return pts;
+        }
         public const string GAnim = "Animation keys (Animation.cs)";
         static readonly TangentMode[] starts = { TangentMode.Smooth, TangentMode.Fast, TangentMode.Slow, TangentMode.Linear };
         static readonly TangentMode[] ends = { TangentMode.Smooth, TangentMode.Slow, TangentMode.Fast, TangentMode.Linear };
@@ -1174,12 +1194,12 @@ T(GControls, "SpriteLabel / GroupBox / Tabs / TextBox / Numeric / Combo / ListBo
                     c.Canvas.DrawArrow(c.X, c.Y, c.X + MathF.Cos(a) * len, c.Y + MathF.Sin(a) * len, col, w, 0, 0, (i & 1) == 0, c.Smooth, op, c.Blend);
                 }
             }, needsPoly: true, needsLine2: true);
-            T(GFiles, "Vector import: SVG / EPS / PDF -> VectorImage.Draw (button 'Open file...')", "VectorImage.Load(file) parses SVG (incl. .svgz), EPS / PostScript and PDF (page = DotStep) into a resolution-independent shape list, then img.Draw(canvas, x, y, scaleX, scaleY, angle) renders it through DRAW_POLY (AA fills / strokes, gradients, clips). Built-in sample = a small SVG when no file was chosen. Drag to move; drag outside = rotate (or Angle slider); Scale = zoom (x0.01), drag the top / bottom edge = squish (ScaleY); Smooth = anti-aliasing; Blend = opacity; Brite < 0 = wireframe (strokes only); Count = copies (timing); XOR = draw the fitted whole image at the left instead of the transformed one. The note shows the parser warnings (text, raster images and patterns are not imported).", c =>
+            T(GFiles, "Vector import: SVG / EPS / PDF -> VectorImage.Draw (button 'Open File')", "VectorImage.Load(file) parses SVG (incl. .svgz), EPS / PostScript and PDF (page = DotStep) into a resolution-independent shape list, then img.Draw(canvas, x, y, scaleX, scaleY, angle) renders it through DRAW_POLY (AA fills / strokes, gradients, clips). Built-in sample = a small SVG when no file was chosen. Drag to move; drag outside = rotate (or Angle slider); Scale = zoom (x0.01), drag the top / bottom edge = squish (ScaleY); Smooth = anti-aliasing; Blend = opacity; Brite < 0 = wireframe (strokes only); Count = copies (timing); XOR = draw the fitted whole image at the left instead of the transformed one. The note shows the parser warnings (text, raster images and patterns are not imported).", c =>
             {
                 var t = L.Find(x => x.Name.StartsWith("Vector import", StringComparison.Ordinal))!;
-                var (img, info) = EnsureVector(t.FilePath, c.DotStep);
+                var (img, info) = EnsureVector(t.FilePath, c.DotStep, SvgSimplify(c));
                 RecolorDemo.SetImage(img);                                 // the strip above edits THIS container (Recolor / SwapColors)
-                var o = new VectorRenderOptions { AA = c.Smooth, Opacity = c.Blend / 255f, Strokes = true, Fills = c.Brite >= 0 };
+                var o = new VectorRenderOptions { AA = c.Smooth, Opacity = c.Blend / 255f, Strokes = true, Fills = c.Brite >= 0, FastLines = c.FastLines };
                 var osz = VectorObjectSize(c, img);                        // picture size on the canvas at Scale 1 (longer side = 1.5 x sprite)
                 float fit = osz.Width / MathF.Max(1e-3f, img.Width);
                 float pfx = c.PivotXF < 0 ? 0.5f : c.PivotXF / osz.Width, pfy = c.PivotYF < 0 ? 0.5f : c.PivotYF / osz.Height;   // pivot as view-box fractions
@@ -1202,25 +1222,196 @@ T(GControls, "SpriteLabel / GroupBox / Tabs / TextBox / Numeric / Combo / ListBo
                 if (RecolorDemo.PickMode != 0) c.Info(RecolorDemo.PickMode == 1 ? "PICK: click the picture for colour A" : "PICK: click the picture for colour B");
             }, needsPoly: true).Ui(Param.Scale, "Zoom (x0.01; the longer side = 1.5 x sprite size at x1.00); drag the top / bottom edge to squish", Param.Angle, "Rotation (deg) - or drag outside the image", Param.Smooth, "Anti-aliased edges", Param.Blend, "Opacity", Param.Brite, "< 0: strokes only (wireframe)", Param.Count, "Copies per frame", Param.DotStep, "PDF page (0-based)", Param.Xor, "Fit the whole image into the left half instead", Param.NotMask, "Raster cache (VectorSprite): rasterise once, blit until the zoom / angle / content changes", Param.Mouse, "Drag = move; drag outside = rotate; edges / corners = resize (Shift = keep aspect); right click = pivot").Range(Param.DotStep, 0, 32).With(Param.Blend, 255).With(Param.Smooth, true);
             L[L.Count - 1].MouseRotates = true; L[L.Count - 1].Resizable = true; L[L.Count - 1].AnimSpin = 0f;
-            L[L.Count - 1].ObjectSize = c => { var vt = L.Find(x => x.Name.StartsWith("Vector import", StringComparison.Ordinal))!; var (vi, _) = EnsureVector(vt.FilePath, c.DotStep); return VectorObjectSize(c, vi); };
+            // QGIS-style simplification of the picture (Vector.Simplify.cs): threshold in SVG units, algorithm, provider side
+            L[L.Count - 1].Ui(Param.Grid, "Simplification threshold, SVG units (0 = off)", Param.Op, "Simplification algorithm",
+                              Param.GridOn, "Use simplification on provider side if possible (SVG has no tile provider: it is applied once the file is read)", Param.FastLines, "Fast thin lines (1 px strokes without AA: faster, hard edges)")
+                          .Ops("None", "Linear (Douglas-Peucker)", "Snap To Grid", "Visvalingam").Range(Param.Grid, 0, 20).With(Param.Grid, 0).With(Param.GridOn, true);
+            L[L.Count - 1].ObjectSize = c => { var vt = L.Find(x => x.Name.StartsWith("Vector import", StringComparison.Ordinal))!; var (vi, _) = EnsureVector(vt.FilePath, c.DotStep, SvgSimplify(c)); return VectorObjectSize(c, vi); };
             L[L.Count - 1].ControlStrip = RecolorDemo.Build; L[L.Count - 1].StripHeight = RecolorDemo.StripHeight;
             // pick mode: a click on the picture (object units = picture units x fit) picks the colour under it
             L[L.Count - 1].ObjectClick = (c, ox, oy) =>
             {
                 if (RecolorDemo.PickMode == 0) return false;
-                var vt = L.Find(x => x.Name.StartsWith("Vector import", StringComparison.Ordinal))!; var (vi, _) = EnsureVector(vt.FilePath, c.DotStep);
+                var vt = L.Find(x => x.Name.StartsWith("Vector import", StringComparison.Ordinal))!; var (vi, _) = EnsureVector(vt.FilePath, c.DotStep, SvgSimplify(c));
                 var osz = VectorObjectSize(c, vi); float fit = osz.Width / MathF.Max(1e-3f, vi.Width);
                 RecolorDemo.PickAt(new PointF(vi.ViewBox.X + ox / fit, vi.ViewBox.Y + oy / fit));
                 return true;
             };
-            L[L.Count - 1].FileFilter = "Vector files|*.svg;*.svgz;*.eps;*.ps;*.ai;*.pdf|SVG (*.svg, *.svgz)|*.svg;*.svgz|PostScript / EPS (*.eps, *.ps, *.ai)|*.eps;*.ps;*.ai|PDF (*.pdf)|*.pdf|All files|*.*";
+            L[L.Count - 1].FileFilter = "Vector files|*.svg;*.svgz;*.eps;*.ps;*.ai;*.pdf;*.mbtiles|SVG (*.svg, *.svgz)|*.svg;*.svgz|MBTiles vector tiles (*.mbtiles)|*.mbtiles|PostScript / EPS (*.eps, *.ps, *.ai)|*.eps;*.ps;*.ai|PDF (*.pdf)|*.pdf|All files|*.*";
+
+            // ===================================================== VectorText (stroke font)
+            T(GVText, "VectorText: alphabet (Latin, Cyrillic, digits, punctuation) from the VectorAngular font",
+              "Every glyph is straight strokes from the font's own data, with the corners rounded (Radius 6 font units, the font's default). Size = cap height in pixels. No font file is loaded.",
+              c =>
+              {
+                  float size = c.Count;                                    // cap height in px at zoom 1
+                  c.Canvas.ClearBuffer(VtPaper);
+                  var ink = new VectorTextStyle { Color = VtInk };
+                  var scene = new TextScene();
+                  float y = 0;
+                  foreach (var line in new[]
+                  {
+                      "ABCDEFGHIJKLMNOPQRSTUVWXYZ",
+                      "abcdefghijklmnopqrstuvwxyz",
+                      "0123456789 .,:;!?-_+=/()\"'",
+                      "АБВГДЕЁЖЗИЙКЛМНОПРСТУФХЦЧШЩЪЫЬЭЮЯІЇЄҐ",
+                      "абвгдеёжзийклмнопрстуфхцчшщъыьэюяіїєґ",
+                  })
+                  {
+                      scene.Add(VectorText.Create(line, size, ink), 0, y, topLeft: true);
+                      y += size * 1.9f;
+                  }
+                  scene.Draw(c, c.Scale);                                  // centred on the canvas; the wheel zooms
+              }).Ui(Param.Count, "Size (cap height, px at zoom 1)", Param.Scale, "Zoom (the slider or the wheel; drag anywhere to move)", Param.FastLines, "Fast thin lines (1 px strokes without AA: faster, hard edges)")
+                .Also(t => t.DragAnywhere = true).Range(Param.Count, 4, 80).With(Param.Count, 12);
+
+            T(GVText, "VectorText styles: plain, bold, italic, bold italic, monospace, corner radius, tip limit",
+              "Bold = wider stroke. Italic = skew. Monospace = one advance for every glyph (wide ones squeezed). Radius = corner rounding in font units (0 = angular). TipDrop = how far an acute tip may be cut (0 = sharp). The captions on the left are plain.",
+              c =>
+              {
+                  float size = c.Count;                                    // text cap height in px at zoom 1
+                  float cap = size * 9f / 16f;                             // the captions are smaller (9 of 16 px)
+                  c.Canvas.ClearBuffer(VtPaper);
+                  var ink = new VectorTextStyle { Color = VtInk };
+                  var bold = new VectorTextStyle { Color = VtInk, Bold = true };
+                  var italic = new VectorTextStyle { Color = VtInk, Italic = true };
+                  var boldItalic = new VectorTextStyle { Color = VtInk, Bold = true, Italic = true };
+                  var mono = new VectorTextStyle { Color = VtInk, Monospace = true };
+                  var angular = new VectorTextStyle { Color = VtInk, Radius = 0f };
+                  var rounded = new VectorTextStyle { Color = VtAccent, Radius = 12f };
+                  var tipped = new VectorTextStyle { Color = VtAccent, Radius = 12f, TipDrop = 3f };
+                  var rows = new (string Caption, string Text, VectorTextStyle Style)[]
+                  {
+                      ("plain", "The quick brown fox 2026", ink),
+                      ("bold", "Bold: lazy dog 0123456789", bold),
+                      ("italic", "Italic: lorem ipsum dolor", italic),
+                      ("bold italic", "Bold italic: Съешь ещё", boldItalic),
+                      ("monospace", "iiii WWWW MMMM 0000", mono),
+                      ("radius 0", "Angular AVWXYZ", angular),
+                      ("radius 12", "Rounded AVWXYZ", rounded),
+                      ("radius 12, tip 3", "Tips AVWXYZ", tipped),
+                  };
+                  var scene = new TextScene();
+                  float y = 0;
+                  foreach (var (caption, text, style) in rows)
+                  {
+                      scene.Add(VectorText.Create(caption, cap, new VectorTextStyle { Color = VtMuted }), 0, y + size * 0.5f - cap * 0.5f, topLeft: true);
+                      scene.Add(VectorText.Create(text, size, style), 170, y, topLeft: true);
+                      y += size * 1.9f;
+                  }
+                  scene.Draw(c, c.Scale);
+              }).Ui(Param.Count, "Size (text cap height, px at zoom 1)", Param.Scale, "Zoom (the slider or the wheel; drag anywhere to move)", Param.FastLines, "Fast thin lines (1 px strokes without AA: faster, hard edges)")
+                .Also(t => t.DragAnywhere = true).Range(Param.Count, 4, 80).With(Param.Count, 16);
+
+            T(GVText, "VectorText outlines: joins (bevel, miter, round), caps (butt, round, square), outline position (centre, inside, outside)",
+              "Joins are the corner shapes of the strokes (Radius 0 shows them best); caps are the ends of open strokes. Outline position puts the stroke of a closed glyph centred on its edge, inside it or outside it; open strokes stay centred. The outline rows are bold so the difference shows.",
+              c =>
+              {
+                  float size = c.Count;                                    // cap height in px at zoom 1
+                  float cap = size * 9f / 28f;                             // the captions: the old 9 of 28 px proportion
+                  c.Canvas.ClearBuffer(VtPaper);
+                  var rows = new (string Caption, string Text, VectorTextStyle Style)[]
+                  {
+                      ("join bevel", "AVNWK", new VectorTextStyle { Color = VtInk, Radius = 0f, Join = VectorJoin.Bevel }),
+                      ("join miter", "AVNWK", new VectorTextStyle { Color = VtInk, Radius = 0f, Join = VectorJoin.Miter }),
+                      ("join round", "AVNWK", new VectorTextStyle { Color = VtInk, Radius = 0f, Join = VectorJoin.Round }),
+                      ("cap butt", "IlLT", new VectorTextStyle { Color = VtInk, Radius = 0f, Cap = VectorCap.Butt }),
+                      ("cap round", "IlLT", new VectorTextStyle { Color = VtInk, Radius = 0f, Cap = VectorCap.Round }),
+                      ("cap square", "IlLT", new VectorTextStyle { Color = VtInk, Radius = 0f, Cap = VectorCap.Square }),
+                      ("outline centre", "OBD", new VectorTextStyle { Color = VtInk, Bold = true, OutlinePosition = VectorOutlinePosition.Center }),
+                      ("outline inside", "OBD", new VectorTextStyle { Color = VtAccent, Bold = true, OutlinePosition = VectorOutlinePosition.Inside }),
+                      ("outline outside", "OBD", new VectorTextStyle { Color = VtInk, Bold = true, OutlinePosition = VectorOutlinePosition.Outside }),
+                  };
+                  var scene = new TextScene();
+                  float y = 0;
+                  foreach (var (caption, text, style) in rows)
+                  {
+                      scene.Add(VectorText.Create(caption, cap, new VectorTextStyle { Color = VtMuted }), 0, y + size * 0.5f - cap * 0.5f, topLeft: true);
+                      scene.Add(VectorText.Create(text, size, style), 170, y, topLeft: true);
+                      y += size * 1.7f;
+                  }
+                  scene.Draw(c, c.Scale);
+              }).Ui(Param.Count, "Size (cap height, px at zoom 1)", Param.Scale, "Zoom (the slider or the wheel; drag anywhere to move)", Param.FastLines, "Fast thin lines (1 px strokes without AA: faster, hard edges)")
+                .Also(t => t.DragAnywhere = true).Range(Param.Count, 4, 80).With(Param.Count, 28);
+
+            T(GVText, "VectorText on a curve: arc, text below a path, fitted to a path and to a wave, alignment",
+              "VectorText.OnPath places each glyph by its distance along a polyline and its height above it, so the letters follow the curve. FitToPath stretches the text so its ink spans the whole path. Below the path (Above = false) the text hangs under the line. Start / Center / End set the place on the path.",
+              c =>
+              {
+                  float size = c.Count;                                    // cap height in px at zoom 1
+                  c.Canvas.ClearBuffer(VtPaper);
+                  var bold = new VectorTextStyle { Color = VtInk, Bold = true };
+                  var plain = new VectorTextStyle { Color = VtInk };
+                  var accent = new VectorTextStyle { Color = VtAccent, Bold = true };
+                  const string Sentence = "The quick brown fox jumps over the lazy dog";
+                  var scene = new TextScene();                             // every piece is in the content's own coordinates (the origin is the centre)
+
+                  // 1. upper arc, centred, bold: the letters stand on the arc
+                  var upper = ArcPoints(0, 0, 220f, Math.PI, 0, 96);
+                  scene.Add(VectorText.OnPath(Sentence, upper, size, new VectorTextPathOptions { Style = bold, Align = VectorTextAlign.Center }), 0, 0);
+
+                  // 2. inner arc, text below the path (hangs inside the circle)
+                  var inner = ArcPoints(0, 0, 150f, Math.PI, 0, 96);
+                  scene.Add(VectorText.OnPath("Lorem ipsum dolor sit amet, consectetur", inner, size * 0.8f,
+                      new VectorTextPathOptions { Style = accent, Align = VectorTextAlign.Center, Above = false }), 0, 0);
+
+                  // 3. fitted to a straight line: the ink spans the whole line
+                  var line = new List<PointF> { new PointF(-200, 200), new PointF(200, 200) };
+                  scene.Add(VectorText.OnPath("Fit to the path", line, size, new VectorTextPathOptions { Style = plain, FitToPath = true }), 0, 0);
+
+                  // 4. fitted to a wave
+                  var wave = new List<PointF>();
+                  for (int i = 0; i <= 80; i++) wave.Add(new PointF(-200 + i * 5f, 250 + 12f * MathF.Sin(i / 80f * MathF.PI * 2)));
+                  scene.Add(VectorText.OnPath("Fitted to a wave", wave, size, new VectorTextPathOptions { Style = accent, FitToPath = true }), 0, 0);
+
+                  // 5. alignment on one straight path: Start, Center, End
+                  foreach (var (align, text, dy) in new[]
+                  {
+                      (VectorTextAlign.Start, "start: lazy dog", 300f),
+                      (VectorTextAlign.Center, "center: lazy dog", 330f),
+                      (VectorTextAlign.End, "end: lazy dog", 360f),
+                  })
+                  {
+                      var seg = new List<PointF> { new PointF(-200, dy), new PointF(200, dy) };
+                      scene.Add(VectorText.OnPath(text, seg, size * 0.7f, new VectorTextPathOptions { Style = plain, Align = align }), 0, 0);
+                  }
+                  scene.Draw(c, c.Scale);                                  // the whole group is centred; the wheel zooms
+              }).Ui(Param.Count, "Size (cap height, px at zoom 1)", Param.Scale, "Zoom (the slider or the wheel; drag anywhere to move)", Param.FastLines, "Fast thin lines (1 px strokes without AA: faster, hard edges)")
+                .Also(t => t.DragAnywhere = true).Range(Param.Count, 4, 80).With(Param.Count, 14);
+
+            // ===================================================== Vector map (MBTiles)
+            T(GMaps, "Vector map: open a .mbtiles file ('Open File'); zoom past the data as far as you like",
+              "A vector MBTiles file (format pbf) becomes a VectorImage for the chosen zoom level Z. Extra zoom (Scale) past it is still vector, so the lines stay sharp. Drag anywhere to pan (no inertia). Nothing is drawn for missing tiles except the background colour. Open File Time is how long the file took to read and build; the flags below change the build or the drawing.",
+              c => MapDemo.Draw(c, L.Find(x => x.Name.StartsWith("Vector map", StringComparison.Ordinal))!.FilePath))
+              .Also(t => t.DragAnywhere = true)                       // drag the map itself: no bounding box around the picture
+              .Also(t => t.OnReset = MapDemo.ResetView)               // Reset recentres the map (the pan lives in the map, not in Ctx.X)
+              .Ui(Param.Z, "Zoom level Z (0..14, the level the shapes are imported at)", Param.Scale, "Extra zoom past Z (x1.00 = none; the shapes are vectors, so it stays sharp)",
+                  Param.Smooth, "Anti-aliased edges",
+                  Param.Xor, "Hide names of streets",
+                  Param.FastLines, "Fast thin lines (1 px strokes without AA: faster, hard edges)",
+                  Param.NotMask, "Bitmap cache (on: the map is drawn as a picture while the zoom is still)",
+                  Param.Count, "Hide by zoom: leave out features whose larger side is under N px (1 = show all)",
+                  Param.DotStep, "Simplification threshold, px at Z (0 = off)",
+                  Param.Op, "Simplification algorithm",
+                  Param.GridOn, "Simplify while the tiles are read (provider side)")
+              .Ops("None", "Linear (Douglas-Peucker)", "Snap To Grid", "Visvalingam")
+              .With(Param.NotMask, true).With(Param.Count, 1).With(Param.DotStep, 0).With(Param.GridOn, true)
+              .Range(Param.Count, 1, 12).Range(Param.DotStep, 0, 20);
+
+            T(GMaps, "Simplify by scale: a detailed curve, simplified only at or below MaxScale (1:1)",
+              "The same curve on both settings. At a view scale at or below MaxScale (1.00 = 1:1, and further zoomed out) it is simplified with the threshold; zoomed in past it, the full detail is drawn. Scale = view scale, Grid = threshold in px (0 = off), Op = algorithm. The note shows the point count before and after.",
+              c => SimplifyScaleDemo.Draw(c))
+              .Ui(Param.Scale, "View scale (1.00 = 1:1; at or below it the curve is simplified)", Param.Grid, "Simplification threshold, px (0 = off)", Param.Op, "Simplification algorithm")
+              .Ops("None", "Linear (Douglas-Peucker)", "Snap To Grid", "Visvalingam")
+              .Range(Param.Grid, 0, 20).With(Param.Grid, 2);
+            L[L.Count - 1].FileFilter = "MBTiles (*.mbtiles)|*.mbtiles|All files|*.*";
 
             // ===================================================== Animated SVG (SMIL)
-            T(GFiles, "Animated SVG (SMIL + CSS): FrameAt / SeekToTime (button 'Open file...')", "VectorImage keeps the animation of a file while importing: SMIL tracks (<animate> of the d attribute, <animateTransform>, <animateMotion>, <set>) AND CSS animations (@keyframes of transform / opacity / stroke-dashoffset with animation-* timing, transform-box / transform-origin - the style AI-generated game art uses). SeekToTime(t) applies every track at time t (paths morph per command, transforms interpolate per function - a 0 to 360 deg spin sweeps), FrameAt(t) returns an independent frame copy, Duration / FrameCount / FrameRate / GetFrame(i) iterate the loop (FrameCount = Duration * 30 fps here). Built-in sample = a small loop when no file was chosen. 'Animate' plays the loop (the clock runs while the check box is ticked; off = frame 0); the playback rate is Speed / 6 (6 = real time). Drag to move; drag outside = rotate; Scale = zoom; Smooth = anti-aliased edges; Blend = opacity; Brite < 0 = wireframe. ClipViewport is on here: decoration the file parks beyond its canvas stays out, like in a browser. The draw goes through the layer compositor (img.Cached): content whose chain only moves is rasterised once per zoom and blitted with the chain's current matrix (slow dollies re-rasterise only when the linear part drifts); morphs / opacity / dashes stay live. Tick 'Precompose' to bake the whole loop into bitmaps once. Playback then evaluates no vector tracks: one bitmap draw per tick. First use and changes to internal resolution / fps / paint settings require a synchronous bake (can take a few seconds). Display zoom / rotation / skew only transform bitmaps and never rebake. The film budget is in MiB; if full-size frames do not fit, smaller bitmaps are baked and enlarged, without silently lowering fps. Film width fixes the internal bitmap grid independently of container size (0 = SVG intrinsic); a higher grid than the display enables area-filtered supersampling. Film fps defaults to 60 here (0 = file FrameRate, usually 30; up to 240 for high-refresh displays). Live vectors sample every render; a 30 fps film holds each sample for 33 ms, so image resolution alone cannot fix temporal choppiness. The note reports actual fps, bitmap size, resolution percentage, memory and bake time. The note shows the track count, the seek + draw cost and the cache stats.", c =>
+            T(GFiles, "Animated SVG (SMIL + CSS): FrameAt / SeekToTime (button 'Open File')", "VectorImage keeps the animation of a file while importing: SMIL tracks (<animate> of the d attribute, <animateTransform>, <animateMotion>, <set>) AND CSS animations (@keyframes of transform / opacity / stroke-dashoffset with animation-* timing, transform-box / transform-origin - the style AI-generated game art uses). SeekToTime(t) applies every track at time t (paths morph per command, transforms interpolate per function - a 0 to 360 deg spin sweeps), FrameAt(t) returns an independent frame copy, Duration / FrameCount / FrameRate / GetFrame(i) iterate the loop (FrameCount = Duration * 30 fps here). Built-in sample = a small loop when no file was chosen. 'Animate' plays the loop (the clock runs while the check box is ticked; off = frame 0); the playback rate is Speed / 6 (6 = real time). Drag to move; drag outside = rotate; Scale = zoom; Smooth = anti-aliased edges; Blend = opacity; Brite < 0 = wireframe. ClipViewport is on here: decoration the file parks beyond its canvas stays out, like in a browser. The draw goes through the layer compositor (img.Cached): content whose chain only moves is rasterised once per zoom and blitted with the chain's current matrix (slow dollies re-rasterise only when the linear part drifts); morphs / opacity / dashes stay live. Tick 'Precompose' to bake the whole loop into bitmaps once. Playback then evaluates no vector tracks: one bitmap draw per tick. First use and changes to internal resolution / fps / paint settings require a synchronous bake (can take a few seconds). Display zoom / rotation / skew only transform bitmaps and never rebake. The film budget is in MiB; if full-size frames do not fit, smaller bitmaps are baked and enlarged, without silently lowering fps. Film width fixes the internal bitmap grid independently of container size (0 = SVG intrinsic); a higher grid than the display enables area-filtered supersampling. Film fps defaults to 60 here (0 = file FrameRate, usually 30; up to 240 for high-refresh displays). Live vectors sample every render; a 30 fps film holds each sample for 33 ms, so image resolution alone cannot fix temporal choppiness. The note reports actual fps, bitmap size, resolution percentage, memory and bake time. The note shows the track count, the seek + draw cost and the cache stats.", c =>
             {
                 var t = L.Find(x => x.Name.StartsWith("Animated SVG", StringComparison.Ordinal))!;
                 var (img, info) = EnsureAnimVector(t.FilePath);
-                var o = new VectorRenderOptions { AA = c.Smooth, Opacity = c.Blend / 255f, Strokes = true, Fills = c.Brite >= 0 };
+                var o = new VectorRenderOptions { AA = c.Smooth, Opacity = c.Blend / 255f, Strokes = true, Fills = c.Brite >= 0, FastLines = c.FastLines };
                 var osz = VectorObjectSize(c, img);                        // picture size on the canvas at Scale 1 (longer side = 1.5 x sprite)
                 float fit = osz.Width / MathF.Max(1e-3f, img.Width);
                 float pfx = c.PivotXF < 0 ? 0.5f : c.PivotXF / osz.Width, pfy = c.PivotYF < 0 ? 0.5f : c.PivotYF / osz.Height;
@@ -1241,7 +1432,7 @@ T(GControls, "SpriteLabel / GroupBox / Tabs / TextBox / Numeric / Combo / ListBo
                     ? Math.Clamp((int)Math.Floor(tt * playedFrames / img.Duration + 1e-9), 0, playedFrames - 1) + 1
                     : (int)(tt * img.FrameRate) + 1;
                 c.Note = $"{info} | t = {tt:0.###} / {img.Duration:0.###} s = frame {playedIndex}/{playedFrames} | {img.Tracks.Count} tracks, {img.Shapes.Count} shapes | frame {ms:F2} ms | {vs.LayerSummary}{warn}";
-            }, needsPoly: true).Ui(Param.Scale, "Zoom (x0.01; the longer side = 1.5 x sprite size at x1.00); drag the top / bottom edge to squish", Param.Time, "Animate: play the loop (off = stand at frame 0)", Param.Speed, "Playback rate = Speed / 6 (6 = real time, 12 = double speed)", Param.Smooth, "Anti-aliased edges", Param.Blend, "Opacity", Param.Brite, "< 0: strokes only (wireframe)", Param.Xor, "Precompose (first draw bakes the loop; off releases the bitmaps)", Param.Count, "Film budget (MiB; smaller bitmaps if necessary, never fewer fps)", Param.DotStep, "Film fps (default 60; 0 = file rate; higher = smoother motion / more memory)", Param.Z, "Internal film width (px; 0 = SVG intrinsic; fixed while resizing the container)", Param.Mouse, "Drag = move; drag outside = rotate; edges / corners = resize (Shift = keep aspect); right click = pivot").Range(Param.Count, 16, 1024).Range(Param.DotStep, 0, 240).Range(Param.Z, 0, 4096).With(Param.Count, 256).With(Param.DotStep, 60).With(Param.Z, 512).With(Param.Xor, false).With(Param.Smooth, true).With(Param.Speed, 6);
+            }, needsPoly: true).Ui(Param.Scale, "Zoom (x0.01; the longer side = 1.5 x sprite size at x1.00); drag the top / bottom edge to squish", Param.Time, "Animate: play the loop (off = stand at frame 0)", Param.Speed, "Playback rate = Speed / 6 (6 = real time, 12 = double speed)", Param.Smooth, "Anti-aliased edges", Param.FastLines, "Fast thin lines (1 px strokes without AA: faster, hard edges)", Param.Blend, "Opacity", Param.Brite, "< 0: strokes only (wireframe)", Param.Xor, "Precompose (first draw bakes the loop; off releases the bitmaps)", Param.Count, "Film budget (MiB; smaller bitmaps if necessary, never fewer fps)", Param.DotStep, "Film fps (default 60; 0 = file rate; higher = smoother motion / more memory)", Param.Z, "Internal film width (px; 0 = SVG intrinsic; fixed while resizing the container)", Param.Mouse, "Drag = move; drag outside = rotate; edges / corners = resize (Shift = keep aspect); right click = pivot").Range(Param.Count, 16, 1024).Range(Param.DotStep, 0, 240).Range(Param.Z, 0, 4096).With(Param.Count, 256).With(Param.DotStep, 60).With(Param.Z, 512).With(Param.Xor, false).With(Param.Smooth, true).With(Param.Speed, 6);
             L[L.Count - 1].MouseRotates = true; L[L.Count - 1].Resizable = true; L[L.Count - 1].AnimSpin = 0f;
             L[L.Count - 1].ObjectSize = c => { var vt = L.Find(x => x.Name.StartsWith("Animated SVG", StringComparison.Ordinal))!; var (vi, _) = EnsureAnimVector(vt.FilePath); return VectorObjectSize(c, vi); };
             L[L.Count - 1].FileFilter = "Animated SVG|*.svg;*.svgz|SVG (*.svg, *.svgz)|*.svg;*.svgz|All files|*.*";
@@ -1868,7 +2059,7 @@ T(GControls, "SpriteLabel / GroupBox / Tabs / TextBox / Numeric / Combo / ListBo
                 int d2 = c.Canvas.DrawVoxels(g, cam, half + half / 2 + c.PanX, c.H / 2 + c.PanY, L);
                 c.Note = $"{camName} | {L} | left: KeepAlpha off ({d1} voxels), right: on ({d2} voxels)";
             }, needsVoxel: true, clears: true)).With(Param.Scale, 150);
-            VoxTest(T(GVoxel, "Voxels from projections: 2-D sprites for the sides -> model (views by check box, 'Open file...' for your own sprites)", "Builds a voxel model from 2-D sprites used as projections (VoxelGrid.FromProjections, cs/VoxelGrid.Projections.cs): a cell is solid where EVERY enabled view is opaque at its projection, and its colour comes from the nearest view; where two opposite views both reach a cell they are blended (Blend selector). The six check boxes enable the six views; the SHAPE selector picks the built-in sprite set: Ball (a disc on every side -> the intersection of three cylinders, a 'Steinmetz solid' with rounded edges: silhouettes alone cannot make a true sphere), Box (squares, differently coloured per side), Cylinder (circle top + bottom, rectangles around -> a can), 'Square top, round bottom' (the front / side are trapezoids and the top is a square while the bottom is a circle - the model morphs from one to the other because the silhouettes are intersected and the colours blend between the two ends), and the rocket from before. 'Open file...' lets you pick up to six PNGs of your own: they are assigned to Front, Back, Left, Right, Top, Bottom in the order chosen (fewer files -> fewer views, name a file front/back/left/right/top/bottom to pin it to a side). Every source sprite is shown at the top of the canvas with the side it is mapped to. Fit: proportional (letterboxed) or stretched to the face. A typical model needs only three views - two adjacent sides and the top: with only Front + Left + Top the back / right / bottom take the colour of the nearer visible view.", c =>
+            VoxTest(T(GVoxel, "Voxels from projections: 2-D sprites for the sides -> model (views by check box, 'Open File' for your own sprites)", "Builds a voxel model from 2-D sprites used as projections (VoxelGrid.FromProjections, cs/VoxelGrid.Projections.cs): a cell is solid where EVERY enabled view is opaque at its projection, and its colour comes from the nearest view; where two opposite views both reach a cell they are blended (Blend selector). The six check boxes enable the six views; the SHAPE selector picks the built-in sprite set: Ball (a disc on every side -> the intersection of three cylinders, a 'Steinmetz solid' with rounded edges: silhouettes alone cannot make a true sphere), Box (squares, differently coloured per side), Cylinder (circle top + bottom, rectangles around -> a can), 'Square top, round bottom' (the front / side are trapezoids and the top is a square while the bottom is a circle - the model morphs from one to the other because the silhouettes are intersected and the colours blend between the two ends), and the rocket from before. 'Open File' lets you pick up to six PNGs of your own: they are assigned to Front, Back, Left, Right, Top, Bottom in the order chosen (fewer files -> fewer views, name a file front/back/left/right/top/bottom to pin it to a side). Every source sprite is shown at the top of the canvas with the side it is mapped to. Fit: proportional (letterboxed) or stretched to the face. A typical model needs only three views - two adjacent sides and the top: with only Front + Left + Top the back / right / bottom take the colour of the nearer visible view.", c =>
             {
                 int n = Math.Clamp(c.Count * 8, 8, 256);
                 var t = L.Find(x => x.Name.StartsWith("Voxels from projections", StringComparison.Ordinal))!;
@@ -1950,7 +2141,7 @@ T(GControls, "SpriteLabel / GroupBox / Tabs / TextBox / Numeric / Combo / ListBo
             L[L.Count - 1].SlowFrames = 5;
             L[L.Count - 1].HasPreview = true;
 
-            VoxTest(T(GVoxel, "Load a MagicaVoxel .vox or a Wavefront .obj (button 'Open file...' in the panel) and draw it with the camera controls", "Loads the file chosen with the 'Open file...' button. MagicaVoxel .vox: all models placed by the scene graph, palette colours, emissive materials (MATL _emit -> Voxel.Emit). Wavefront .obj: voxelised at Count x 32 voxels along the longest side; colours come from the .mtl referenced by 'mtllib' (Kd per material, per face) or from per-vertex colours ('v x y z r g b'); materials with a bright Ke (self-illumination) become emitters (ObjOptions.EmissiveStrength, default 12) - the built-in sample below shows exactly that: a pyramid on a slab with a glowing top from an in-memory .mtl. Closed meshes are filled (Fill selector: Auto / Solid / Shell). Without a file the built-in sample is generated (the house saved to .vox and loaded back + the obj text) so the test also runs in the suite. Camera / zoom / lighting as in the other voxel tests; the note shows load time, grid size, voxel and emitter counts.", c =>
+            VoxTest(T(GVoxel, "Load a MagicaVoxel .vox or a Wavefront .obj (button 'Open File' in the panel) and draw it with the camera controls", "Loads the file chosen with the 'Open File' button. MagicaVoxel .vox: all models placed by the scene graph, palette colours, emissive materials (MATL _emit -> Voxel.Emit). Wavefront .obj: voxelised at Count x 32 voxels along the longest side; colours come from the .mtl referenced by 'mtllib' (Kd per material, per face) or from per-vertex colours ('v x y z r g b'); materials with a bright Ke (self-illumination) become emitters (ObjOptions.EmissiveStrength, default 12) - the built-in sample below shows exactly that: a pyramid on a slab with a glowing top from an in-memory .mtl. Closed meshes are filled (Fill selector: Auto / Solid / Shell). Without a file the built-in sample is generated (the house saved to .vox and loaded back + the obj text) so the test also runs in the suite. Camera / zoom / lighting as in the other voxel tests; the note shows load time, grid size, voxel and emitter counts.", c =>
             {
                 var t = L.Find(x => x.Name.StartsWith("Load a MagicaVoxel", StringComparison.Ordinal))!;
                 var (g, info, tLoad) = EnsureVoxelFile(t.FilePath, Math.Clamp(c.Count, 1, 32) * 32, c.DotStep);
@@ -2498,6 +2689,207 @@ T(GControls, "SpriteLabel / GroupBox / Tabs / TextBox / Numeric / Combo / ListBo
         }
 
         // ---- files ---------------------------------------------------------------------------
+        /// <summary>
+        /// The map test's camera. One VectorImage per zoom level (imported once, reused while Z stays), drawn with a
+        /// centre, the level and an extra scale. Centre = normalised web-mercator (0..1); panning changes it.
+        /// </summary>
+        /// <summary>
+        /// Lays out vector text pictures on one content grid and draws them centred on the canvas at a zoom. The centre of
+        /// the content's ink bounds sits on the canvas centre (Ctx.X/Y, which the drag moves). Used by the vector text tests.
+        /// </summary>
+        sealed class TextScene
+        {
+            readonly List<(VectorImage Pic, float Dx, float Dy)> items = new List<(VectorImage, float, float)>();
+
+            /// <summary>topLeft: the picture's ViewBox corner goes to (x, y) on the grid; otherwise its own coordinates are shifted by (x, y).</summary>
+            public void Add(VectorImage pic, float x, float y, bool topLeft = false)
+                => items.Add((pic, topLeft ? x - pic.ViewBox.X : x, topLeft ? y - pic.ViewBox.Y : y));
+
+            public void Draw(Ctx c, float zoom)
+            {
+                bool any = false; float l = 0, t = 0, r = 0, b = 0;
+                foreach (var (pic, dx, dy) in items)
+                    foreach (var sh in pic.Shapes)
+                    {
+                        if (sh.Path.SegmentCount == 0) continue;
+                        var bb = sh.Path.ControlBounds();
+                        float x0 = bb.Left + dx, x1 = bb.Right + dx, y0 = bb.Top + dy, y1 = bb.Bottom + dy;
+                        if (!any) { l = x0; r = x1; t = y0; b = y1; any = true; }
+                        else { l = Math.Min(l, x0); r = Math.Max(r, x1); t = Math.Min(t, y0); b = Math.Max(b, y1); }
+                    }
+                if (!any) return;
+                float cu = (l + r) / 2, cv = (t + b) / 2;
+                foreach (var (pic, dx, dy) in items)
+                    pic.Draw(c.Canvas, System.Numerics.Matrix3x2.CreateTranslation(dx - cu, dy - cv) * System.Numerics.Matrix3x2.CreateScale(zoom) * System.Numerics.Matrix3x2.CreateTranslation(c.X, c.Y), new VectorRenderOptions { FastLines = c.FastLines });
+            }
+        }
+
+        // Simplification by scale (SimplifySettings.MaxScale / AppliesAt): the curve is simplified only at or below
+        // MaxScale (1:1 by default); zoomed in past it, the full detail is drawn.
+        static class SimplifyScaleDemo
+        {
+            static VectorImage? full, simp; static string simpKey = "";
+
+            static VectorImage Build(int n)
+            {
+                var path = new VectorPath();
+                for (int i = 0; i <= n; i++)
+                {
+                    double t = i / (double)n * Math.PI * 2;
+                    double r = 180 * (1 + 0.04 * Math.Sin(37 * t) + 0.02 * Math.Sin(113 * t));   // a wobbly ring: lots of detail
+                    float x = (float)(r * Math.Cos(t)), y = (float)(r * Math.Sin(t));
+                    if (i == 0) path.MoveTo(x, y); else path.LineTo(x, y);
+                }
+                path.Close();
+                var img = new VectorImage { Width = 520, Height = 520, ViewBox = new RectangleF(-260, -260, 520, 520) };
+                img.Shapes.Add(new VectorShape(path, null, new VectorColor(VtInk), 1f));
+                return img;
+            }
+
+            static int Segments(VectorImage p) { int n = 0; foreach (var s in p.Shapes) n += s.Path.SegmentCount; return n; }
+
+            public static void Draw(Ctx c)
+            {
+                c.Canvas.ClearBuffer(VtPaper);
+                full ??= Build(4000);
+                float k = MathF.Max(0.01f, c.Scale);                    // view scale: screen pixels per picture unit
+                int idx = (int)c.Op - 1;                                 // 0 = None
+                var settings = new SimplifySettings
+                {
+                    Tolerance = idx <= 0 ? 0 : c.Grid,
+                    Algorithm = (SimplifyAlgorithm)Math.Clamp(idx - 1, 0, 2),
+                    ProviderSide = false,
+                    MaxScale = 1.0,
+                };
+                bool on = settings.AppliesAt(k);
+                VectorImage pic = full;
+                if (on)
+                {
+                    string key = settings.Tolerance + "|" + settings.Algorithm;
+                    if (simp == null || simpKey != key)
+                    {
+                        simp = Build(4000);
+                        simp.Simplify(settings);
+                        simpKey = key;
+                    }
+                    pic = simp;
+                }
+                var m = System.Numerics.Matrix3x2.CreateScale(k) * System.Numerics.Matrix3x2.CreateTranslation(c.W / 2f, c.H / 2f);
+                pic.Draw(c.Canvas, m, new VectorRenderOptions { AA = c.Smooth });
+                string alg = idx <= 0 ? "none" : settings.Algorithm.ToString();
+                c.Note = $"MaxScale {settings.MaxScale:0.00} (1:1). View scale {k:0.00}: {(on ? "simplified" : "full detail")}. " +
+                         $"Points {Segments(full)} -> {Segments(pic)} (threshold {settings.Tolerance} px, {alg}).";
+            }
+        }
+
+        static class MapDemo
+        {
+            static VectorImage? img; static string imgKey = "", status = "";
+            static double openMs; static int openShapes;                 // "Open File Time": read + build of the last open
+            static double originX, originY;              // world pixels (at the level) of the picture's (0,0)
+            static double homeX = double.NaN, homeY;     // the file's centre, normalised world (0..1): reset goes here
+            static double nx = double.NaN, ny;           // centre, normalised world (0..1)
+            static int lastX, lastY; static bool haveLast;
+            // bitmap cache (on by default): the picture is kept as 256 px tiles on a lattice. A pan copies the tiles it has,
+            // draws the ones on screen that are missing (in parallel), and draws the ring around the view in the background.
+            // A zoom or a changed key drops the tiles. Off: every frame draws the vectors of the view directly.
+            static readonly VectorTileCache tiles = new VectorTileCache();
+            static string cacheInfo = "";
+            static double lastK = double.NaN;               // the zoom of the last frame: a changed zoom draws the vectors directly
+
+            static double MercY(double lat) { double r = lat * Math.PI / 180.0; return (1.0 - Math.Log(Math.Tan(r) + 1.0 / Math.Cos(r)) / Math.PI) / 2.0; }
+
+            /// <summary>
+            /// The simplification the flags ask for. Algorithm list: index 0 "None" (no simplification), 1 Linear,
+            /// 2 Snap To Grid, 3 Visvalingam. ctx.Op = index + 1 (DefaultOp = 0 counts as None).
+            /// </summary>
+            static SimplifySettings? SimplifyFrom(Ctx c)
+            {
+                int idx = (int)c.Op - 1;
+                if (c.DotStep <= 0 || idx <= 0) return null;
+                return new SimplifySettings { Tolerance = c.DotStep, Algorithm = (SimplifyAlgorithm)Math.Clamp(idx - 1, 0, 2), ProviderSide = c.ShowGrid };
+            }
+
+            static void Open(string path, int z, SimplifySettings? simp, bool streetNames)
+            {
+                var sw = System.Diagnostics.Stopwatch.StartNew();
+                try
+                {
+                    using var mb = MbTiles.Open(path);
+                    homeX = ((mb.West + mb.East) / 2 + 180) / 360; homeY = MercY((mb.North + mb.South) / 2);
+                    if (double.IsNaN(nx)) { nx = homeX; ny = homeY; }
+                    img = VectorImage.FromMbTiles(mb, new MbTilesView { Zoom = z, StreetNames = streetNames, Simplify = simp });
+                    img.BuildIndex();                                  // grid over the shapes: each frame draws only what is in view
+                    double world = 256.0 * Math.Pow(2, z);
+                    var va = img.VisibleArea ?? img.ViewBox;
+                    originX = (mb.West + 180) / 360 * world - va.X;
+                    originY = MercY(mb.North) * world - va.Y;
+                    openMs = sw.Elapsed.TotalMilliseconds; openShapes = img.Shapes.Count;
+                    status = $"z{z}, {img.Shapes.Count} shapes";
+                }
+                catch (Exception ex) { img = null; status = ex.Message; }
+                tiles.Clear();
+            }
+
+            /// <summary>Reset (the Reset button): the map goes back to the file's centre, at the level, without a drag.</summary>
+            public static void ResetView()
+            {
+                if (!double.IsNaN(homeX)) { nx = homeX; ny = homeY; }
+                haveLast = false;                                  // the next frame is not a move
+            }
+
+            public static void Draw(Ctx c, string? path)
+            {
+                c.Canvas.ClearBuffer(MbTilesStyle.Background);
+                if (string.IsNullOrEmpty(path) || !System.IO.File.Exists(path))
+                {
+                    c.Note = "Open a .mbtiles file with the 'Open File' button (format pbf = vector tiles).";
+                    return;
+                }
+                int z = Math.Clamp(c.Z, 0, 14);
+                var simp = SimplifyFrom(c);
+                bool streetNames = !c.Xor;                             // "Hide names of streets" is the Xor flag here
+                string key = path + "|" + z + "|" + (simp == null ? "off" : simp.Tolerance + "|" + simp.Algorithm + "|" + simp.ProviderSide) + "|" + streetNames;
+                if (img == null || imgKey != key) { Open(path, z, simp, streetNames); imgKey = key; }
+                if (img == null) { c.Note = status; return; }
+
+                float k = MathF.Max(0.01f, c.Scale);      // extra zoom past the level; 1 = none
+                double per = 256.0 * Math.Pow(2, z) * k;  // screen pixels per normalised unit
+                bool moved = haveLast && (c.X != lastX || c.Y != lastY);
+                if (moved)
+                {
+                    nx -= (c.X - lastX) / per; ny -= (c.Y - lastY) / per;
+                    nx = Math.Clamp(nx, 0, 1); ny = Math.Clamp(ny, 0, 1);
+                }
+                lastX = c.X; lastY = c.Y; haveLast = true;
+
+                double cx = nx * 256.0 * Math.Pow(2, z) - originX, cy = ny * 256.0 * Math.Pow(2, z) - originY;
+                var opts = new VectorRenderOptions { AA = c.Smooth, FastLines = c.FastLines };
+                int minPx = Math.Max(1, c.Count);                     // "hide by zoom": shapes whose larger side is under this many px are left out
+                // everything that changes the drawn pixels is in the tile key (a change drops the tiles)
+                string vkey = key + "|" + minPx + "|" + c.Smooth;
+                bool zooming = !double.IsNaN(lastK) && lastK != k;      // every zoom step would draw all its tiles again: draw directly
+                lastK = k;
+                if (!c.NotMask || zooming)
+                {
+                    DrawDirect(c, cx, cy, k, opts, minPx);
+                    cacheInfo = c.NotMask ? "vectors (zooming)" : "bitmap cache off";
+                }
+                else
+                {
+                    tiles.Draw(img, c.Canvas, cx, cy, k, vkey, opts, minPx, MbTilesStyle.Background);
+                    cacheInfo = $"tiles: {tiles.LastCopied} copied, {tiles.LastDrawn} drawn on screen, {tiles.LastPrefetched} ready from background";
+                }
+                double lon = nx * 360 - 180, lat = Math.Atan(Math.Sinh(Math.PI * (1 - 2 * ny))) * 180 / Math.PI;
+                c.Note = $"Open File Time {openMs:0} ms ({openShapes} shapes) | {status} | Z{z} x{k:0.00} | centre {lat:F5}, {lon:F5} | {cacheInfo}";
+            }
+
+            static void DrawDirect(Ctx c, double cx, double cy, float k, VectorRenderOptions opts, int minPx)
+            {
+                img!.DrawVisible(c.Canvas, VectorViewCache.ViewMatrix(cx, cy, k, c.W * 0.5f, c.H * 0.5f), opts, minPx);   // only the shapes in view
+            }
+        }
+
         static VectorImage? tvec; static string tvecKey = "", tvecInfo = "";
         const string SampleSvg = "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 200 200'><defs><linearGradient id='g' x1='0' y1='0' x2='1' y2='1'><stop offset='0' stop-color='#ffcc33'/><stop offset='1' stop-color='#ff3366'/></linearGradient><radialGradient id='r'><stop offset='0' stop-color='#fff'/><stop offset='1' stop-color='#3366ff'/></radialGradient></defs>"
             + "<rect x='10' y='10' width='180' height='180' rx='24' fill='url(#g)' stroke='#402' stroke-width='4'/><circle cx='70' cy='70' r='40' fill='url(#r)' fill-opacity='0.9'/>"
@@ -2510,18 +2902,29 @@ T(GControls, "SpriteLabel / GroupBox / Tabs / TextBox / Numeric / Combo / ListBo
             float fit = c.S * 1.5f / MathF.Max(1e-3f, MathF.Max(img.Width, img.Height));
             return new SizeF(MathF.Max(1f, img.Width * fit), MathF.Max(1f, img.Height * fit));
         }
-        static (VectorImage img, string info) EnsureVector(string? path, int page)
+        /// <summary>The SVG test's simplification flags: threshold (Grid, SVG units; 0 = off), algorithm (Op), provider side (GridOn).</summary>
+        /// <summary>Algorithm list: 0 None, 1 Linear, 2 Snap To Grid, 3 Visvalingam (ctx.Op = index + 1). Every caller of EnsureVector passes this one result, so the cache key is the same for all of them.</summary>
+        static SimplifySettings? SvgSimplify(Ctx c)
         {
-            string key = $"{path}/{page}";
+            int idx = (int)c.Op - 1;
+            if (c.Grid <= 0 || idx <= 0) return null;
+            return new SimplifySettings { Tolerance = c.Grid, Algorithm = (SimplifyAlgorithm)Math.Clamp(idx - 1, 0, 2), ProviderSide = c.ShowGrid };
+        }
+
+        static (VectorImage img, string info) EnsureVector(string? path, int page, SimplifySettings? simp = null)
+        {
+            string key = $"{path}/{page}/{(simp == null || !simp.On ? "off" : simp.Tolerance + "/" + simp.Algorithm)}";
             if (tvec != null && tvecKey == key) return (tvec, tvecInfo);
             var sw = System.Diagnostics.Stopwatch.StartNew();
             VectorImage img; string info;
             try
             {
                 if (path != null && File.Exists(path)) { img = VectorImage.Load(path, page); info = $"{Path.GetFileName(path)} ({img.Format}, load {sw.Elapsed.TotalMilliseconds:F1} ms)"; }
-                else { img = VectorImage.FromSvg(SampleSvg); info = "built-in sample SVG (open an .svg / .eps / .pdf with the 'Open file...' button)"; }
+                else { img = VectorImage.FromSvg(SampleSvg); info = "built-in sample SVG (open an .svg / .eps / .pdf with the 'Open File' button)"; }
             }
             catch (Exception ex) { img = VectorImage.FromSvg(SampleSvg); info = $"{Path.GetFileName(path)}: {ex.GetType().Name}: {ex.Message} - showing the sample"; }
+            // a fresh copy per setting: simplification removes points, so it cannot be undone on a cached picture
+            if (simp != null && simp.On) { int before = img.Shapes.Sum(sh => sh.Path.SegmentCount); img.Simplify(simp); info += $" | simplified {before} -> {img.Shapes.Sum(sh => sh.Path.SegmentCount)} segments"; }
             tvec = img; tvecKey = key; tvecInfo = info; return (img, info);
         }
         static VectorImage? tanim; static string tanimKey = "", tanimInfo = "";
@@ -2547,7 +2950,7 @@ T(GControls, "SpriteLabel / GroupBox / Tabs / TextBox / Numeric / Combo / ListBo
             try
             {
                 if (path != null && File.Exists(path)) { img = VectorImage.Load(path); info = $"{Path.GetFileName(path)} ({img.Format}, load {sw.Elapsed.TotalMilliseconds:F1} ms)"; }
-                else { img = VectorImage.FromSvg(AnimSampleSvg); info = $"built-in sample ({img.Tracks.Count} tracks, {img.Duration:0.###} s loop) - open an animated .svg with 'Open file...'"; }
+                else { img = VectorImage.FromSvg(AnimSampleSvg); info = $"built-in sample ({img.Tracks.Count} tracks, {img.Duration:0.###} s loop) - open an animated .svg with 'Open File'"; }
             }
             catch (Exception ex) { img = VectorImage.FromSvg(AnimSampleSvg); info = $"{Path.GetFileName(path)}: {ex.GetType().Name}: {ex.Message} - showing the sample"; }
             img.ClipViewport = true;   // scenes (the AI-made ones especially) park dust / parallax beyond the canvas; the demo shows the container's rectangle only
@@ -2589,7 +2992,7 @@ T(GControls, "SpriteLabel / GroupBox / Tabs / TextBox / Numeric / Combo / ListBo
                     g = new VoxelGrid(back.Width + mesh.Width + 4, Math.Max(back.Height, mesh.Height), Math.Max(back.Depth, mesh.Depth));
                     g.Paste(back, 0, 0, 0); g.Paste(mesh, back.Width + 4, 0, 0);
                     back.Dispose(); mesh.Dispose();
-                    info = $"built-in sample: house via .vox round trip ({vox.Length} bytes) + obj text pyramid with .mtl colours and a Ke (glowing) tip (res {Math.Max(8, objRes / 4)}) - use 'Open file...' for your own";
+                    info = $"built-in sample: house via .vox round trip ({vox.Length} bytes) + obj text pyramid with .mtl colours and a Ke (glowing) tip (res {Math.Max(8, objRes / 4)}) - use 'Open File' for your own";
                 }
             }
             catch (Exception ex)

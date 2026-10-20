@@ -941,6 +941,14 @@ namespace Sr2d64CSport
             for (int i = 0; i < count; i++)
                 cols[i] = ScaleBrightness(BarColorAt(basis, i, d, sgn, steps), BarPercent(i, cycle, d, sgn));
             int left = p.RunX, wide = p.ClipW, x0 = left - shift;
+            if (stripeAnim == StripeAnimationMode.WrapOffset)
+            {
+                // The moving bars are painted into a scratch strip first; only the pixels inside the run's own slanted
+                // silhouette (the /____/ outline the bars make without animation) are copied to the buffer. The pattern
+                // slides inside the skewed edges; clipping to the rectangle would cut the edges square.
+                PaintSilhouette(s, cols, barStep, sk, h, left, wide, x0, p.RunW, stripeStyle == StripeBarsStyle.FullBars ? 0 : line);
+                return;
+            }
             if (stripeStyle == StripeBarsStyle.FullBars)
             {
                 s.SetLockRectXY(left, 0, wide, h);
@@ -953,6 +961,43 @@ namespace Sr2d64CSport
             s.SetLockRectXY(left, Math.Max(0, h - line), wide, line);     // ... and the bottom one
             Bars(s, cols, barStep, sk, h, x0);
             s.SetLockRect();
+        }
+
+        /// <summary>Scratch strip for the wrapped bars (reused between frames while the size stays).</summary>
+        Sprite? barStrip;
+
+        /// <summary>
+        /// Paints the wrapped bars into the scratch strip, then copies the pixels that lie inside the run's slanted
+        /// silhouette: at row centre y the run spans x in [sk*(h-y)/h, RunW - sk + sk*(h-y)/h) relative to the run's left
+        /// edge - the same footprint the bars have without animation. Only the rows of the top and bottom lines are
+        /// copied when the style is Lines (<paramref name="line"/> &gt; 0 means "lines only").
+        /// </summary>
+        void PaintSilhouette(Sprite s, int[] cols, double barStep, int sk, int h, int left, int wide, int x0, int runW, int line)
+        {
+            if (barStrip == null || barStrip.Width != wide || barStrip.Height != h)
+            {
+                barStrip?.Dispose();
+                barStrip = new Sprite(wide, h);
+            }
+            barStrip.ClearBuffer(0);
+            Bars(barStrip, cols, barStep, sk, h, x0 - left);       // bars in strip coordinates (0 = the run's left edge)
+            var src = barStrip.Pixels;
+            var dst = s.Pixels;
+            int stride = s.Width;
+            bool linesOnly = line > 0;
+            for (int y = 0; y < h; y++)
+            {
+                if (linesOnly && y >= line && y < h - line) continue;   // Lines style: only the top and bottom rows
+                double yc = y + 0.5;
+                double lo = sk * (h - yc) / h, hi = runW - sk + sk * (h - yc) / h;
+                int xa = (int)Math.Max(0, Math.Ceiling(lo - 0.5));          // pixel centre x + 0.5 >= lo
+                int xb = (int)Math.Min(wide, Math.Ceiling(hi - 0.5));       // pixel centre x + 0.5 <  hi
+                for (int x = xa; x < xb; x++)
+                {
+                    int c = src[y * wide + x];
+                    if (c != 0) dst[y * stride + left + x] = c;
+                }
+            }
         }
 
         /// <summary>The colours the bars are cut from, before the animation: the frame colours of a Custom handler, else
@@ -1365,6 +1410,7 @@ namespace Sr2d64CSport
                 }
             }
             base.WndProc(ref m);
+            if (m.Msg == WM_GETMINMAXINFO) MaximizeOnNearestMonitor(m.LParam);   // after WinForms: its MaximizedBounds may be stale
         }
 
         /// <summary>The frame messages of <see cref="NativeWindowFrame"/>; true when handled here.</summary>
@@ -1453,6 +1499,33 @@ namespace Sr2d64CSport
             Marshal.StructureToPtr(p, lParam, false);
         }
 
+        const int WM_GETMINMAXINFO = 0x0024;
+
+        [StructLayout(LayoutKind.Sequential)]
+        struct WinPoint { public int X, Y; }
+
+        [StructLayout(LayoutKind.Sequential)]
+        struct WinMinMaxInfo { public WinPoint ptReserved, ptMaxSize, ptMaxPosition, ptMinTrackSize, ptMaxTrackSize; }
+
+        /// <summary>
+        /// Maximize goes to the monitor the window is on now. WinForms sizes the maximized window from MaximizedBounds, a
+        /// screen rectangle that was set when the form was last maximized from the menu or button; a double click on the bar
+        /// or the system menu uses it as it was, so the window went to the wrong screen and was then clamped to the current one
+        /// in WM_NCCALCSIZE (the flicker). This answer replaces the size with the work area of the monitor the window is on.
+        /// ptMaxPosition is relative to that monitor's origin. Full screen is not touched.
+        /// </summary>
+        void MaximizeOnNearestMonitor(IntPtr lParam)
+        {
+            if (fullscreen || lParam == IntPtr.Zero) return;
+            var mi = new WinMonitorInfo { cbSize = Marshal.SizeOf<WinMonitorInfo>() };
+            if (!GetMonitorInfo(MonitorFromWindow(Handle, MONITOR_DEFAULTTONEAREST), ref mi)) return;
+            var info = Marshal.PtrToStructure<WinMinMaxInfo>(lParam);
+            info.ptMaxPosition = new WinPoint { X = mi.rcWork.Left - mi.rcMonitor.Left, Y = mi.rcWork.Top - mi.rcMonitor.Top };
+            info.ptMaxSize = new WinPoint { X = mi.rcWork.Right - mi.rcWork.Left, Y = mi.rcWork.Bottom - mi.rcWork.Top };
+            info.ptMaxTrackSize = info.ptMaxSize;
+            Marshal.StructureToPtr(info, lParam, false);
+        }
+
         [StructLayout(LayoutKind.Sequential)]
         struct WinRect { public int Left, Top, Right, Bottom; }
 
@@ -1498,9 +1571,9 @@ namespace Sr2d64CSport
         // ---- dragging / clicking the bar (the bar drives it; see TitleBarStrip) --------------------
         internal void BarDragStart(Point screen)
         {
-            if (WindowState != FormWindowState.Normal && WindowState != FormWindowState.Maximized) return;
+            if (WindowState != FormWindowState.Normal && WindowState != FormWindowState.Maximized && !fullscreen) return;
             dragBar = true;
-            dragRestores = WindowState == FormWindowState.Maximized;
+            dragRestores = fullscreen || WindowState == FormWindowState.Maximized;   // a drag from full screen or maximized restores first
             dragPos = screen;
         }
 
@@ -1513,8 +1586,10 @@ namespace Sr2d64CSport
                 dragRestores = false;
                 // keep the grab point where it was on the caption, relative to the restored width
                 float frac = Math.Clamp((dragPos.X - Left) / (float)Math.Max(1, Width), 0.05f, 0.95f);
-                WindowState = FormWindowState.Normal;
-                Location = new Point(screen.X - (int)(RestoreBounds.Width * frac), screen.Y - bar.Height / 2);
+                int restoredW;
+                if (fullscreen) { ToggleFullScreen(); restoredW = Width; }   // leaves full screen: back to the normal bounds
+                else { WindowState = FormWindowState.Normal; restoredW = RestoreBounds.Width; }
+                Location = new Point(screen.X - (int)(restoredW * frac), screen.Y - bar.Height / 2);
             }
             else Location = new Point(Location.X + screen.X - dragPos.X, Location.Y + screen.Y - dragPos.Y);
             dragPos = screen;

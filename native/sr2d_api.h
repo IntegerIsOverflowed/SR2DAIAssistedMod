@@ -75,7 +75,7 @@ static_assert(sizeof(SR2D_VoxelScene) == 232, "SR2D ABI: SR2D_VoxelScene drifted
 // SR2D_OPS list, an op-word encoding or a mirrored struct layout changes - cs/SR2D.cs refuses to run
 // against a native library that reports a different number (a stale SR2D64.dll otherwise loads and
 // silently draws garbage).
-#define SR2D_ABI 1
+#define SR2D_ABI 2
 #define SR2D_OPS(X) \
 /* ---- misc ------------------------------------------------------------ */ \
 X(void, MOVSD_,        (int* src, int* dst, int dwcnt), (src, dst, dwcnt)) \
@@ -143,6 +143,7 @@ X(void, MASK_BLEND_MODE,(int* src, int* dst, int* mask, int w, int h, int maskex
 /* ---- line (new) ------------------------------------------------------ */ \
 X(void, DRAW_POLY,     (int* dst, int dw, int clipL, int clipT, int clipR, int clipB, const float* xy, const int* counts, int ncont, int col, int op, int k, int flags), (dst, dw, clipL, clipT, clipR, clipB, xy, counts, ncont, col, op, k, flags)) \
 X(void, DRAW_LINE2,    (int* dst, int dw, int clipL, int clipT, int clipR, int clipB, float x0, float y0, float x1, float y1, int col, int op, int k, float dotlen, float gaplen, float phase), (dst, dw, clipL, clipT, clipR, clipB, x0, y0, x1, y1, col, op, k, dotlen, gaplen, phase)) \
+X(void, DRAW_LINE2_AA, (int* dst, int dw, int clipL, int clipT, int clipR, int clipB, float x0, float y0, float x1, float y1, int col, int op, int k), (dst, dw, clipL, clipT, clipR, clipB, x0, y0, x1, y1, col, op, k)) \
 /* ---- free transform (new) ------------------------------------------- */ \
 X(void, DRAW_WARP,     (int* src, int sw, int sh, int* dst, int dw, int clipL, int clipT, int clipR, int clipB, const float* quad, const float* poly, int npoly, int op, int flags, int k), (src, sw, sh, dst, dw, clipL, clipT, clipR, clipB, quad, poly, npoly, op, flags, k)) \
 /* ---- blur (new) ------------------------------------------------------ */ \
