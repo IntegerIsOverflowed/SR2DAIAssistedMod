@@ -128,6 +128,19 @@ static class OutlineSeamChecks
             if (partialFast != 0 || partialAa == 0 || redFast == 0) { Console.WriteLine("FAIL wireframe FastLines"); Environment.Exit(1); }
         }
 
+        // node structure of the baked bands (what a vector editor shows): hairline wireframe at 8x, no overlaps expected
+        {
+            var pic = VectorText.Create("OBD", 28f, new VectorTextStyle { Bold = true, Color = Black, OutlinePosition = VectorOutlinePosition.Inside });
+            var baked = BakedCopy(pic);
+            int nodes = 0; foreach (var s2 in baked.Shapes) nodes += s2.Path.SegmentCount;
+            Matrix3x2 m8 = Matrix3x2.CreateScale(8f) * Matrix3x2.CreateTranslation(-pic.ViewBox.X * 8f + 8, -pic.ViewBox.Y * 8f + 8);
+            var wsp = new Sprite((int)MathF.Ceiling(pic.ViewBox.Width * 8f) + 16, (int)MathF.Ceiling(pic.ViewBox.Height * 8f) + 16);
+            wsp.ClearBuffer(White);
+            VectorText.Wireframe(baked, unchecked((int)0xFFE0245E)).Draw(wsp, m8);
+            File.WriteAllBytes(Path.Combine(outDir, "bake_nodes_inside.png"), Png.Encode(wsp.Pixels, wsp.Width, wsp.Height));
+            Console.WriteLine($"  bake nodes (OBD inside): {nodes} segments in {baked.Shapes.Count} shapes");
+        }
+
         // sample sheet for the user's SVG editor: the three positions, bold, outlines baked (no clipPath anywhere)
         var sheet = new VectorImage { Title = "Outline positions (baked)" };
         float y = 0; float maxW = 0;

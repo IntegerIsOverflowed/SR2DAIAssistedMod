@@ -138,6 +138,8 @@ namespace Sr2d64CSport
         readonly SpriteLabel lblMask = new SpriteLabel { AutoSize = false, Height = 16 };
         static readonly string[] MaskNames = { "circle", "diamond", "stripes", "checker" };
         readonly SpriteButton btnWireColor = new SpriteButton();
+        readonly SpriteButton btnSaveSvg = new SpriteButton(), btnSaveSvgObjects = new SpriteButton();
+        public const string DemoVersion = "0.56", DemoDate = "2026-10-20";   // shown in the title bar; change the version here
         int wireColor = unchecked((int)0xFFE0245E);     // the wireframe overlay colour (ARGB), picked with the Wireframe colour button
         readonly SpriteButton btnSuite = new SpriteButton(), btnCopy = new SpriteButton(), btnSave = new SpriteButton(), btnReset = new SpriteButton(), btnFile = new SpriteButton(), btnMeasure = new SpriteButton(), btnCode = new SpriteButton();
         readonly SpriteToggle chkProgress = Tick();      // slow tests: show phases / partial renders while a frame is being made
@@ -174,6 +176,7 @@ namespace Sr2d64CSport
         public MainForm()
         {
             Text = "SR2D demo";
+            StripeStyle = StripeBarsStyle.TopAndBottomLines;   // colored edges (top and bottom lines) instead of full bars
             WindowState = FormWindowState.Maximized;        // starts maximised as a window (the taskbar stays); the sprite title bar is the base class's
             MinimumSize = new Size(1100, 700);
             StartPosition = FormStartPosition.CenterScreen;
@@ -346,6 +349,8 @@ namespace Sr2d64CSport
             Btn(btnRow, btnReset, "Reset params", (_, _) => ResetParams());
             Btn(btnRow, btnCode, "Code (F2)", (_, _) => ShowCode(!codeShown));
             Btn(btnRow, btnFile, "Open File", (_, _) => OpenTestFile()); btnFile.Visible = false;
+            Btn(btnRow, btnSaveSvg, "Save SVG...", (_, _) => SaveSvg(false)); btnSaveSvg.Visible = false;
+            Btn(btnRow, btnSaveSvgObjects, "Save SVG (outlines as objects)", (_, _) => SaveSvg(true)); btnSaveSvgObjects.Visible = false;
             testStack.Controls.Add(btnRow);
             // slow tests only
             Btn(testStack, btnMeasure, "Measure fps (render N frames)", (_, _) => StartMeasure()); btnMeasure.Visible = false;
@@ -420,17 +425,32 @@ namespace Sr2d64CSport
         /// (<see cref="StaticUsed"/>) plus what Ctx recorded while it ran (a test may read more once a check box is on), or its
         /// own <see cref="DemoTest.Controls"/> list when it has one. Re-evaluated after each frame; cheap when nothing changed.
         /// </summary>
+        SpriteColorDialog? wireDialog;
         void PickWireColor()
         {
-            using var dlg = new SpriteColorDialog { Value = Color.FromArgb(wireColor) };
-            if (dlg.ShowDialog(this) != DialogResult.OK) return;
-            wireColor = dlg.Value.ToArgb();
-            ShowWireColor();
+            if (wireDialog != null) { wireDialog.Activate(); return; }
+            // not a modal ShowDialog inside the button's mouse-up: the dialog opens once that click has finished, and
+            // it is a plain window owned by this form (OK / Cancel raise ButtonClick before the dialog closes)
+            var dlg = new SpriteColorDialog { Value = Color.FromArgb(wireColor), StartPosition = FormStartPosition.CenterParent };
+            wireDialog = dlg;
+            dlg.ButtonClick += (_, _) => { if (dlg.DialogResult == DialogResult.OK) { wireColor = dlg.Value.ToArgb(); ShowWireColor(); } };
+            dlg.FormClosed += (_, _) => { wireDialog = null; BeginInvoke(new Action(dlg.Dispose)); };
+            BeginInvoke(new Action(() => { if (!dlg.IsDisposed) dlg.Show(this); }));
         }
         void ShowWireColor()
         {
-            btnWireColor.Text = $"Wireframe colour #{wireColor & 0xFFFFFF:X6}";
-            btnWireColor.Size = new Size(Sprite.MeasureText(btnWireColor.Text).Width + 22, 26);
+            btnWireColor.Accented = true;                    // the button wears the colour it sets
+            btnWireColor.AccentColor = Color.FromArgb(wireColor);
+        }
+
+        void SaveSvg(bool baked)
+        {
+            if (current?.SvgText == null) return;
+            string text = current.SvgText(ctx, baked);
+            using var dlg = new SaveFileDialog { Title = "Save SVG", Filter = "SVG (*.svg)|*.svg", DefaultExt = "svg", FileName = baked ? "vector-import-outlines-as-objects.svg" : "vector-import.svg" };
+            if (dlg.ShowDialog(this) != DialogResult.OK) return;
+            File.WriteAllText(dlg.FileName, text, new System.Text.UTF8Encoding(false));
+            Log("saved " + dlg.FileName + (baked ? " (outlines as plain objects)" : ""));
         }
 
         void UpdateVisible(Param used)
@@ -924,6 +944,7 @@ namespace Sr2d64CSport
             orbiting = panning = rotating = shadowDrag = false; edgeDrag = 0; pivotX = pivotY = -1; backdropX = backdropY = 0;
             prog.Visible = false;
             btnFile.Visible = t.FileFilter != null;
+            btnSaveSvg.Visible = btnSaveSvgObjects.Visible = t.SvgText != null;
             btnMeasure.Visible = chkProgress.Visible = t.SlowFrames > 0;
             ShowStrip(t);
             SetFileButton(t.FilePath != null ? "Open File (" + (t.FilePath.Contains('|') ? t.FilePath.Split('|').Length + " files" : FileLabel(Path.GetFileName(t.FilePath))) + ")" : "Open File");
@@ -1012,7 +1033,7 @@ namespace Sr2d64CSport
             string api = Caps.HasWarp && Caps.HasLine2 && Caps.HasAlphaOver && Caps.HasPoly && Caps.HasBlur ? "new API"
                        : Caps.HasWarp || Caps.HasLine2 || Caps.HasAlphaOver || Caps.HasPoly || Caps.HasBlur ? "partial API" : "old API";
             var col = Caps.HasWarp ? Color.FromArgb(0xFF, 0x70, 0xE0, 0x90) : Color.FromArgb(0xFF, 0xFF, 0xB0, 0x50);
-            SetTitleTags(new TitleTag(rel, col), new TitleTag("kernels: " + Caps.SimdName + " \u00b7 " + api, Color.FromArgb(0xFF, 0x8A, 0x94, 0xA6)));
+            SetTitleTags(new TitleTag(rel, col), new TitleTag("kernels: " + Caps.SimdName + " \u00b7 " + api + " \u00b7 v" + DemoVersion + " \u00b7 "+ DemoDate, Color.FromArgb(0xFF, 0x8A, 0x94, 0xA6)));
         }
 
         // ------------------------------------------------------------- assets

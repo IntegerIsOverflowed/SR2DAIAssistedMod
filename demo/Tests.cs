@@ -196,6 +196,8 @@ namespace Sr2d64CSport
         public float AnimSpin = 0.5f;
         /// <summary>Size of the draggable object in its own units at Scale 1 (canvas pixels at x1.00). Null = a sprite-sized square. The frame / handles / pivot maths use it (vector import test: the picture's size).</summary>
         public Func<Ctx, SizeF>? ObjectSize;
+        /// <summary>Vector import: the picture as SVG text for the Save SVG buttons (bake = outlines written as plain objects).</summary>
+        public Func<Ctx, bool, string>? SvgText;
         /// <summary>Drop-shadow tests: the object is stationary (canvas centre); dragging sets the Z slider (distance) and the Angle slider (direction) from the vector centre -> pointer.</summary>
         public bool ShadowByMouse;
         /// <summary>The whole canvas is the draggable object (a backdrop the test shifts by Ctx.X / Y - canvas centre): open hand everywhere, no pivot marker.</summary>
@@ -1236,6 +1238,7 @@ T(GControls, "SpriteLabel / GroupBox / Tabs / TextBox / Numeric / Combo / ListBo
                               Param.GridOn, "Use simplification on provider side if possible (SVG has no tile provider: it is applied once the file is read)", Param.Wireframe, "Show wireframe (outlines of the vector shapes)", Param.WireColor, "Wireframe colour (outline overlay)", Param.FastLines, "Fast thin lines (1 px strokes without AA: faster, hard edges)")
                           .Ops("None", "Linear (Douglas-Peucker)", "Snap To Grid", "Visvalingam").Range(Param.Grid, 0, 20).With(Param.Grid, 0).With(Param.GridOn, true);
             L[L.Count - 1].ObjectSize = c => { var vt = L.Find(x => x.Name.StartsWith("Vector import", StringComparison.Ordinal))!; var (vi, _) = EnsureVector(vt.FilePath, c.DotStep, SvgSimplify(c)); return VectorObjectSize(c, vi); };
+            L[L.Count - 1].SvgText = (c, bake) => { var vt = L.Find(x => x.Name.StartsWith("Vector import", StringComparison.Ordinal))!; var (vi, _) = EnsureVector(vt.FilePath, c.DotStep, null); return vi.ToSvg(bake); };
             L[L.Count - 1].ControlStrip = RecolorDemo.Build; L[L.Count - 1].StripHeight = RecolorDemo.StripHeight;
             // pick mode: a click on the picture (object units = picture units x fit) picks the colour under it
             L[L.Count - 1].ObjectClick = (c, ox, oy) =>
