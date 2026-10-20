@@ -28,6 +28,33 @@ static class VectorTextChecks
 
     static List<PointF> AllPoints(Sr2d64CSport.VectorImage img) => img.Shapes.SelectMany(s => Points(s.Path)).ToList();
 
+    // the nodes plus 16 samples of every cubic: the true extent of rounded curves (a curve's extreme is not a node)
+    static List<PointF> CurveSamples(Sr2d64CSport.VectorPath p)
+    {
+        var r = new List<PointF>();
+        int di = 0; PointF cur = default;
+        foreach (var k in p.Kinds)
+        {
+            switch (k)
+            {
+                case Sr2d64CSport.VectorPath.K.Move:
+                case Sr2d64CSport.VectorPath.K.Line: cur = new PointF(p.Data[di], p.Data[di + 1]); r.Add(cur); di += 2; break;
+                case Sr2d64CSport.VectorPath.K.Cubic:
+                    {
+                        var c1 = new PointF(p.Data[di], p.Data[di + 1]); var c2 = new PointF(p.Data[di + 2], p.Data[di + 3]); var e = new PointF(p.Data[di + 4], p.Data[di + 5]);
+                        for (int i = 1; i <= 16; i++)
+                        {
+                            float t = i / 16f, u = 1 - t;
+                            r.Add(new PointF(u * u * u * cur.X + 3 * u * u * t * c1.X + 3 * u * t * t * c2.X + t * t * t * e.X, u * u * u * cur.Y + 3 * u * u * t * c1.Y + 3 * u * t * t * c2.Y + t * t * t * e.Y));
+                        }
+                        cur = e; di += 6; break;
+                    }
+            }
+        }
+        return r;
+    }
+    static List<PointF> AllSamples(Sr2d64CSport.VectorImage img) => img.Shapes.SelectMany(s => CurveSamples(s.Path)).ToList();
+
     static void SaveText(string text, string name)
     {
         string outDir = Environment.GetEnvironmentVariable("CTLRUN_OUT") ?? Path.Combine(Path.GetTempPath(), "ctlrun");
@@ -181,14 +208,14 @@ static class VectorTextChecks
         var hang = AllPoints(Sr2d64CSport.VectorText.OnPath("H", hangLine, 70f, new Sr2d64CSport.VectorTextPathOptions { Above = false }));
         Chk(MathF.Abs(hang.Min(p => p.Y) - 100f) < 0.01f && MathF.Abs(hang.Max(p => p.Y) - 170f) < 0.01f, $"below the path: glyphs stay upright (H spans y {hang.Min(p => p.Y):0.0}..{hang.Max(p => p.Y):0.0})");
 
-        // rounding: radius 12 adds curve points to the angular glyph; radius 0 keeps the vertices only
+        // rounding: each corner of the angular glyph becomes one curve between two nodes (2 per corner, not a polyline)
         var angularO = AllPoints(Sr2d64CSport.VectorText.Create("O", 70f, new Sr2d64CSport.VectorTextStyle { Radius = 0f }));
         var roundO = AllPoints(Sr2d64CSport.VectorText.Create("O", 70f, new Sr2d64CSport.VectorTextStyle { Radius = 12f }));
-        Chk(roundO.Count > angularO.Count + 20, $"radius 12 rounds the O's corners ({angularO.Count} -> {roundO.Count} points)");
+        Chk(roundO.Count == 2 * angularO.Count, $"radius 12 rounds each O corner into two smooth nodes ({angularO.Count} -> {roundO.Count} nodes)");
 
         // tip limit: the apex of A is exactly at cap height with TipDrop 0, and lowered by at most TipDrop with 3
-        float apexSharp = AllPoints(Sr2d64CSport.VectorText.Create("A", 70f, new Sr2d64CSport.VectorTextStyle { Radius = 12f, TipDrop = 0f })).Min(p => p.Y);
-        float apexDrop = AllPoints(Sr2d64CSport.VectorText.Create("A", 70f, new Sr2d64CSport.VectorTextStyle { Radius = 12f, TipDrop = 3f })).Min(p => p.Y);
+        float apexSharp = AllSamples(Sr2d64CSport.VectorText.Create("A", 70f, new Sr2d64CSport.VectorTextStyle { Radius = 12f, TipDrop = 0f })).Min(p => p.Y);
+        float apexDrop = AllSamples(Sr2d64CSport.VectorText.Create("A", 70f, new Sr2d64CSport.VectorTextStyle { Radius = 12f, TipDrop = 3f })).Min(p => p.Y);
         Chk(MathF.Abs(apexSharp + 70f) < 0.01f, $"tip drop 0: A keeps its apex at cap height (y {apexSharp:0.00})");
         Chk(apexDrop > -70f + 0.5f && apexDrop <= -66.9f, $"tip drop 3: A's apex is lowered by 3 units at most (y {apexDrop:0.00})");
 
