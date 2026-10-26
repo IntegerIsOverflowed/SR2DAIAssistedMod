@@ -30,6 +30,10 @@ namespace Sr2d64CSport
         OffsetY = 524288,
         /// <summary>The test reads <see cref="Ctx.FastLines"/> - vector drawing: strokes of at most 1 px without anti-aliasing (faster, hard edges).</summary>
         FastLines = 1048576,
+        /// <summary>The test reads <see cref="Ctx.Wireframe"/> - vector drawing: the outline of every shape is drawn on top as a hairline (VectorRenderOptions.Wireframe).</summary>
+        Wireframe = 2097152,
+        /// <summary>The test reads <see cref="Ctx.WireColor"/> - the colour of the wireframe overlay (the Wireframe colour control).</summary>
+        WireColor = 4194304,
     }
 
     internal sealed class Ctx
@@ -38,6 +42,8 @@ namespace Sr2d64CSport
         /// <summary>Frame tests (DemoTest.Frame): the editable transform frame - draw your object through Frame.Transform at (Frame.OriginX, OriginY) and call Frame.Attach(w, h, ox, oy) every frame so the handles know where it is.</summary>
         public TransformFrame Frame = null!;
         public Sprite Temp = null!;            // scratch, same size as a sprite
+        /// <summary>Hold-mouse tests (DemoTest.HoldMouse): right / middle button currently held over the viewport.</summary>
+        public bool HoldRight, HoldMiddle;
         public Assets A = null!;
         public int LastInt;                    // e.g. MaskInterSector result, shown in the status bar
         /// <summary>Offset (px) of the grabbable checker backdrop: drag anywhere with the hand cursor (tests with <see cref="DemoTest.GrabBackdrop"/>). Deliberately NOT the Mouse parameter, so no follow-the-mouse check box appears.</summary>
@@ -79,7 +85,8 @@ namespace Sr2d64CSport
 
         int x, y, z = 120, blend = 128, count = 1, maskBits = Assets.MaskCircle, dotStep;
         float angle, scale = 1f, scaleY = 1f, brite = 1f, time, yaw, pitch = 0.55f, panX, panY;
-        bool smooth, notMask, xor, fastLines;
+        bool smooth, notMask, xor, fastLines, wireframe;
+        int wireColor = unchecked((int)0xFFE0245E);
         SR2D.Op op = SR2D.Op.Paint;
 
         /// <summary>Seconds of animation time. Stops advancing while the "Animate" check box is off.</summary>
@@ -131,6 +138,10 @@ namespace Sr2d64CSport
         public bool Xor { get { Touch(Param.Xor); return xor; } set => xor = value; }
         /// <summary>Vector tests: 1 px strokes are painted without anti-aliasing (VectorRenderOptions.FastLines).</summary>
         public bool FastLines { get { Touch(Param.FastLines); return fastLines; } set => fastLines = value; }
+        /// <summary>Vector tests: the outline of every shape is drawn on top as a one-pixel hairline (VectorRenderOptions.Wireframe).</summary>
+        public bool Wireframe { get { Touch(Param.Wireframe); return wireframe; } set => wireframe = value; }
+        /// <summary>Colour of the wireframe overlay (ARGB), set by the Wireframe colour control.</summary>
+        public int WireColor { get { Touch(Param.WireColor); return wireColor; } set => wireColor = value; }
 
         public Ctx Clone() => (Ctx)MemberwiseClone();
 
@@ -187,10 +198,14 @@ namespace Sr2d64CSport
         public float AnimSpin = 0.5f;
         /// <summary>Size of the draggable object in its own units at Scale 1 (canvas pixels at x1.00). Null = a sprite-sized square. The frame / handles / pivot maths use it (vector import test: the picture's size).</summary>
         public Func<Ctx, SizeF>? ObjectSize;
+        /// <summary>Vector import: the picture as SVG text for the Save SVG buttons (bake = outlines written as plain objects).</summary>
+        public Func<Ctx, bool, string>? SvgText;
         /// <summary>Drop-shadow tests: the object is stationary (canvas centre); dragging sets the Z slider (distance) and the Angle slider (direction) from the vector centre -> pointer.</summary>
         public bool ShadowByMouse;
         /// <summary>The whole canvas is the draggable object (a backdrop the test shifts by Ctx.X / Y - canvas centre): open hand everywhere, no pivot marker.</summary>
         public bool DragAnywhere;
+        /// <summary>Right and middle button are held-view keys, not teleport / pan: the test reads Ctx.HoldRight / HoldMiddle while they are down.</summary>
+        public bool HoldMouse;
         /// <summary>Reset params also calls this (after the pan goes back to the centre): a test that keeps its own view, like the map, recentres it here.</summary>
         public Action? OnReset;
         /// <summary>Grabbable checker backdrop: drag anywhere with the hand cursor slides it - without the "follow the mouse" check box (the offset lives in Ctx.BackdropX/Y, not in the Mouse parameter).</summary>
@@ -238,7 +253,7 @@ namespace Sr2d64CSport
         /// </summary>
         public int SlowFrames;
         /// <summary>Slow tests: parameters that trigger a re-run when they change (others are ignored while frozen).</summary>
-        public Param SlowRerunOn = Param.Mouse | Param.Count | Param.Angle | Param.Scale | Param.Op | Param.MaskBits | Param.Smooth | Param.NotMask | Param.Xor | Param.FastLines | Param.Camera | Param.Z | Param.Brite;
+        public Param SlowRerunOn = Param.Mouse | Param.Count | Param.Angle | Param.Scale | Param.Op | Param.MaskBits | Param.Smooth | Param.NotMask | Param.Xor | Param.FastLines | Param.Wireframe | Param.WireColor | Param.Camera | Param.Z | Param.Brite;
         /// <summary>Called on the UI thread when the user picks a file for this test (tests that load .vox / .obj); null = no file button.</summary>
         public string? FileFilter;
         public string? FilePath;               // last chosen file (set by the form)
@@ -1199,7 +1214,7 @@ T(GControls, "SpriteLabel / GroupBox / Tabs / TextBox / Numeric / Combo / ListBo
                 var t = L.Find(x => x.Name.StartsWith("Vector import", StringComparison.Ordinal))!;
                 var (img, info) = EnsureVector(t.FilePath, c.DotStep, SvgSimplify(c));
                 RecolorDemo.SetImage(img);                                 // the strip above edits THIS container (Recolor / SwapColors)
-                var o = new VectorRenderOptions { AA = c.Smooth, Opacity = c.Blend / 255f, Strokes = true, Fills = c.Brite >= 0, FastLines = c.FastLines };
+                var o = new VectorRenderOptions { AA = c.Smooth, Opacity = c.Blend / 255f, Strokes = true, Fills = c.Brite >= 0, FastLines = c.FastLines, Wireframe = c.Wireframe, WireframeColor = c.WireColor };
                 var osz = VectorObjectSize(c, img);                        // picture size on the canvas at Scale 1 (longer side = 1.5 x sprite)
                 float fit = osz.Width / MathF.Max(1e-3f, img.Width);
                 float pfx = c.PivotXF < 0 ? 0.5f : c.PivotXF / osz.Width, pfy = c.PivotYF < 0 ? 0.5f : c.PivotYF / osz.Height;   // pivot as view-box fractions
@@ -1224,9 +1239,10 @@ T(GControls, "SpriteLabel / GroupBox / Tabs / TextBox / Numeric / Combo / ListBo
             L[L.Count - 1].MouseRotates = true; L[L.Count - 1].Resizable = true; L[L.Count - 1].AnimSpin = 0f;
             // QGIS-style simplification of the picture (Vector.Simplify.cs): threshold in SVG units, algorithm, provider side
             L[L.Count - 1].Ui(Param.Grid, "Simplification threshold, SVG units (0 = off)", Param.Op, "Simplification algorithm",
-                              Param.GridOn, "Use simplification on provider side if possible (SVG has no tile provider: it is applied once the file is read)", Param.FastLines, "Fast thin lines (1 px strokes without AA: faster, hard edges)")
+                              Param.GridOn, "Use simplification on provider side if possible (SVG has no tile provider: it is applied once the file is read)", Param.Wireframe, "Show wireframe (outlines of the vector shapes)", Param.WireColor, "Wireframe colour (outline overlay)", Param.FastLines, "Fast thin lines (1 px strokes without AA: faster, hard edges)")
                           .Ops("None", "Linear (Douglas-Peucker)", "Snap To Grid", "Visvalingam").Range(Param.Grid, 0, 20).With(Param.Grid, 0).With(Param.GridOn, true);
             L[L.Count - 1].ObjectSize = c => { var vt = L.Find(x => x.Name.StartsWith("Vector import", StringComparison.Ordinal))!; var (vi, _) = EnsureVector(vt.FilePath, c.DotStep, SvgSimplify(c)); return VectorObjectSize(c, vi); };
+            L[L.Count - 1].SvgText = (c, bake) => { var vt = L.Find(x => x.Name.StartsWith("Vector import", StringComparison.Ordinal))!; var (vi, _) = EnsureVector(vt.FilePath, c.DotStep, null); return vi.ToSvg(bake); };
             L[L.Count - 1].ControlStrip = RecolorDemo.Build; L[L.Count - 1].StripHeight = RecolorDemo.StripHeight;
             // pick mode: a click on the picture (object units = picture units x fit) picks the colour under it
             L[L.Count - 1].ObjectClick = (c, ox, oy) =>
@@ -1262,7 +1278,7 @@ T(GControls, "SpriteLabel / GroupBox / Tabs / TextBox / Numeric / Combo / ListBo
                       y += size * 1.9f;
                   }
                   scene.Draw(c, c.Scale);                                  // centred on the canvas; the wheel zooms
-              }).Ui(Param.Count, "Size (cap height, px at zoom 1)", Param.Scale, "Zoom (the slider or the wheel; drag anywhere to move)", Param.FastLines, "Fast thin lines (1 px strokes without AA: faster, hard edges)")
+              }).Ui(Param.Count, "Size (cap height, px at zoom 1)", Param.Scale, "Zoom (the slider or the wheel; drag anywhere to move)", Param.Wireframe, "Show wireframe (outlines of the vector shapes)", Param.FastLines, "Fast thin lines (1 px strokes without AA: faster, hard edges)")
                 .Also(t => t.DragAnywhere = true).Range(Param.Count, 4, 80).With(Param.Count, 12);
 
             T(GVText, "VectorText styles: plain, bold, italic, bold italic, monospace, corner radius, tip limit",
@@ -1300,7 +1316,7 @@ T(GControls, "SpriteLabel / GroupBox / Tabs / TextBox / Numeric / Combo / ListBo
                       y += size * 1.9f;
                   }
                   scene.Draw(c, c.Scale);
-              }).Ui(Param.Count, "Size (text cap height, px at zoom 1)", Param.Scale, "Zoom (the slider or the wheel; drag anywhere to move)", Param.FastLines, "Fast thin lines (1 px strokes without AA: faster, hard edges)")
+              }).Ui(Param.Count, "Size (text cap height, px at zoom 1)", Param.Scale, "Zoom (the slider or the wheel; drag anywhere to move)", Param.Wireframe, "Show wireframe (outlines of the vector shapes)", Param.FastLines, "Fast thin lines (1 px strokes without AA: faster, hard edges)")
                 .Also(t => t.DragAnywhere = true).Range(Param.Count, 4, 80).With(Param.Count, 16);
 
             T(GVText, "VectorText outlines: joins (bevel, miter, round), caps (butt, round, square), outline position (centre, inside, outside)",
@@ -1331,8 +1347,20 @@ T(GControls, "SpriteLabel / GroupBox / Tabs / TextBox / Numeric / Combo / ListBo
                       y += size * 1.7f;
                   }
                   scene.Draw(c, c.Scale);
-              }).Ui(Param.Count, "Size (cap height, px at zoom 1)", Param.Scale, "Zoom (the slider or the wheel; drag anywhere to move)", Param.FastLines, "Fast thin lines (1 px strokes without AA: faster, hard edges)")
+              }).Ui(Param.Count, "Size (cap height, px at zoom 1)", Param.Scale, "Zoom (the slider or the wheel; drag anywhere to move)", Param.Wireframe, "Show wireframe (outlines of the vector shapes)", Param.FastLines, "Fast thin lines (1 px strokes without AA: faster, hard edges)")
                 .Also(t => t.DragAnywhere = true).Range(Param.Count, 4, 80).With(Param.Count, 28);
+
+            T(GVText, "Outline Convert To Object: outline test sheet (CENTER 2 mm, OUTSIDE 1 mm, INSIDE 1 mm)",
+              "Corel's Outline Convert To Object, made here from outline_test_shapes.svg. Table: every shape in its column (the column sets the outline position and width). One shape: the rocker switches to one shape centred in the viewport, with its outline position and width. Black = converted shape, white = its wireframe, yellow = the initial shape's wireframe, red / blue = initial / converted nodes. Green = the renderer's own live stroke over the black (on by default): wherever the two routes disagree the green shows past the black. The info line names the program that produced the black layer, because the switches can make it GDI+ or the old fine grid instead of the engine's bake entry. The cap and corner selectors drive both layers; the analytic route switch shows the distance-field fallback, which rounds every corner whatever the selector says. The suite check renders both routes for each shape and fails if they differ (pixel 0.25, ink integral 1 %). The dashed rows are gated on their own numbers (no whole pixel at all, worst pixel 0.50, ink integral 1 %): their conversion goes through VectorOffset.DashedBand, the entry the SVG bake itself calls for a dashed stroke, and its dash caps sit on the band's centre line at half the pen's radius exactly as the stroker's do. A dashed row whose source ring the fill's side changes along - a ring that runs through the fill of another ring, or crosses itself - is measured and printed but not gated: DashedBand takes one side sign per ring and is wrong on the part where the fill lies on the other side, a defect of its own which the check names in its summary instead of folding into a pass. Settings (table / one shape rocker and the panels for each mode) are in the Test tab; zoom and pan work in both modes. The wavy blob's dashes scale with the width, one subpath per dash (as Corel).",
+              c => OutlineConvertDemo.Draw(c))
+              .Ui(Param.Scale, "Zoom: wheel or slider (x0.05 .. x4); drag to pan")
+              .Also(t => { t.SettingsControl = OutlineConvertDemo.BuildSettings; t.DragAnywhere = true; t.HomeX = 0.5f; t.HomeY = 0.5f; t.Check = _ => OutlineConvertDemo.SelfCheck(); });
+
+            T(GVText, "Stroke check: the renderer's stroke over the original curves (no outline conversion)",
+              "The renderer's own stroke, with no conversion of outlines to shapes. Each shape is a VectorShape stroke with the width, cap and corner from the Test tab. Outside / Inside clip the stroke to the exterior / interior of the closed contours (the same method as the VectorText outline positions, twice the width and clipped); open pieces stay centred at the full width. Blue = the renderer's stroke; orange = the native GDI+ stroke of the same geometry (Windows), mixed in by the Mix slider, shown as a difference (Difference flag or middle button held), or alone while the right button is held. Yellow = the wireframe of the original curves, drawn on top; red dots = their nodes (optional). Shapes: the same list as the Outline Convert To Object test.",
+              c => StrokeCheckDemo.Draw(c))
+              .Ui(Param.Scale, "Zoom: wheel or slider (x0.05 .. x4); drag to pan")
+              .Also(t => { t.SettingsControl = StrokeCheckDemo.BuildSettings; t.DragAnywhere = true; t.HomeX = 0.5f; t.HomeY = 0.5f; t.HoldMouse = true; });
 
             T(GVText, "VectorText on a curve: arc, text below a path, fitted to a path and to a wave, alignment",
               "VectorText.OnPath places each glyph by its distance along a polyline and its height above it, so the letters follow the curve. FitToPath stretches the text so its ink spans the whole path. Below the path (Above = false) the text hangs under the line. Start / Center / End set the place on the path.",
@@ -1376,7 +1404,7 @@ T(GControls, "SpriteLabel / GroupBox / Tabs / TextBox / Numeric / Combo / ListBo
                       scene.Add(VectorText.OnPath(text, seg, size * 0.7f, new VectorTextPathOptions { Style = plain, Align = align }), 0, 0);
                   }
                   scene.Draw(c, c.Scale);                                  // the whole group is centred; the wheel zooms
-              }).Ui(Param.Count, "Size (cap height, px at zoom 1)", Param.Scale, "Zoom (the slider or the wheel; drag anywhere to move)", Param.FastLines, "Fast thin lines (1 px strokes without AA: faster, hard edges)")
+              }).Ui(Param.Count, "Size (cap height, px at zoom 1)", Param.Scale, "Zoom (the slider or the wheel; drag anywhere to move)", Param.Wireframe, "Show wireframe (outlines of the vector shapes)", Param.FastLines, "Fast thin lines (1 px strokes without AA: faster, hard edges)")
                 .Also(t => t.DragAnywhere = true).Range(Param.Count, 4, 80).With(Param.Count, 14);
 
             // ===================================================== Vector map (MBTiles)
@@ -1398,20 +1426,20 @@ T(GControls, "SpriteLabel / GroupBox / Tabs / TextBox / Numeric / Combo / ListBo
               .With(Param.NotMask, true).With(Param.Count, 1).With(Param.DotStep, 0).With(Param.GridOn, true)
               .Range(Param.Count, 1, 12).Range(Param.DotStep, 0, 20);
 
+            L[L.Count - 1].FileFilter = "MBTiles (*.mbtiles)|*.mbtiles|All files|*.*";     // the vector map (its Open File button)
             T(GMaps, "Simplify by scale: a detailed curve, simplified only at or below MaxScale (1:1)",
               "The same curve on both settings. At a view scale at or below MaxScale (1.00 = 1:1, and further zoomed out) it is simplified with the threshold; zoomed in past it, the full detail is drawn. Scale = view scale, Grid = threshold in px (0 = off), Op = algorithm. The note shows the point count before and after.",
               c => SimplifyScaleDemo.Draw(c))
               .Ui(Param.Scale, "View scale (1.00 = 1:1; at or below it the curve is simplified)", Param.Grid, "Simplification threshold, px (0 = off)", Param.Op, "Simplification algorithm")
               .Ops("None", "Linear (Douglas-Peucker)", "Snap To Grid", "Visvalingam")
               .Range(Param.Grid, 0, 20).With(Param.Grid, 2);
-            L[L.Count - 1].FileFilter = "MBTiles (*.mbtiles)|*.mbtiles|All files|*.*";
 
             // ===================================================== Animated SVG (SMIL)
             T(GFiles, "Animated SVG (SMIL + CSS): FrameAt / SeekToTime (button 'Open File')", "VectorImage keeps the animation of a file while importing: SMIL tracks (<animate> of the d attribute, <animateTransform>, <animateMotion>, <set>) AND CSS animations (@keyframes of transform / opacity / stroke-dashoffset with animation-* timing, transform-box / transform-origin - the style AI-generated game art uses). SeekToTime(t) applies every track at time t (paths morph per command, transforms interpolate per function - a 0 to 360 deg spin sweeps), FrameAt(t) returns an independent frame copy, Duration / FrameCount / FrameRate / GetFrame(i) iterate the loop (FrameCount = Duration * 30 fps here). Built-in sample = a small loop when no file was chosen. 'Animate' plays the loop (the clock runs while the check box is ticked; off = frame 0); the playback rate is Speed / 6 (6 = real time). Drag to move; drag outside = rotate; Scale = zoom; Smooth = anti-aliased edges; Blend = opacity; Brite < 0 = wireframe. ClipViewport is on here: decoration the file parks beyond its canvas stays out, like in a browser. The draw goes through the layer compositor (img.Cached): content whose chain only moves is rasterised once per zoom and blitted with the chain's current matrix (slow dollies re-rasterise only when the linear part drifts); morphs / opacity / dashes stay live. Tick 'Precompose' to bake the whole loop into bitmaps once. Playback then evaluates no vector tracks: one bitmap draw per tick. First use and changes to internal resolution / fps / paint settings require a synchronous bake (can take a few seconds). Display zoom / rotation / skew only transform bitmaps and never rebake. The film budget is in MiB; if full-size frames do not fit, smaller bitmaps are baked and enlarged, without silently lowering fps. Film width fixes the internal bitmap grid independently of container size (0 = SVG intrinsic); a higher grid than the display enables area-filtered supersampling. Film fps defaults to 60 here (0 = file FrameRate, usually 30; up to 240 for high-refresh displays). Live vectors sample every render; a 30 fps film holds each sample for 33 ms, so image resolution alone cannot fix temporal choppiness. The note reports actual fps, bitmap size, resolution percentage, memory and bake time. The note shows the track count, the seek + draw cost and the cache stats.", c =>
             {
                 var t = L.Find(x => x.Name.StartsWith("Animated SVG", StringComparison.Ordinal))!;
                 var (img, info) = EnsureAnimVector(t.FilePath);
-                var o = new VectorRenderOptions { AA = c.Smooth, Opacity = c.Blend / 255f, Strokes = true, Fills = c.Brite >= 0, FastLines = c.FastLines };
+                var o = new VectorRenderOptions { AA = c.Smooth, Opacity = c.Blend / 255f, Strokes = true, Fills = c.Brite >= 0, FastLines = c.FastLines, Wireframe = c.Wireframe, WireframeColor = c.WireColor };
                 var osz = VectorObjectSize(c, img);                        // picture size on the canvas at Scale 1 (longer side = 1.5 x sprite)
                 float fit = osz.Width / MathF.Max(1e-3f, img.Width);
                 float pfx = c.PivotXF < 0 ? 0.5f : c.PivotXF / osz.Width, pfy = c.PivotYF < 0 ? 0.5f : c.PivotYF / osz.Height;
@@ -1432,7 +1460,7 @@ T(GControls, "SpriteLabel / GroupBox / Tabs / TextBox / Numeric / Combo / ListBo
                     ? Math.Clamp((int)Math.Floor(tt * playedFrames / img.Duration + 1e-9), 0, playedFrames - 1) + 1
                     : (int)(tt * img.FrameRate) + 1;
                 c.Note = $"{info} | t = {tt:0.###} / {img.Duration:0.###} s = frame {playedIndex}/{playedFrames} | {img.Tracks.Count} tracks, {img.Shapes.Count} shapes | frame {ms:F2} ms | {vs.LayerSummary}{warn}";
-            }, needsPoly: true).Ui(Param.Scale, "Zoom (x0.01; the longer side = 1.5 x sprite size at x1.00); drag the top / bottom edge to squish", Param.Time, "Animate: play the loop (off = stand at frame 0)", Param.Speed, "Playback rate = Speed / 6 (6 = real time, 12 = double speed)", Param.Smooth, "Anti-aliased edges", Param.FastLines, "Fast thin lines (1 px strokes without AA: faster, hard edges)", Param.Blend, "Opacity", Param.Brite, "< 0: strokes only (wireframe)", Param.Xor, "Precompose (first draw bakes the loop; off releases the bitmaps)", Param.Count, "Film budget (MiB; smaller bitmaps if necessary, never fewer fps)", Param.DotStep, "Film fps (default 60; 0 = file rate; higher = smoother motion / more memory)", Param.Z, "Internal film width (px; 0 = SVG intrinsic; fixed while resizing the container)", Param.Mouse, "Drag = move; drag outside = rotate; edges / corners = resize (Shift = keep aspect); right click = pivot").Range(Param.Count, 16, 1024).Range(Param.DotStep, 0, 240).Range(Param.Z, 0, 4096).With(Param.Count, 256).With(Param.DotStep, 60).With(Param.Z, 512).With(Param.Xor, false).With(Param.Smooth, true).With(Param.Speed, 6);
+            }, needsPoly: true).Ui(Param.Wireframe, "Show wireframe (outlines of the vector shapes)", Param.WireColor, "Wireframe colour (outline overlay)", Param.Scale, "Zoom (x0.01; the longer side = 1.5 x sprite size at x1.00); drag the top / bottom edge to squish", Param.Time, "Animate: play the loop (off = stand at frame 0)", Param.Speed, "Playback rate = Speed / 6 (6 = real time, 12 = double speed)", Param.Smooth, "Anti-aliased edges", Param.FastLines, "Fast thin lines (1 px strokes without AA: faster, hard edges)", Param.Blend, "Opacity", Param.Brite, "< 0: strokes only (wireframe)", Param.Xor, "Precompose (first draw bakes the loop; off releases the bitmaps)", Param.Count, "Film budget (MiB; smaller bitmaps if necessary, never fewer fps)", Param.DotStep, "Film fps (default 60; 0 = file rate; higher = smoother motion / more memory)", Param.Z, "Internal film width (px; 0 = SVG intrinsic; fixed while resizing the container)", Param.Mouse, "Drag = move; drag outside = rotate; edges / corners = resize (Shift = keep aspect); right click = pivot").Range(Param.Count, 16, 1024).Range(Param.DotStep, 0, 240).Range(Param.Z, 0, 4096).With(Param.Count, 256).With(Param.DotStep, 60).With(Param.Z, 512).With(Param.Xor, false).With(Param.Smooth, true).With(Param.Speed, 6);
             L[L.Count - 1].MouseRotates = true; L[L.Count - 1].Resizable = true; L[L.Count - 1].AnimSpin = 0f;
             L[L.Count - 1].ObjectSize = c => { var vt = L.Find(x => x.Name.StartsWith("Animated SVG", StringComparison.Ordinal))!; var (vi, _) = EnsureAnimVector(vt.FilePath); return VectorObjectSize(c, vi); };
             L[L.Count - 1].FileFilter = "Animated SVG|*.svg;*.svgz|SVG (*.svg, *.svgz)|*.svg;*.svgz|All files|*.*";
@@ -2720,7 +2748,1677 @@ T(GControls, "SpriteLabel / GroupBox / Tabs / TextBox / Numeric / Combo / ListBo
                 if (!any) return;
                 float cu = (l + r) / 2, cv = (t + b) / 2;
                 foreach (var (pic, dx, dy) in items)
-                    pic.Draw(c.Canvas, System.Numerics.Matrix3x2.CreateTranslation(dx - cu, dy - cv) * System.Numerics.Matrix3x2.CreateScale(zoom) * System.Numerics.Matrix3x2.CreateTranslation(c.X, c.Y), new VectorRenderOptions { FastLines = c.FastLines });
+                    pic.Draw(c.Canvas, System.Numerics.Matrix3x2.CreateTranslation(dx - cu, dy - cv) * System.Numerics.Matrix3x2.CreateScale(zoom) * System.Numerics.Matrix3x2.CreateTranslation(c.X, c.Y), new VectorRenderOptions { FastLines = c.FastLines, Wireframe = c.Wireframe, WireframeColor = unchecked((int)0xFFFFFFFF) });   // text: white wireframe
+            }
+        }
+
+        /// <summary>Outline Convert To Object: the outline test sheet (outline_test_shapes.svg, Corel export, 1 unit = 0.01 mm).
+        /// Table = every shape in its column (CENTER 2 mm, OUTSIDE 1 mm, INSIDE 1 mm). One shape = one shape centred, with its outline position and width.
+        /// Round joins and caps only (the distance-field outline); the dashed blob becomes one compound path, one subpath per dash.</summary>
+        internal static class OutlineConvertDemo
+        {
+            const double MmPerUnit = 0.01;
+            const double Pixel = 0.04, Tol = 0.01;                         // mm: distance-field grid (0.04) and fit tolerance (0.01; was 0.04 at T78)
+            public static bool ShowBaseWire = true, ShowStrokeOutline = true, ShowBaseNodes = true, ShowStrokeNodes = true;
+            public static bool ShowRender = true;                             // the live route is on by default: with it off the page shows only its own output
+            public static int StrokeAlpha = 50;                               // its opacity, 0..100
+            /// <summary>Which entry produced the black layer. false = <see cref="VectorOffset.Band(VectorPath, float, VectorOutlinePosition, VectorCap, VectorJoin, float)"/>,
+            /// the same call the SVG bake makes (cs/Vector.cs), so the page shows what the engine exports. true = the older fine
+            /// distance-field grid (0.04 mm cells, 0.01 mm fit), a different geometry, kept reachable to compare the two.</summary>
+            public static bool LegacyFineGrid;
+            /// <summary>false = the analytic route; true = only the distance-field grid, which rounds every corner and caps every
+            /// end whatever the Cap / Corner selectors say (see VectorOffset.FastBand). Exposed so the page cannot hide the fallback.</summary>
+            public static bool AnalyticRoute { get => VectorOffset.FastPath; set => VectorOffset.FastPath = value; }
+            const int BgArgb = unchecked((int)0xFFCCCCCC), StrokeArgb = unchecked((int)0xFF40E050);
+            public static bool OneShape;                                    // rocker: false = table of all shapes, true = one shape centred
+            public static int ShapeChoice, CircleChoice, PosChoice;         // PosChoice: 0 Center, 1 Outside, 2 Inside
+            public static double WidthMm = 2;
+
+            // ---- the dash both outline pages share ---------------------------------------------------
+            // The wavy blob used to be the only dashed shape and its pattern was written into the demo twice, once for the live
+            // stroke and once for the conversion, so neither could be changed without editing the other. It is a setting now, and
+            // the setting drives the engine's own container API (VectorShape.SetDash), which is what an editor of a vector
+            // container would call. The defaults reproduce the report the suite was measured with: the wavy blob dashed 5 w on /
+            // 3 w off in multiples of the outline width, every other shape solid.
+            /// <summary>Which shapes the pattern applies to: 0 = the wavy blob alone, 1 = every shape, 2 = none.</summary>
+            public static int DashScope;
+            /// <summary>The pattern as typed: alternating on / off lengths separated by spaces or commas. An odd count is read
+            /// twice, as SVG reads it. A field that does not parse leaves the shapes solid rather than dashing them by accident.</summary>
+            public static string DashText = "5 3";
+            /// <summary>true: the lengths are multiples of the outline width (Corel's Outline Pen, and what the wavy blob always
+            /// did). false: the lengths are millimetres in the path's own units, which is what SVG's stroke-dasharray means - the
+            /// width then changes how thick the dashes are, not how long.</summary>
+            public static bool DashInWidths = true;
+            /// <summary>Phase: how far into the pattern each subpath starts, in the pattern's own units.</summary>
+            public static float DashOffset;
+            /// <summary>What a closed lap does where it meets that phase; see <see cref="VectorDashSeam"/>.</summary>
+            public static VectorDashSeam DashSeamChoice;
+
+            /// <summary>The pattern the settings describe for one shape at one outline width, in millimetres, or null when the
+            /// shape is solid (dash off, or a field that does not parse).</summary>
+            internal static float[]? DashFor(Shape s, double w)
+            {
+                if (DashScope == 2 || (DashScope == 0 && s.Key != "WAVY_DASH")) return null;
+                var l = new List<float>();
+                foreach (var tk in DashText.Split(new[] { ' ', ',', ';', '\t' }, StringSplitOptions.RemoveEmptyEntries))
+                {
+                    if (!float.TryParse(tk, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out float v)) return null;
+                    if (!(v >= 0) || float.IsInfinity(v)) return null;
+                    l.Add(v);
+                }
+                if (l.Count == 0) return null;
+                if (DashInWidths) for (int i = 0; i < l.Count; i++) l[i] = (float)(l[i] * w);
+                return l.ToArray();
+            }
+            /// <summary>The same pattern in the units <see cref="VectorOffset.DashedBand"/> takes.</summary>
+            internal static double[]? DashForBand(Shape s, double w)
+            {
+                var f = DashFor(s, w);
+                if (f == null) return null;
+                var d = new double[f.Length]; for (int i = 0; i < f.Length; i++) d[i] = f[i];
+                return d;
+            }
+            /// <summary>The phase in millimetres: it is typed in the pattern's own units, so it scales with the width exactly when
+            /// the pattern does. A phase left in the other unit would move against the dashes it is meant to shift.</summary>
+            internal static float DashOffsetMm(double w) => DashInWidths ? (float)(DashOffset * w) : DashOffset;
+            /// <summary>The dash settings in one string: both pages cache their views against it, so a view is rebuilt when any
+            /// of them moves.</summary>
+            internal static string DashKey() => $"{DashScope}|{DashText}|{DashInWidths}|{DashOffset.ToString("R", System.Globalization.CultureInfo.InvariantCulture)}|{(int)DashSeamChoice}";
+            /// <summary>What the dash settings do to one shape, for the info lines: named, because a page that shows dashes
+            /// without saying where they came from cannot be read.</summary>
+            internal static string DashSetting(Shape s, double w)
+            {
+                var d = DashFor(s, w);
+                var ci = System.Globalization.CultureInfo.InvariantCulture;
+                if (d == null) return DashScope == 2 ? "dash off (every shape solid)" : $"dash off for this shape (the pattern [{DashText}] applies to {(DashScope == 0 ? "the wavy blob only" : "every shape")}, or does not parse)";
+                return $"dash [{string.Join(" ", d.Select(v => v.ToString("0.###", ci)))}] mm, {(DashInWidths ? "pattern x outline width (Corel)" : "pattern in mm (SVG user units)")}, offset {DashOffset.ToString("0.###", ci)}, seam {DashSeamChoice}";
+            }
+            /// <summary>The dash setting as one line, without a shape: what a whole check run was measured with.</summary>
+            internal static string DashRunNote()
+            {
+                var ci = System.Globalization.CultureInfo.InvariantCulture;
+                if (DashScope == 2) return "off - every shape solid, every row gated";
+                return $"{(DashScope == 0 ? "the wavy blob only (every other row solid and gated)" : "EVERY shape (no row is gated: see the summary)")}, " +
+                       $"pattern [{DashText}] {(DashInWidths ? "x outline width (Corel)" : "in mm (SVG user units)")}, offset {DashOffset.ToString("0.###", ci)}, seam {DashSeamChoice}";
+            }
+
+            internal static readonly string[] Names = { "Jagged Eight Figure", "Smooth Eight Figure", "Tangled Cord", "Scribbles", "Jagged Continuous \"A\"", "Wavy Blob", "Circle", "Straight Horizontal Line", "Rounded \"OBD\" Letters", "Corners (chamfer and scallop)" };
+            internal static readonly string[] Keys = { "eight jagged", "eight smooth", "tangled", "scribble", "A_one_jagged_line", "WAVY_DASH", "circle", "just_straight_line", "OBD", "corners" };
+            internal static readonly string[] CircleExtras = { "Circle", "Star", "Arrow" };
+            static readonly string[] Positions = { "Center", "Outside", "Inside" };
+
+            internal sealed class Shape { public string Column = ""; public string Key = ""; public VectorPath Path = new VectorPath(); public bool Closed; }
+            sealed class View
+            {
+                public VectorImage? BaseWire, ConvFill, ConvWire, RenderLayer, Guides;
+                public List<PointF> BaseNodes = new List<PointF>(), ConvNodes = new List<PointF>();
+                public double CX, CY, BW, BH;
+            }
+
+            static List<Shape>? shapes;
+            static View? tableView, singleView;
+            static string singleKey = "";
+
+            /// <summary>Every path of the embedded SVG, in mm, with the CENTER / OUTSIDE / INSIDE column and the shape key; the two corner pieces are one object.
+            /// A file the user loads appends to this list - see <see cref="LoadVectorFile"/> - so the built-in ten keep their indexes.</summary>
+            internal static List<Shape> Shapes()
+            {
+                if (shapes != null) return shapes;
+                var asm = typeof(OutlineConvertDemo).Assembly;
+                string res = asm.GetManifestResourceNames().First(n => n.EndsWith("outline_test_shapes.svg", StringComparison.Ordinal));
+                string text;
+                using (var st = asm.GetManifestResourceStream(res)!)
+                using (var rd = new StreamReader(st)) text = rd.ReadToEnd();
+                var merged = new List<Shape>();
+                foreach (var e in System.Xml.Linq.XDocument.Parse(text).Descendants())
+                {
+                    var id = (string?)e.Attribute("id");
+                    if (string.IsNullOrEmpty(id) || id.StartsWith("grid", StringComparison.Ordinal)) continue;
+                    int u = id.IndexOf('_');
+                    if (u <= 0) continue;
+                    var geo = Geometry(e);
+                    if (geo == null) continue;
+                    string col = id.Substring(0, u);
+                    string key = System.Text.RegularExpressions.Regex.Replace(id.Substring(u + 1), "_?x0020_?", " ").Trim();
+                    var path = Scale(geo, MmPerUnit);
+                    if (key.Contains("scalop", StringComparison.Ordinal) || key == "smooth_corner")
+                    {
+                        var ex = merged.FirstOrDefault(m => m.Column == col && m.Key == "corners");
+                        if (ex != null) { ex.Path = Concat(ex.Path, path); continue; }
+                        key = "corners";
+                    }
+                    merged.Add(new Shape { Column = col, Key = key, Path = path, Closed = path.Kinds.Contains(VectorPath.K.Close) });
+                }
+                // corners: one object, open pieces
+                foreach (var m in merged) if (m.Key == "corners") m.Closed = false;
+                shapes = merged;
+                return shapes;
+            }
+
+            static VectorPath? Geometry(System.Xml.Linq.XElement e)
+            {
+                var inv = System.Globalization.CultureInfo.InvariantCulture;
+                double A(string n) => double.Parse((string)e.Attribute(n)!, inv);
+                var p = new VectorPath();
+                switch (e.Name.LocalName)
+                {
+                    case "path": return VectorPath.ParseSvg((string)e.Attribute("d")!);
+                    case "polygon":
+                    case "polyline":
+                        {
+                            var nums = new List<double>();
+                            foreach (System.Text.RegularExpressions.Match m in System.Text.RegularExpressions.Regex.Matches((string)e.Attribute("points")!, @"-?\d*\.?\d+(?:[eE][-+]?\d+)?"))
+                                nums.Add(double.Parse(m.Value, inv));
+                            for (int i = 0; i + 1 < nums.Count; i += 2)
+                            {
+                                if (i == 0) p.MoveTo((float)nums[i], (float)nums[i + 1]); else p.LineTo((float)nums[i], (float)nums[i + 1]);
+                            }
+                            if (e.Name.LocalName == "polygon") p.Close();
+                            return p;
+                        }
+                    case "line":
+                        p.MoveTo((float)A("x1"), (float)A("y1")); p.LineTo((float)A("x2"), (float)A("y2"));
+                        return p;
+                    case "circle":
+                        {
+                            double cx = A("cx"), cy = A("cy"), r = A("r"), k = 0.5523 * r;
+                            p.MoveTo((float)(cx + r), (float)cy);
+                            p.CurveTo((float)(cx + r), (float)(cy + k), (float)(cx + k), (float)(cy + r), (float)cx, (float)(cy + r));
+                            p.CurveTo((float)(cx - k), (float)(cy + r), (float)(cx - r), (float)(cy + k), (float)(cx - r), (float)cy);
+                            p.CurveTo((float)(cx - r), (float)(cy - k), (float)(cx - k), (float)(cy - r), (float)cx, (float)(cy - r));
+                            p.CurveTo((float)(cx + k), (float)(cy - r), (float)(cx + r), (float)(cy - k), (float)(cx + r), (float)cy);
+                            p.Close();
+                            return p;
+                        }
+                }
+                return null;
+            }
+
+            static VectorPath Scale(VectorPath p, double s)
+            {
+                var q = new VectorPath();
+                q.Kinds.AddRange(p.Kinds);
+                foreach (var v in p.Data) q.Data.Add((float)(v * s));
+                return q;
+            }
+
+            static VectorPath Concat(VectorPath a, VectorPath b)
+            {
+                var q = new VectorPath();
+                q.Kinds.AddRange(a.Kinds); q.Kinds.AddRange(b.Kinds);
+                q.Data.AddRange(a.Data); q.Data.AddRange(b.Data);
+                return q;
+            }
+
+            internal static VectorPath Star()
+            {
+                var p = new VectorPath();
+                for (int i = 0; i < 10; i++)
+                {
+                    double a = -Math.PI / 2 + i * Math.PI / 5, r = i % 2 == 0 ? 10 : 4;
+                    float x = (float)(r * Math.Cos(a)), y = (float)(r * Math.Sin(a));
+                    if (i == 0) p.MoveTo(x, y); else p.LineTo(x, y);
+                }
+                return p.Close();
+            }
+
+            internal static VectorPath Arrow()
+            {
+                var pts = new (float X, float Y)[] { (-10, -3), (2, -3), (2, -7), (10, 0), (2, 7), (2, 3), (-10, 3) };
+                var p = new VectorPath();
+                for (int i = 0; i < pts.Length; i++) { if (i == 0) p.MoveTo(pts[i].X, pts[i].Y); else p.LineTo(pts[i].X, pts[i].Y); }
+                return p.Close();
+            }
+
+            // ---- the file the user brings in ---------------------------------------------------------
+            // Both outline pages read one shape list, so a file loaded on either page is a shape on both, and it is converted,
+            // stroked and measured exactly as the built-in ones are. The entries go after the embedded ten: the table's three
+            // columns, the Circle row's second combo and SelfCheck's gate all key off the built-in indexes, so renumbering them
+            // would move what the suite measures. A loaded path is one path, and the table's columns come from the embedded
+            // SVG's own layout, so it is registered in the CENTER column and shown by the ONE SHAPE view.
+            const int LoadCap = 64;                     // paths taken from one file: a drawing of thousands would make the combo unusable
+            const float PxPerMm = 96f / 25.4f;          // the unit an exported SVG is written in, which is the unit the SVG reader reads
+            static string[] comboNames = Names, comboKeys = Keys;
+
+            /// <summary>The shape combo's items on both pages: the embedded SVG's names, then one entry per path a loaded file
+            /// brought in.</summary>
+            internal static string[] NameList() => comboNames;
+            /// <summary>Parallel to <see cref="NameList"/>: the key each entry is looked up by in <see cref="Shapes"/>.</summary>
+            internal static string[] KeyList() => comboKeys;
+            /// <summary>Where the last load's first path sits in that list, so a page can point its own selector at it.</summary>
+            internal static int FirstLoadedIndex = -1;
+            /// <summary>What the last load did, for the file panel's note line.</summary>
+            internal static string LoadNote = "No file loaded yet: the shape list is the embedded SVG's ten rows.";
+
+            /// <summary>What "Load vector file" does with the path the dialog returned: every path of the file becomes one entry
+            /// of the shape list both pages read. The readers work in their own units - SVG in 96 dpi pixels (SvgReader resolves
+            /// mm / cm / in against Dpi = 96), PostScript and PDF in points - and the pages work in millimetres, so the file is
+            /// scaled once, here, and its stroke widths and dash lengths scale with it (VectorShape.Bake does that). Returns null
+            /// on success, or why nothing was added. A headless rig calls it with a path of its own: no dialog is involved.</summary>
+            internal static string? LoadVectorFile(string path)
+            {
+                VectorImage img;
+                try { img = VectorImage.Load(path); }
+                catch (Exception ex) { return "could not read " + Path.GetFileName(path) + ": " + ex.Message; }
+                double mmPerUnit = img.Format is VectorFormat.PostScript or VectorFormat.Pdf ? 25.4 / 72.0 : 25.4 / 96.0;
+                img.Transform(System.Numerics.Matrix3x2.CreateScale((float)mmPerUnit));   // bakes the reader's own transforms in as well
+                string stem = Path.GetFileNameWithoutExtension(path);
+                var added = new List<Shape>();
+                int skipped = 0, capped = 0;
+                foreach (var sh in img.Shapes)
+                {
+                    if (sh.IsImage || sh.Path == null || sh.Path.IsEmpty) { skipped++; continue; }
+                    if (added.Count >= LoadCap) { capped++; continue; }
+                    string want = string.IsNullOrEmpty(sh.Id) ? stem + " " + (added.Count + 1) : stem + ": " + sh.Id;
+                    string key = want;
+                    for (int n = 2; Shapes().Any(x => x.Key == key) || added.Any(x => x.Key == key); n++) key = want + " (" + n + ")";
+                    added.Add(new Shape { Column = "CENTER", Key = key, Path = sh.Path, Closed = sh.Path.Kinds.Contains(VectorPath.K.Close) });
+                }
+                if (added.Count == 0)
+                    return "no path to check in " + Path.GetFileName(path) + (skipped > 0 ? $" ({skipped} of its shapes are pictures or empty)" : "");
+                Shapes().AddRange(added);
+                // appended to whatever the list already holds, so a second file does not drop the first one's entries
+                FirstLoadedIndex = comboNames.Length;
+                comboNames = comboNames.Concat(added.Select(a => a.Key)).ToArray();
+                comboKeys = comboKeys.Concat(added.Select(a => a.Key)).ToArray();
+                LoadNote = $"{added.Count} path{(added.Count == 1 ? "" : "s")} of {Path.GetFileName(path)} added to the Shape list" +
+                           (capped > 0 ? $", {capped} left out (the list takes {LoadCap})" : "") +
+                           (skipped > 0 ? $", {skipped} picture(s) or empty shape(s) skipped" : "") +
+                           ". Switch to ONE SHAPE: the table lists the embedded rows only.";
+                return null;
+            }
+
+            /// <summary>What this page's "Export to SVG" writes: the converted object of the shape it is showing, at its own
+            /// outline position, width, cap, corner and dash - the same path its view fills, so the file another program opens
+            /// is the geometry this page measured. Returns null on success, or why nothing was written.</summary>
+            internal static string? ExportConversionSvg(string file)
+            {
+                var s = ChosenShape();
+                var conv = Make(s, PosChoice, WidthMm);
+                var img = new VectorImage();
+                if (!conv.IsEmpty) img.Shapes.Add(new VectorShape { Path = conv, Fill = new VectorColor(unchecked((int)0xFF000000)), Stroke = null, Id = s.Key });
+                return SaveSvgPx(img, file);
+            }
+
+            /// <summary>Writes an image the pages built in millimetres as an SVG in 96 dpi user units, the unit the SVG reader
+            /// reads, so a file that came in through "Load vector file" goes out at the size it came in at. The viewBox is fitted
+            /// to the content plus what its strokes can reach: an SVG whose viewBox does not contain the drawing shows a reader
+            /// nothing, which would read as an export that lost the geometry.</summary>
+            internal static string? SaveSvgPx(VectorImage img, string file)
+            {
+                if (img.IsEmpty) return "nothing to export: this selection draws no geometry at these settings";
+                img.Transform(System.Numerics.Matrix3x2.CreateScale(PxPerMm));
+                var b = ContentBounds(img);
+                float pad = StrokeReach(img) + 2;
+                b.Inflate(pad, pad);
+                img.ViewBox = b; img.Width = b.Width; img.Height = b.Height;
+                try { img.SaveSvg(file); }
+                catch (Exception ex) { return "could not write " + Path.GetFileName(file) + ": " + ex.Message; }
+                return null;
+            }
+
+            /// <summary>The rectangle that contains every path of an image, in the image's own units.</summary>
+            internal static RectangleF ContentBounds(VectorImage img)
+            {
+                float l = float.MaxValue, t = float.MaxValue, r = float.MinValue, b = float.MinValue;
+                foreach (var s in img.Shapes)
+                {
+                    if (s.Path == null || s.Path.IsEmpty) continue;
+                    var q = s.Path.ControlBounds();
+                    l = Math.Min(l, Math.Min(q.Left, q.Right)); r = Math.Max(r, Math.Max(q.Left, q.Right));
+                    t = Math.Min(t, Math.Min(q.Top, q.Bottom)); b = Math.Max(b, Math.Max(q.Top, q.Bottom));
+                }
+                return r <= l || b <= t ? new RectangleF(0, 0, 1, 1) : RectangleF.FromLTRB(l, t, r, b);
+            }
+
+            /// <summary>How far past its paths an image's strokes can paint: half the widest stroke, times what a miter may
+            /// add to it. A cap or a corner the page asked for is geometry the paths do not bound.</summary>
+            static float StrokeReach(VectorImage img)
+            {
+                float grow = 0;
+                foreach (var s in img.Shapes)
+                    if (s.Stroke != null && !s.Hairline)
+                        grow = Math.Max(grow, s.StrokeWidth * (s.Join == VectorJoin.Miter ? Math.Max(1f, s.MiterLimit) : 1f) / 2f);
+                return grow;
+            }
+
+            /// <summary>The file panel both outline pages share: bring a vector file's paths into the shape list, and write what
+            /// the page shows back out as an SVG. One builder for two pages because they read the same shape list, and a button
+            /// that behaves differently on one of them is a trap. <paramref name="export"/> is the page's own export - the
+            /// conversion here, the live stroke on the Stroke check page; <paramref name="changed"/> is its refresh after a load:
+            /// the combo's items, the caches, and which shape is selected; <paramref name="describe"/> names what an export
+            /// wrote, because on the Outline page the export follows the ONE SHAPE selector even while the TABLE is showing.</summary>
+            internal static SpriteGroupBox FileGroup(int x, int y, Func<string, string?> export, Action changed, Func<string> describe)
+            {
+                var g = new SpriteGroupBox { Text = "Vector file", Location = new Point(x, y), Size = new Size(296, 152) };
+                var load = new SpriteButton { Text = "Load vector file...", Size = new Size(280, 28), Location = new Point(8, 24) };
+                var save = new SpriteButton { Text = "Export to SVG...", Size = new Size(280, 28), Location = new Point(8, 56) };
+                // the note is as tall as the dash group's: a long file name in the "n paths of ... added" line wraps to four
+                // lines, and a fixed-size label clips what does not fit
+                var note = new SpriteLabel { Style = LabelStyle.Muted, AutoSize = false, WordWrap = true, Location = new Point(8, 90), Size = new Size(280, 56), Text = LoadNote };
+                load.Click += (_, _) =>
+                {
+                    using var dlg = new OpenFileDialog { Filter = "Vector files|*.svg;*.svgz;*.eps;*.ps;*.ai;*.pdf|All files|*.*", Title = "Load a vector file into the shape list" };
+                    if (dlg.ShowDialog() != DialogResult.OK) return;
+                    string? err = LoadVectorFile(dlg.FileName);
+                    note.Text = err ?? LoadNote;
+                    if (err == null) changed();
+                };
+                save.Click += (_, _) =>
+                {
+                    using var dlg = new SaveFileDialog { Title = "Export to SVG", Filter = "SVG (*.svg)|*.svg", DefaultExt = "svg", FileName = "sr2d-outline.svg" };
+                    if (dlg.ShowDialog() != DialogResult.OK) return;
+                    string? err = export(dlg.FileName);
+                    note.Text = err ?? "wrote " + Path.GetFileName(dlg.FileName) + ": " + describe();
+                };
+                g.Controls.Add(load); g.Controls.Add(save); g.Controls.Add(note);
+                void Fit() { int w = Math.Max(60, g.ClientSize.Width - 16); load.Width = save.Width = note.Width = w; }
+                g.Resize += (_, _) => Fit();
+                Fit();
+                return g;
+            }
+
+            /// <summary>What the renderer strokes for one shape and position. Path: the closed contours, stroked Width (twice the outline
+            /// width for an outside / inside position, clipped to that side: the engine's own clip, as the VectorText outline positions).
+            /// Open: the open pieces (the OBD bar, corners, lines), always centred at OpenWidth. Dash: what the dash settings give this
+            /// shape at this width, or null when it is solid.</summary>
+            internal sealed class Render
+            {
+                public VectorPath Path = new VectorPath(); public float Width; public VectorPath Open = new VectorPath(); public float OpenWidth;
+                public float[]? Dash; public float DashOffset; public VectorDashSeam DashSeam; public VectorClip? Clip;
+                /// <summary>The side of Path the stroke's band lies on: Center for a centred stroke, the position's side for the
+                /// ring stroke of an Inside / Outside outline. The renderer needs it to cap a dash on the band, not on the pen.</summary>
+                public VectorOutlinePosition Side;
+                /// <summary>Sets the dash on a shape through the engine's container API, the call an editor of a vector container makes.</summary>
+                internal void ApplyDash(VectorShape v) => v.SetDash(Dash, DashOffset, DashSeam);
+            }
+
+            internal static Render RenderOf(Shape s, int pos, double w)
+            {
+                var (closedP, openP) = SplitClosed(s.Path);
+                bool ring = pos != 0 && !closedP.IsEmpty;
+                var r = new Render
+                {
+                    Path = closedP, Width = (float)(ring ? 2 * w : w),
+                    Open = openP, OpenWidth = (float)w,
+                    Dash = DashFor(s, w), DashOffset = DashOffsetMm(w), DashSeam = DashSeamChoice,
+                    Side = !ring ? VectorOutlinePosition.Center : pos == 1 ? VectorOutlinePosition.Outside : VectorOutlinePosition.Inside,
+                };
+                if (ring) r.Clip = pos == 1 ? ExteriorClip(closedP, (float)(4 * w + 1)) : new VectorClip(closedP);   // outside: the exterior; inside: the interior (the source's nonzero fill)
+                return r;
+            }
+
+            /// <summary>The closed contours of a path, and its open pieces.</summary>
+            internal static (VectorPath Closed, VectorPath Open) SplitClosed(VectorPath p)
+            {
+                var closed = new VectorPath(); var open = new VectorPath();
+                foreach (var (sub, isClosed) in Subpaths(p))
+                {
+                    if (isClosed) closed.Append(sub); else open.Append(sub);
+                }
+                return (closed, open);
+            }
+
+            /// <summary>The subpaths of a path, each with whether it is closed (a Close follows its points).</summary>
+            internal static List<(VectorPath Path, bool Closed)> Subpaths(VectorPath p)
+            {
+                var list = new List<(VectorPath, bool)>();
+                VectorPath? cur = null; bool closed = false; int di = 0;
+                void Flush() { if (cur != null) list.Add((cur, closed)); cur = null; closed = false; }
+                foreach (var k in p.Kinds)
+                {
+                    var d = p.Data;
+                    switch (k)
+                    {
+                        case VectorPath.K.Move:
+                            Flush(); cur = new VectorPath(); cur.MoveTo(d[di], d[di + 1]); di += 2; break;
+                        case VectorPath.K.Line:
+                            cur ??= new VectorPath(); cur.LineTo(d[di], d[di + 1]); di += 2; break;
+                        case VectorPath.K.Cubic:
+                            cur ??= new VectorPath(); cur.CurveTo(d[di], d[di + 1], d[di + 2], d[di + 3], d[di + 4], d[di + 5]); di += 6; break;
+                        default:
+                            cur?.Close(); closed = true; break;
+                    }
+                }
+                Flush();
+                return list;
+            }
+
+            /// <summary>Everything outside the contours, within their bounds grown by margin (even-odd: the rectangle minus the contours).</summary>
+            internal static VectorClip ExteriorClip(VectorPath contours, float margin)
+            {
+                var r = contours.ControlBounds();
+                r.Inflate(margin, margin);
+                var p = new VectorPath().Rect(r.Left, r.Top, r.Width, r.Height);
+                p.Append(contours);
+                return new VectorClip(p, true);
+            }
+
+            /// <summary>The outline of a shape: pos 0 = centre (width w, half each side); pos 1 / 2 = outside / inside ring of width w. Open shapes are always centred.</summary>
+            static VectorPath Make(Shape s, int pos, double w)
+             => Make(s, pos, w, StrokeCap(), StrokeJoin());
+
+            /// <summary>The same conversion with the cap and corner given, so the check can drive it without the page's selectors.
+            /// The NativeOutline flag still routes it to GDI+ (the point of that flag is to be visible on the page).</summary>
+            static VectorPath Make(Shape s, int pos, double w, VectorCap cap, VectorJoin join)
+            {
+                var dp = DashForBand(s, w);
+                if (dp != null)
+                {
+                    // The dashes are cut along the contour where the renderer cuts them, then banded to the stroke each dash
+                    // paints (centred w, or 2 w kept inside the ring of depth w), so the converted pattern sits on the drawn one
+                    // at every position. DashedBand takes the same pattern, phase and seam rule the live stroke takes: a
+                    // converted dashed outline that used a different rule than the stroke would differ at the seam by design.
+                    var dside = pos == 0 ? VectorOutlinePosition.Center : pos == 1 ? VectorOutlinePosition.Outside : VectorOutlinePosition.Inside;
+                    return VectorOffset.DashedBand(s.Path, dp, DashOffsetMm(w), DashSeamChoice, w, Pixel, Tol, dside, cap, join, 4f);
+                }
+                bool ring = pos != 0 && s.Closed;
+                if (NativeOutline.On)
+                {
+                    // reference flag: GraphicsPath.Widen (NativeOutline.cs) instead of VectorOffset
+                    double r = ring ? w : w / 2;
+                    return ring ? NativeOutline.Band(s.Path, pos == 1 ? r : 0, pos == 2 ? -r : 0) : NativeOutline.Band(s.Path, r, -r);
+                }
+                // the production entry, and its argument convention: the band of a stroke of twice the ring depth (a ring of
+                // depth w), or of a stroke of w centred. The page then shows the geometry the engine's SVG bake writes.
+                var side = !ring ? VectorOutlinePosition.Center : pos == 1 ? VectorOutlinePosition.Outside : VectorOutlinePosition.Inside;
+                if (LegacyFineGrid)
+                    return VectorOffset.Outline(s.Path, ring ? w : w / 2, ring ? pos : 0, Pixel, Tol, cap,
+                        join == VectorJoin.Bevel ? 1 : join == VectorJoin.Round ? 2 : 0);
+                return VectorOffset.Band(s.Path, (float)(ring ? 2 * w : w), side, cap, join, 4f);
+            }
+
+            /// <summary>The stroke layer follows the Cap / Join selectors (flat = butt, square, round; miter, bevel, round).</summary>
+            static VectorCap StrokeCap() => NativeOutline.CapIndex == 0 ? VectorCap.Butt : NativeOutline.CapIndex == 2 ? VectorCap.Round : VectorCap.Square;
+            static VectorJoin StrokeJoin() => NativeOutline.JoinIndex == 1 ? VectorJoin.Bevel : NativeOutline.JoinIndex == 2 ? VectorJoin.Round : VectorJoin.Miter;
+
+            // ---- the check the page was missing ----------------------------------------------------
+            // The page used to have no assertion at all, and its default view hid the live stroke, so nothing on it could
+            // disagree with anything. SelfCheck renders each shape twice through two different engine routes and compares.
+
+            /// <summary>The conversion with the cap and corner asked for, always on the production entry (VectorOffset.Band,
+            /// the call the SVG bake makes). The page's GDI+ and fine-grid switches change what is shown; they must not
+            /// change what is gated, or a reference implementation could pass its own test.</summary>
+            static VectorPath MakeProduction(Shape s, int pos, double w, VectorCap cap, VectorJoin join)
+            {
+                var savedNative = NativeOutline.On; var savedGrid = LegacyFineGrid;
+                NativeOutline.On = false; LegacyFineGrid = false;
+                try { return Make(s, pos, w, cap, join); }
+                finally { NativeOutline.On = savedNative; LegacyFineGrid = savedGrid; }
+            }
+
+            /// <summary>The side of the filled region beside a closed subpath, sampled along it: +1 the fill lies left of the
+            /// direction of travel, -1 right, 2 on both sides (the point runs inside the fill of another ring, or through a
+            /// self-crossing), 0 on neither. A ring the fill's side changes along is one the dashed conversion cannot serve
+            /// with the single side sign it takes per ring, while the live route clips a doubled pen to the fill pixel by
+            /// pixel and is right: such a row is measured and named, not gated.</summary>
+            static int FillSideAt(List<PointF> pts, List<(int Start, int Count)> rings, PointF a, PointF b, double eps)
+            {
+                double dx = b.X - a.X, dy = b.Y - a.Y, l = Math.Sqrt(dx * dx + dy * dy);
+                if (l < 1e-9) return 0;
+                double nx = -dy / l * eps, ny = dx / l * eps;
+                int wl = WindingAt(pts, rings, a.X + nx, a.Y + ny), wr = WindingAt(pts, rings, a.X - nx, a.Y - ny);
+                if (wl != 0 && wr != 0) return 2;
+                if (wl != 0) return 1;
+                if (wr != 0) return -1;
+                return 0;
+            }
+            /// <summary>The nonzero winding number of a point against a set of flattened rings.</summary>
+            static int WindingAt(List<PointF> pts, List<(int Start, int Count)> rings, double x, double y)
+            {
+                int w = 0;
+                foreach (var (s, c) in rings)
+                    for (int i = 0; i < c; i++)
+                    {
+                        PointF a = pts[s + i], b = pts[s + (i + 1) % c];
+                        double cr = (b.X - a.X) * (y - a.Y) - (b.Y - a.Y) * (x - a.X);
+                        if (a.Y <= y) { if (b.Y > y && cr > 0) w++; }
+                        else if (b.Y <= y && cr < 0) w--;
+                    }
+                return w;
+            }
+            /// <summary>True when the fill's side changes along one of the path's closed subpaths.</summary>
+            static bool FillSideFlips(VectorPath p)
+            {
+                var pts = new List<PointF>();
+                var rings = new List<(int Start, int Count)>();
+                foreach (var (start, count, closed) in VectorRender.Flatten(p, System.Numerics.Matrix3x2.Identity, 0.02f, pts))
+                    if (closed && count >= 3) rings.Add((start, count));
+                foreach (var (s, c) in rings)
+                {
+                    int seen = 0;
+                    for (int i = 0; i < c; i += 4)
+                    {
+                        int side = FillSideAt(pts, rings, pts[s + i], pts[s + (i + 1) % c], 0.05);
+                        if (side == 0) continue;
+                        if (seen != 0 && side != seen) return true;
+                        seen = side;
+                    }
+                }
+                return false;
+            }
+
+            /// <summary>Suite check: for every shape and every column, the live stroke route (the stroker painting the
+            /// contour, clipped for Inside / Outside) and the conversion (VectorOffset.Band filled as a shape) must be the
+            /// same picture. Both routes are the engine's own but they share no code below the flattening, so a disagreement
+            /// is a real defect in one of them. Gate, and the numbers it is set against, are the ones tests/cs/ctlrun
+            /// OutlineSeamChecks.BakeRun measures: no pixel off by more than 0.25 of a level and the ink integral within 1 %,
+            /// with both passes asked for the same fine flattening (the live stroke pass otherwise tessellates at the device
+            /// pixel and a miter spike of that coarse polyline overshoots the true offset curve - a look, not a shape).
+            /// The conversion is filled with the rule the SVG bake declares (nonzero, the default, which is what
+            /// VectorOffset.Orient orients for); the even-odd number of the same path is printed beside it and says whether
+            /// the compound has rings that cover each other. The dashed rows are gated on their own numbers, and the ones
+            /// whose source ring the fill's side changes along are measured and named instead, for the reasons below.</summary>
+            public static string? SelfCheck(Action<string>? log = null, string? dumpDir = null)
+            {
+                const int W = 260, H = 260, ink = unchecked((int)0xFF000000), paper = unchecked((int)0xFFFFFFFF);
+                var opt = new VectorRenderOptions { AA = true, AaQuality = 16, Opacity = 1f, Strokes = true, Fills = true, Tolerance = 0.02f };
+                var (posArr, wArr) = ((int[])new[] { 0, 1, 2 }, new double[] { 2.0, 1.0, 1.0 });   // the table's own columns
+                // each corner tested with the cap a drawing that asks for it also asks for: every cap and every corner appears once
+                var look = new (VectorCap Cap, VectorJoin Join)[] { (VectorCap.Square, VectorJoin.Miter), (VectorCap.Butt, VectorJoin.Round), (VectorCap.Round, VectorJoin.Bevel) };
+                double worstPixel = 0, worstInt = 0; int worstHard = 0, cases = 0, skipped = 0; string worstCase = "";
+                // The dashed rows are gated on their own numbers rather than the solid rows'. They are a different construction:
+                // a solid row asks the engine's bake entry VectorOffset.Band, while a dashed outline bakes through
+                // VectorOffset.DashedBand - the entry the SVG bake itself calls for a dashed stroke (VectorImage.ToSvg with
+                // bakeOutlines), because Band takes no dash arguments and would export the outline solid. The two routes have to
+                // agree in shape and in ink. They do now that the ends of a sided (Inside / Outside) dash are capped on the
+                // band's centre line at half the pen's radius in the stroker and in DashedBand alike: before that, the stroker
+                // capped a dash with the doubled pen on the path and let the clip cut it in half, so it bulged twice as far past
+                // the dash as the conversion's and the two pictures disagreed by whole pixels at every dash end.
+                // What is left on these rows is sub-pixel: the live route clips a doubled pen to its side while the conversion
+                // carries the half band as its own geometry, so the two boundaries can fall either side of an antialiased pixel
+                // edge. That is a fraction of a level and never a whole one, which is why the gate on the dashed rows is "no
+                // hard pixel at all", with a bound on the worst fractional one and the same 1 % ink integral. Which rows are
+                // dashed follows the dash setting instead of a hard-coded shape key: with the pattern on for every shape the
+                // solid gate measures nothing, and the summary says so in as many words rather than reporting a pass.
+                // The bound on the worst fractional pixel of a dashed row. It is looser than the solid rows' 0.25 because the
+                // live route reaches its band by clipping a doubled pen and the conversion carries the half band as its own
+                // geometry, so on a curved contour the two boundaries land a fraction of a pixel apart; measured worst over
+                // every shape and outline position is 0.455 (a butt-cap row, no cap geometry in it at all), and a whole pixel
+                // apart - which is what the cap bug was - is caught by the hard-pixel count instead.
+                const double DashPixelGate = 0.50;
+                double dashInt = 0, dashPixel = 0; string dashIntCase = "", dashPixelCase = "", dashHardCase = "";
+                int dashedCases = 0, dashHard = 0;
+                // A dashed row whose source ring the fill's side changes along (a ring that runs through the fill of another
+                // ring, or crosses itself): DashedBand takes one side sign per ring, from the ring's own winding, so on the
+                // part where the fill is on the other side its band lands on the wrong one, while the live route clips a
+                // doubled pen to the fill and is right. A defect of its own - the whole lobe, not the cap - so the row is
+                // measured and named here and left out of both gates, exactly as it was before the caps were fixed.
+                double crossPixel = 0, crossInt = 0; string crossWorst = ""; int crossCases = 0, crossHard = 0;
+                var sw = System.Diagnostics.Stopwatch.StartNew();
+                foreach (var key in Keys)
+                {
+                    var s = Shapes().FirstOrDefault(x => x.Column == "CENTER" && x.Key == key);
+                    if (s == null) continue;
+                    for (int p = 0; p < posArr.Length; p++)
+                        for (int j = 0; j < look.Length; j++)
+                        {
+                            var (cap, join) = look[j];
+                            var conv = MakeProduction(s, posArr[p], wArr[p], cap, join);
+                            var r = RenderOf(s, posArr[p], wArr[p]);
+                            bool dashed = r.Dash != null;
+                            bool flips = dashed && FillSideFlips(r.Path);
+                            var stroked = new VectorImage();
+                            if (!r.Path.IsEmpty) { var sh = new VectorShape { Path = r.Path, Fill = null, Stroke = new VectorColor(ink), StrokeWidth = r.Width, Cap = cap, Join = join, MiterLimit = 4f, Clip = r.Clip, StrokeSide = r.Side }; r.ApplyDash(sh); stroked.Shapes.Add(sh); }
+                            if (!r.Open.IsEmpty) { var sh = new VectorShape { Path = r.Open, Fill = null, Stroke = new VectorColor(ink), StrokeWidth = r.OpenWidth, Cap = cap, Join = join, MiterLimit = 4f }; r.ApplyDash(sh); stroked.Shapes.Add(sh); }
+                            var baked = new VectorImage();
+                            // the rule the export and the page use: VectorOffset.Orient orients the rings for nonzero, and the SVG
+                            // bake writes no fill-rule, so this is the picture a viewer gets from the exported file.
+                            if (!conv.IsEmpty) baked.Shapes.Add(new VectorShape { Path = conv, Fill = new VectorColor(ink), Stroke = null });
+                            // one map for both, built from the source shape grown by what a miter can reach
+                            var b = s.Path.ControlBounds();
+                            float miter = join == VectorJoin.Miter ? 4f : 1f;
+                            double grow = r.Width * miter + 2 * wArr[p] + 2;
+                            double fit = Math.Min((W - 8) / Math.Max(1e-3, b.Width + 2 * grow), (H - 8) / Math.Max(1e-3, b.Height + 2 * grow));
+                            var map = System.Numerics.Matrix3x2.CreateTranslation(-(b.Left + b.Right) / 2, -(b.Top + b.Bottom) / 2)
+                                    * System.Numerics.Matrix3x2.CreateScale((float)fit)
+                                    * System.Numerics.Matrix3x2.CreateTranslation(W / 2f, H / 2f);
+                            var a = new Sprite(W, H); a.ClearBuffer(paper); stroked.Draw(a, map, opt);
+                            var k = new Sprite(W, H); k.ClearBuffer(paper); baked.Draw(k, map, opt);
+                            // the same baked shape filled even-odd as well: a compound whose rings overlap (two adjacent dashes of a
+                            // dashed band, say) is correct under nonzero and loses the overlap under even-odd, so a case that agrees
+                            // here but not above has double-covered geometry the union did not merge.
+                            var k2 = new Sprite(W, H); k2.ClearBuffer(paper);
+                            if (!conv.IsEmpty)
+                            {
+                                var baked2 = new VectorImage();
+                                baked2.Shapes.Add(new VectorShape { Path = conv, Fill = new VectorColor(ink), Stroke = null, EvenOdd = true });
+                                baked2.Draw(k2, map, opt);
+                            }
+                            double maxP = 0, sumA = 0, sumB = 0, sumC = 0; int hard = 0, cells = 0;
+                            for (int i = 0; i < a.Pixels.Length; i++)
+                            {
+                                int ca = a.Pixels[i] & 0xff, cb = k.Pixels[i] & 0xff, cc = k2.Pixels[i] & 0xff;
+                                if (ca < 0x80) cells++;
+                                maxP = Math.Max(maxP, Math.Abs(ca - cb) / 255.0);
+                                if (Math.Abs(ca - cb) > 128) hard++;
+                                sumA += 255 - ca; sumB += 255 - cb; sumC += 255 - cc;
+                            }
+                            double dInt = Math.Abs(sumA - sumB) / Math.Max(1.0, sumA);
+                            double dIntNz = Math.Abs(sumA - sumC) / Math.Max(1.0, sumA);
+                            string caseName = $"{key} {new[] { "center", "outside", "inside" }[p]} {join} {cap}";
+                            // the exclusions, named: an empty conversion (a zero-width band) and a shape the stroker paints
+                            // with no ink at all cannot be compared, and are skipped rather than counted as passes.
+                            if (sumA == 0 && sumB == 0) { skipped++; log?.Invoke($"  skip {caseName}: neither route drew any ink"); a.Dispose(); k.Dispose(); k2.Dispose(); continue; }
+                            cases++;
+                            log?.Invoke($"  {caseName,-40} pixel {maxP:0.000} hard {hard} of {cells} ink, integral {dInt * 100:0.00}% (the same path filled even-odd {dIntNz * 100:0.00}%), " +
+                                        $"stroke ink {sumA / 255:0} px vs baked {sumB / 255:0} px (even-odd {sumC / 255:0}), conv {conv.SegmentCount} segs, closed src {r.Path.SegmentCount} open src {r.Open.SegmentCount}, s.Closed={s.Closed}" +
+                                        (flips ? "  [the fill's side changes along a ring: reported, not gated]" : ""));
+                            if (dumpDir != null)
+                            {
+                                // the pair, side by side with their difference, so a number can be looked at
+                                var comb = new Sprite(4 * W, H); comb.ClearBuffer(paper);
+                                comb.Draw(a, 0, 0, SR2D.Op.Paint); comb.Draw(k, W, 0, SR2D.Op.Paint);
+                                comb.Draw(k2, 2 * W, 0, SR2D.Op.Paint);
+                                var dif = new Sprite(W, H);
+                                for (int i = 0; i < dif.Pixels.Length; i++)
+                                {
+                                    int ca = a.Pixels[i] & 0xff, cb = k.Pixels[i] & 0xff, d = Math.Abs(ca - cb);
+                                    dif.Pixels[i] = unchecked((int)0xFF000000) | (d << 16) | (d << 8) | d;
+                                }
+                                comb.Draw(dif, 3 * W, 0, SR2D.Op.Paint);
+                                var safe = System.Text.RegularExpressions.Regex.Replace(caseName, "[^A-Za-z0-9]+", "_");
+                                File.WriteAllBytes(Path.Combine(dumpDir, $"cmp_{safe}.png"), Png.Encode(comb.Pixels, comb.Width, comb.Height));
+                                dif.Dispose(); comb.Dispose();
+                            }
+                            if (flips)
+                            {
+                                crossCases++;
+                                if (maxP > crossPixel) crossPixel = maxP;
+                                if (dInt > crossInt) { crossInt = dInt; crossWorst = caseName; }
+                                if (hard > crossHard) crossHard = hard;
+                            }
+                            else if (dashed)
+                            {
+                                dashedCases++;
+                                if (dInt > dashInt) { dashInt = dInt; dashIntCase = caseName; }
+                                if (maxP > dashPixel) { dashPixel = maxP; dashPixelCase = caseName; }
+                                if (hard > dashHard) { dashHard = hard; dashHardCase = caseName; }
+                            }
+                            else
+                            {
+                                if (maxP > worstPixel) { worstPixel = maxP; worstCase = caseName; }
+                                if (dInt > worstInt) { worstInt = dInt; worstCase = caseName; }
+                                if (hard > worstHard) worstHard = hard;
+                            }
+                            a.Dispose(); k.Dispose(); k2.Dispose();
+                        }
+                }
+                sw.Stop();
+                int solidCases = cases - dashedCases - crossCases;
+                log?.Invoke($"dash setting for this run: {DashRunNote()}");
+                log?.Invoke($"cases {cases} compared ({solidCases} on the solid gate, {dashedCases} on the dashed gate, {crossCases} reported not gated" +
+                            (crossCases == 0 ? "" : $": the fill's side changes along a ring of the source, worst pixel {crossPixel:0.000}, worst hard {crossHard}, worst integral {crossInt * 100:0.00}% at {crossWorst}") +
+                            (dashedCases == 0 ? "" : $"; dashed gate worst pixel {dashPixel:0.000} (gate {DashPixelGate:0.00}) at {dashPixelCase}, worst hard {dashHard} (gate 0)" + (dashHard > 0 ? $" at {dashHardCase}" : "") + $", worst integral {dashInt * 100:0.00}% (gate 1%) at {dashIntCase}") +
+                            $"); skipped {skipped}; solid worst pixel {worstPixel:0.000} (gate 0.25), worst hard {worstHard}, worst integral {worstInt * 100:0.00}% (gate 1%), worst case {worstCase}, {sw.ElapsedMilliseconds} ms");
+                if (cases == 0) return "outline check compared nothing: every case drew no ink";
+                // The gates are asked in turn, and a run in which the solid one measured no row says so instead of passing:
+                // reporting a pass would claim the bake entry agrees with the stroke when no row asked that entry for anything.
+                if (solidCases == 0)
+                    return $"outline check gated no row on the solid gate: the dash setting ({DashRunNote()}) puts every row on " +
+                           $"VectorOffset.DashedBand, which the solid gate does not cover (it asks VectorOffset.Band). The dashed gate " +
+                           $"measured {dashedCases} rows, {crossCases} rows are reported not gated. " +
+                           "Set the dash back to the wavy blob only, or off, to gate the bake entry again.";
+                // The dashed rows are gated on their own: no whole pixel may differ (a hard pixel is the two routes drawing
+                // different geometry, which is what the cap fix removed), the worst fractional one stays under DashPixelGate
+                // (antialiasing of the two boundaries), and the ink integral under the same 1 % as the solid rows. Asked
+                // before the solid gate so a run in which both disagree reports the dashed reason, which names the dash end.
+                if (dashedCases > 0 && dashHard > 0)
+                    return $"dashed outline conversion does not match the dashed stroke: {dashHard} hard pixels (gate 0), " +
+                           $"worst pixel {dashPixel:0.000}, worst case {dashHardCase} - the two routes draw different geometry at a dash end";
+                if (dashedCases > 0 && (dashPixel > DashPixelGate || dashInt > 0.01))
+                    return $"dashed outline conversion does not match the dashed stroke: worst pixel {dashPixel:0.000} (gate {DashPixelGate:0.00}) at {dashPixelCase}, " +
+                           $"ink integral {dashInt * 100:0.00}% (gate 1%) at {dashIntCase}";
+                if (worstPixel > 0.25 || worstInt > 0.01)
+                    return $"outline conversion does not match the stroke: worst pixel {worstPixel:0.000} (gate 0.25), " +
+                           $"ink integral {worstInt * 100:0.00}% (gate 1%), {worstHard} hard pixels, worst case {worstCase}";
+                return null;
+            }
+
+            // ---- the two file buttons, checked with no dialog ---------------------------------------
+            // Load and Export are the only controls on either page that touch the file system, and a dialog cannot be driven
+            // headless, so this writes its own file, loads it through the same call the Load button makes, exports through the
+            // same calls the two Export buttons make, reads the files back and compares them with what the pages draw.
+            // One map for both sides of a pair: fitting each picture to its own bounds would compare two scales, because a
+            // converted band's bounds are not the source path's. The export is written in 96 dpi user units, so its side is
+            // drawn through that map pre-scaled by the factor the export multiplied by - and the flattening tolerance is in
+            // device pixels, so both sides tessellate the same curve at the same fineness.
+
+            /// <summary>--fileprobe: the file buttons' own check. Returns null when every gate held, or the first thing that
+            /// did not. <paramref name="dumpDir"/> takes the probe file, the exports, and a side-by-side picture per case.</summary>
+            public static string? FileSelfCheck(Action<string>? log = null, string? dumpDir = null)
+            {
+                const int W = 260, H = 260, ink = unchecked((int)0xFF000000), paper = unchecked((int)0xFFFFFFFF);
+                // set against what this probe measures today - worst pixel 0.008, worst ink integral 0.001 % over its twelve
+                // cases - so both gates sit well above the four-decimal coordinates the SVG writer emits and well below what a
+                // lost clip, an unconverted unit or a stroke width that did not survive the round trip would cost.
+                const double PixelGate = 0.02, IntGate = 0.001;
+                var opt = new VectorRenderOptions { AA = true, AaQuality = 16, Opacity = 1f, Strokes = true, Fills = true, Tolerance = 0.02f };
+                string dir = dumpDir ?? Path.Combine(Path.GetTempPath(), "sr2d_fileprobe");
+                Directory.CreateDirectory(dir);
+                // a closed curve and an open polyline: the two things a stroke and a conversion treat differently, and what a
+                // file a user brings in is most likely to be. The closed one is exactly 80 px across, so the unit conversion
+                // the load does has an exact answer to be held against.
+                string probe = Path.Combine(dir, "probe_shapes.svg");
+                File.WriteAllText(probe,
+                    "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"200\" height=\"160\" viewBox=\"0 0 200 160\">" +
+                    "<path id=\"closed_cubic\" d=\"M 40 40 C 40 20 120 20 120 40 C 120 80 40 80 40 40 Z\" fill=\"#000000\"/>" +
+                    "<path id=\"open_poly\" d=\"M 20 120 L 60 100 L 100 140 L 180 110\" fill=\"none\" stroke=\"#000000\" stroke-width=\"4\"/>" +
+                    "</svg>");
+
+                int before = Shapes().Count, comboBefore = comboNames.Length;
+                string? err = LoadVectorFile(probe);
+                if (err != null) return "the Load button's own call refused the probe file: " + err;
+                int added = Shapes().Count - before;
+                if (added != 2) return $"the load added {added} paths to the shape list; the probe file has 2";
+                if (FirstLoadedIndex != comboBefore)
+                    return $"the load put its first path at index {FirstLoadedIndex}, not after the {comboBefore} entries already listed";
+                if (comboNames.Length != comboBefore + added || comboKeys.Length != comboNames.Length)
+                    return $"the shape combo lists {comboNames.Length} names and {comboKeys.Length} keys; {comboBefore} plus the {added} loaded is {comboBefore + added}";
+                for (int i = 0; i < Names.Length; i++)
+                    if (comboKeys[i] != Keys[i])
+                        return $"the load moved a built-in entry: index {i} is \"{comboKeys[i]}\" instead of \"{Keys[i]}\" - the table's columns, the Circle row's second combo and SelfCheck's gate all key off those indexes";
+                var closed = Shapes().First(x => x.Key.EndsWith("closed_cubic", StringComparison.Ordinal));
+                var open = Shapes().First(x => x.Key.EndsWith("open_poly", StringComparison.Ordinal));
+                int firstIndex = FirstLoadedIndex;      // the second load below moves FirstLoadedIndex on to its own file
+                if (!closed.Closed || open.Closed)
+                    return $"the load read the closed flag wrong: closed_cubic Closed={closed.Closed}, open_poly Closed={open.Closed}";
+                double wantMm = 80 * 25.4 / 96.0, gotMm = closed.Path.ControlBounds().Width;
+                log?.Invoke($"load: {added} paths appended after the {comboBefore} entries already listed, combo {comboNames.Length} entries, " +
+                            $"the probe's 80 px closed path spans {gotMm:0.#####} mm (a 96 dpi user unit is {25.4 / 96.0:0.#####} mm)");
+                if (Math.Abs(gotMm - wantMm) > 0.01)
+                    return $"the load did not convert units: an 80 px span came back {gotMm:0.####} mm, expected {wantMm:0.####} mm";
+
+                // The same drawing declared the way a drawing program writes it: a physical size on the root and a viewBox in
+                // the file's own units, so the reader has to resolve one against the other (SvgReader's ViewportMatrix). A unit
+                // convention is not a licence to resize somebody's drawing, so this file must land on the same millimetres as
+                // the pixel-declared one above - and the pixel comparison below cannot catch that on its own, because a load
+                // and an export that are wrong by the same factor agree with each other perfectly.
+                string probeMm = Path.Combine(dir, "probe_mm.svg");
+                File.WriteAllText(probeMm,
+                    "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"52.9167mm\" height=\"42.3333mm\" viewBox=\"0 0 100 80\">" +
+                    "<g transform=\"translate(4 6)\"><path id=\"closed_mm\" d=\"M 16 14 C 16 4 56 4 56 14 C 56 34 16 34 16 14 Z\" fill=\"#000000\"/></g>" +
+                    "</svg>");
+                int beforeMm = Shapes().Count;
+                err = LoadVectorFile(probeMm);
+                if (err != null) return "the Load button's own call refused the mm-declared probe file: " + err;
+                if (Shapes().Count - beforeMm != 1) return $"the mm-declared probe added {Shapes().Count - beforeMm} paths; it has 1";
+                var mmClosed = Shapes().First(x => x.Key.EndsWith("closed_mm", StringComparison.Ordinal));
+                var b1 = closed.Path.ControlBounds(); var b2 = mmClosed.Path.ControlBounds();
+                log?.Invoke($"load: the mm-declared copy of the same drawing, group transform and all, spans {b2.Width:0.#####} x {b2.Height:0.#####} mm; " +
+                            $"the px-declared one spans {b1.Width:0.#####} x {b1.Height:0.#####} mm");
+                if (Math.Abs(b2.Width - b1.Width) > 0.01 || Math.Abs(b2.Height - b1.Height) > 0.01)
+                    return $"the load did not honour the mm-declared file's own size: its closed path spans {b2.Width:0.####} x {b2.Height:0.####} mm, " +
+                           $"the same drawing declared in pixels spans {b1.Width:0.####} x {b1.Height:0.####} mm";
+
+                double worstPixel = 0, worstInt = 0; string worstCase = ""; int cases = 0;
+                var posNames = new[] { "center", "outside", "inside" };   // all three outline positions the pages offer
+                int savedShape = ShapeChoice, savedCircle = CircleChoice, savedPos = PosChoice; double savedWidth = WidthMm;
+                int sShape = StrokeCheckDemo.ShapeChoice, sCircle = StrokeCheckDemo.CircleChoice, sPos = StrokeCheckDemo.PosChoice;
+                double sWidth = StrokeCheckDemo.WidthMm;
+                string? fail = null;
+                try
+                {
+                    // the pages' own defaults: what a user who pressed the two buttons and nothing else gets
+                    WidthMm = StrokeCheckDemo.WidthMm = 2.0;
+                    CircleChoice = StrokeCheckDemo.CircleChoice = 0;
+                    for (int k = 0; k < added && fail == null; k++)
+                        for (int p = 0; p < posNames.Length && fail == null; p++)
+                        {
+                            ShapeChoice = StrokeCheckDemo.ShapeChoice = firstIndex + k;
+                            PosChoice = StrokeCheckDemo.PosChoice = p;
+                            ResetViews();
+                            Shape s = ChosenShape();
+                            string name = s.Key.Substring(s.Key.IndexOf(':') + 1).Trim();
+                            var b = s.Path.ControlBounds();
+                            double grow = WidthMm * 4 + 2;                     // what a miter can reach past the path
+                            double fit = Math.Min((W - 8) / Math.Max(1e-3, b.Width + 2 * grow), (H - 8) / Math.Max(1e-3, b.Height + 2 * grow));
+                            var map = System.Numerics.Matrix3x2.CreateTranslation(-(b.Left + b.Right) / 2, -(b.Top + b.Bottom) / 2)
+                                    * System.Numerics.Matrix3x2.CreateScale((float)fit)
+                                    * System.Numerics.Matrix3x2.CreateTranslation(W / 2f, H / 2f);
+                            var mapPx = System.Numerics.Matrix3x2.CreateScale(1 / PxPerMm) * map;
+
+                            string? Paints(string what, VectorImage back, bool stroke)
+                            {
+                                if (back.Shapes.Count == 0) return $"{what}: the exported file has no shape in it";
+                                foreach (var sh in back.Shapes)
+                                {
+                                    var got = stroke ? sh.Stroke : sh.Fill;
+                                    if (got == null) return $"{what}: the exported file's shape came back with no {(stroke ? "stroke" : "fill")}, so a reader draws nothing";
+                                    if ((stroke ? sh.Fill : sh.Stroke) != null) return $"{what}: the exported file's shape also carries a {(stroke ? "fill" : "stroke")} the page never wrote";
+                                }
+                                return null;
+                            }
+                            // the pixel measure reads one channel, so both sides of a pair are drawn in the same ink: the Stroke
+                            // page draws blue and the Outline page black, and a colour is not what the buttons are about
+                            void Ink(VectorImage img) { foreach (var sh in img.Shapes) { if (sh.Stroke != null) sh.Stroke = new VectorColor(ink); if (sh.Fill != null) sh.Fill = new VectorColor(ink); } }
+
+                            string? Compare(string what, VectorImage page, VectorImage back)
+                            {
+                                var a = new Sprite(W, H); a.ClearBuffer(paper); page.Draw(a, map, opt);
+                                var c = new Sprite(W, H); c.ClearBuffer(paper); back.Draw(c, mapPx, opt);
+                                double maxP = 0, sumA = 0, sumB = 0; int hard = 0;
+                                for (int i = 0; i < a.Pixels.Length; i++)
+                                {
+                                    int ca = a.Pixels[i] & 0xff, cb = c.Pixels[i] & 0xff;
+                                    maxP = Math.Max(maxP, Math.Abs(ca - cb) / 255.0);
+                                    if (Math.Abs(ca - cb) > 128) hard++;
+                                    sumA += 255 - ca; sumB += 255 - cb;
+                                }
+                                cases++;
+                                if (sumA == 0 && sumB == 0)
+                                {
+                                    a.Dispose(); c.Dispose();
+                                    return $"{what}: neither the page nor the file drew any ink, so the comparison measured nothing";
+                                }
+                                double dInt = Math.Abs(sumA - sumB) / Math.Max(1.0, sumA);
+                                if (maxP > worstPixel) { worstPixel = maxP; worstCase = what; }
+                                if (dInt > worstInt) { worstInt = dInt; worstCase = what; }
+                                log?.Invoke($"  {what,-34} pixel {maxP:0.000} hard {hard}, integral {dInt * 100:0.000}%, page ink {sumA / 255:0.0} px vs file {sumB / 255:0.0} px");
+                                if (dumpDir != null)
+                                {
+                                    // page, file, and their difference: a number that fails can be looked at
+                                    var comb = new Sprite(3 * W, H); comb.ClearBuffer(paper);
+                                    comb.Draw(a, 0, 0, SR2D.Op.Paint); comb.Draw(c, W, 0, SR2D.Op.Paint);
+                                    var dif = new Sprite(W, H);
+                                    for (int i = 0; i < dif.Pixels.Length; i++)
+                                    {
+                                        int ca = a.Pixels[i] & 0xff, cb = c.Pixels[i] & 0xff, d = Math.Abs(ca - cb);
+                                        dif.Pixels[i] = unchecked((int)0xFF000000) | (d << 16) | (d << 8) | d;
+                                    }
+                                    comb.Draw(dif, 2 * W, 0, SR2D.Op.Paint);
+                                    string safe = System.Text.RegularExpressions.Regex.Replace(what, "[^A-Za-z0-9]+", "_");
+                                    File.WriteAllBytes(Path.Combine(dumpDir, $"file_{safe}.png"), Png.Encode(comb.Pixels, comb.Width, comb.Height));
+                                    dif.Dispose(); comb.Dispose();
+                                }
+                                a.Dispose(); c.Dispose();
+                                if (maxP > PixelGate || dInt > IntGate)
+                                    return $"{what}: the exported file is not the picture the page draws - worst pixel {maxP:0.000} (gate {PixelGate:0.00}), " +
+                                           $"ink integral {dInt * 100:0.00}% (gate {IntGate * 100:0.00}%), {hard} hard pixels";
+                                return null;
+                            }
+
+                            // the Outline page's Export writes the conversion it fills
+                            string what = $"conversion {name} {posNames[p]}";
+                            string convFile = Path.Combine(dir, $"export_conv_{k}_{p}.svg");
+                            err = ExportConversionSvg(convFile);
+                            if (err != null) fail = $"{what}: the Export button's own call refused to write: {err}";
+                            else
+                            {
+                                var back = VectorImage.Load(convFile);
+                                fail = Paints(what, back, false);
+                                if (fail == null)
+                                {
+                                    Ink(back);
+                                    var page = new VectorImage();
+                                    var conv = Make(s, p, WidthMm);
+                                    if (!conv.IsEmpty) page.Shapes.Add(new VectorShape { Path = conv, Fill = new VectorColor(ink), Stroke = null });
+                                    fail = Compare(what, page, back);
+                                }
+                            }
+                            if (fail != null) break;
+
+                            // the Stroke page's Export writes the live stroke it draws
+                            what = $"stroke {name} {posNames[p]}";
+                            string strokeFile = Path.Combine(dir, $"export_stroke_{k}_{p}.svg");
+                            err = StrokeCheckDemo.ExportStrokeSvg(strokeFile);
+                            if (err != null) fail = $"{what}: the Export button's own call refused to write: {err}";
+                            else
+                            {
+                                var back = VectorImage.Load(strokeFile);
+                                fail = Paints(what, back, true);
+                                if (fail == null)
+                                {
+                                    Ink(back);
+                                    var page = StrokeCheckDemo.StrokeLayer().Clone();   // a clone: Ink must not recolour the cached scene
+                                    Ink(page);
+                                    fail = Compare(what, page, back);
+                                }
+                            }
+                        }
+                }
+                catch (Exception ex) { fail = "file check threw " + ex.GetType().Name + ": " + ex.Message; log?.Invoke(ex.ToString()); }
+                finally
+                {
+                    ShapeChoice = savedShape; CircleChoice = savedCircle; PosChoice = savedPos; WidthMm = savedWidth;
+                    StrokeCheckDemo.ShapeChoice = sShape; StrokeCheckDemo.CircleChoice = sCircle; StrokeCheckDemo.PosChoice = sPos; StrokeCheckDemo.WidthMm = sWidth;
+                    ResetViews();
+                }
+                log?.Invoke($"cases {cases} compared; worst pixel {worstPixel:0.000} (gate {PixelGate:0.00}), worst ink integral {worstInt * 100:0.000}% (gate {IntGate * 100:0.00}%), worst case {worstCase}");
+                if (fail != null) return fail;
+                if (cases == 0) return "file check compared nothing: no case reached the pixel comparison";
+                return null;
+            }
+
+            /// <summary>--bandprobe: the same conversion SelfCheck gates, with OutlineArrange.Band reporting the ring count and
+            /// net area of each of its stages, so a result that comes back nearly empty can be traced to the stage that lost it.
+            /// It changes nothing: the probe only reads what the production route already computes.</summary>
+            /// <summary>The one-shape view's fit frame for the current selectors. The --bandprobe harness reads it at every
+            /// outline position: the frame is the initial shape grown by the width, so it must not move when the position
+            /// switches, or the view rescales and the outline switch reads as the shape changing size.</summary>
+            internal static string FrameProbe()
+            {
+                var v = SingleView();
+                return $"cx={v.CX:0.####} cy={v.CY:0.####} bw={v.BW:0.####} bh={v.BH:0.####}";
+            }
+
+            public static void StageProbe(string key, int pos, double w, VectorCap cap, VectorJoin join, Action<string> log)
+            {
+                var s = Shapes().FirstOrDefault(x => x.Column == "CENTER" && x.Key == key);
+                if (s == null) { log($"no shape {key}"); return; }
+                log($"=== {key} pos={pos} w={w} {join} {cap}");
+                OutlineArrange.BandProbe = log;
+                try
+                {
+                    var conv = MakeProduction(s, pos, w, cap, join);
+                    log($"=== result: {conv.SegmentCount} segments");
+                }
+                finally { OutlineArrange.BandProbe = null; }
+            }
+
+            static View TableView()
+            {
+                if (tableView != null) return tableView;
+                var sw = System.Diagnostics.Stopwatch.StartNew();
+                var v = TableBuild();
+                if (Perf != null) Perf($"TableView total {sw.Elapsed.TotalMilliseconds,8:0} ms");
+                return tableView = v;
+            }
+
+            /// <summary>Set by --outlineperf to a sink that receives one line per stage of the table build, so "the page
+            /// takes too long to open" is answered by a measurement of where the time goes rather than by a guess at it.
+            /// Null in the product, and nothing is formatted when it is.</summary>
+            public static Action<string>? Perf;
+
+            /// <summary>The table build with no caching, for --outlineperf: the cached view would make every measurement
+            /// after the first read as zero.</summary>
+            internal static void TableViewOnce() { TableBuild(); }
+
+            /// <summary>Drops both cached views, as the page's own switches do when a setting changes what they show.</summary>
+            internal static void ResetViews() { tableView = null; singleView = null; singleKey = ""; }
+
+            static View TableBuild()
+            {
+                var bases = new List<VectorPath>(); var convs = new List<VectorPath>(); var renders = new List<Render>();
+                var columns = new (string Col, int Pos, double W)[] { ("CENTER", 0, 2.0), ("OUTSIDE", 1, 1.0), ("INSIDE", 2, 1.0) };
+                // the extent of each column's converted outlines, for the captions and the dividers
+                var x0 = new double[3]; var x1 = new double[3];
+                for (int i = 0; i < 3; i++) { x0[i] = double.MaxValue; x1[i] = double.MinValue; }
+                double top = double.MaxValue, bottom = double.MinValue;
+                var sw = System.Diagnostics.Stopwatch.StartNew();
+                var all = Shapes();
+                if (Perf != null) Perf($"  svg parse          {sw.Elapsed.TotalMilliseconds,8:0} ms  ({all.Count} paths)");
+                double tMake = 0, tRender = 0;
+                foreach (var key in Keys)
+                    foreach (var (col, pos, w) in columns)
+                    {
+                        var s = all.FirstOrDefault(x => x.Column == col && x.Key == key);
+                        if (s == null) continue;
+                        sw.Restart();
+                        var conv = Make(s, pos, w);
+                        double ms = sw.Elapsed.TotalMilliseconds;
+                        tMake += ms;
+                        sw.Restart();
+                        renders.Add(RenderOf(s, pos, w));
+                        tRender += sw.Elapsed.TotalMilliseconds;
+                        bases.Add(s.Path); convs.Add(conv);
+                        if (Perf != null) Perf($"  {key,-22} {col,-8} conv {ms,7:0} ms   {conv.SegmentCount,5} segs");
+                        if (conv.SegmentCount == 0) continue;
+                        var b = conv.ControlBounds();
+                        x0[pos] = Math.Min(x0[pos], Math.Min(b.Left, b.Right)); x1[pos] = Math.Max(x1[pos], Math.Max(b.Left, b.Right));
+                        top = Math.Min(top, Math.Min(b.Top, b.Bottom)); bottom = Math.Max(bottom, Math.Max(b.Top, b.Bottom));
+                    }
+                if (Perf != null)
+                {
+                    Perf($"  conversions        {tMake,8:0} ms  ({convs.Count})");
+                    Perf($"  live stroke setups {tRender,8:0} ms  ({renders.Count})");
+                }
+                sw.Restart();
+                var v = Build(bases, convs, renders);
+                if (Perf != null) Perf($"  view assembly      {sw.Elapsed.TotalMilliseconds,8:0} ms  ({v.BaseNodes.Count} base + {v.ConvNodes.Count} converted nodes)");
+                sw.Restart();
+                Guides(v, x0, x1, top, bottom);
+                if (Perf != null) Perf($"  guides             {sw.Elapsed.TotalMilliseconds,8:0} ms");
+                return v;
+            }
+
+            /// <summary>Captions CENTER / OUTSIDE / INSIDE above their columns, and a divider between each pair of columns.</summary>
+            static void Guides(View v, double[] x0, double[] x1, double top, double bottom)
+            {
+                if (top > bottom) return;
+                var g = new VectorImage();
+                string[] names = { "CENTER", "OUTSIDE", "INSIDE" };
+                double capY = top - 7.0;                     // the captions sit 7 mm above the top of the shapes
+                for (int i = 0; i < 3; i++)
+                {
+                    if (x1[i] < x0[i]) continue;
+                    var t0 = VectorText.Create(names[i], 3.2f, new VectorTextStyle { Color = unchecked((int)0xFF202428) });
+                    double bl = double.MaxValue, br = double.MinValue, bt = double.MaxValue;
+                    foreach (var sh in t0.Shapes)
+                    {
+                        var b = sh.Path.ControlBounds();
+                        bl = Math.Min(bl, Math.Min(b.Left, b.Right)); br = Math.Max(br, Math.Max(b.Left, b.Right)); bt = Math.Min(bt, Math.Min(b.Top, b.Bottom));
+                    }
+                    if (bl > br) continue;
+                    double cx = (x0[i] + x1[i]) / 2;
+                    var t = t0.Transform(System.Numerics.Matrix3x2.CreateTranslation((float)(cx - (br - bl) / 2 - bl), (float)(capY - bt)));
+                    g.Shapes.AddRange(t.Shapes);
+                }
+                // dividers: midway between neighbouring columns, from above the captions down past the last row
+                for (int i = 0; i < 2; i++)
+                {
+                    if (x1[i] < x0[i] || x1[i + 1] < x0[i + 1]) continue;
+                    double dx = (x1[i] + x0[i + 1]) / 2;
+                    var line = new VectorPath();
+                    line.MoveTo((float)dx, (float)(capY - 3)); line.LineTo((float)dx, (float)(bottom + 2));
+                    g.Shapes.Add(new VectorShape { Path = line, Fill = null, Stroke = new VectorColor(unchecked((int)0xFF5A5F66)), StrokeWidth = 0.15f });
+                }
+                v.Guides = g;
+                v.BH += 10; v.CY -= 5;                       // the view's frame takes in the captions
+            }
+
+            /// <summary>The shape the one-shape views show: the shape combo, with the Circle entry further picked by the second
+            /// combo between the circle, the star and the arrow. Both pages ask for it, so the choice is made once. The combo's
+            /// items are <see cref="NameList"/>, which grows when a file is loaded, so the key comes from the same grown list.</summary>
+            internal static Shape ChosenShape()
+            {
+                if (ShapeChoice == 6 && CircleChoice == 1) return new Shape { Key = "star", Closed = true, Path = Star() };
+                if (ShapeChoice == 6 && CircleChoice == 2) return new Shape { Key = "arrow", Closed = true, Path = Arrow() };
+                return Shapes().First(x => x.Column == "CENTER" && x.Key == KeyList()[ShapeChoice]);
+            }
+
+            static View SingleView()
+            {
+                string key = $"{ShapeChoice}|{CircleChoice}|{PosChoice}|{WidthMm.ToString("R", System.Globalization.CultureInfo.InvariantCulture)}|{NativeOutline.On}|{NativeOutline.CapIndex}|{NativeOutline.JoinIndex}|{LegacyFineGrid}|{AnalyticRoute}|{DashKey()}";
+                if (singleView != null && key == singleKey) return singleView;
+                Shape s = ChosenShape();
+                singleKey = key;
+                // the frame is the initial shape grown by the outline width on every side, NOT the conversion's own bounds:
+                // fitting each conversion made the shape resize when the position switched (a torus read as switching between
+                // its inner and outer circle), while a fixed frame keeps the original in place and shows the outline jump
+                return singleView = Build(new List<VectorPath> { s.Path }, new List<VectorPath> { Make(s, PosChoice, WidthMm) }, new List<Render> { RenderOf(s, PosChoice, WidthMm) }, WidthMm);
+            }
+
+            static View Build(List<VectorPath> bases, List<VectorPath> convs, List<Render> renders, double frame = 0)
+            {
+                var v = new View();
+                var bi = new VectorImage(); var ci = new VectorImage();
+                double x0 = double.MaxValue, y0 = double.MaxValue, x1 = double.MinValue, y1 = double.MinValue;
+                void Grow(VectorPath p)
+                {
+                    if (p.SegmentCount == 0) return;
+                    var b = p.ControlBounds();
+                    x0 = Math.Min(x0, b.Left); x1 = Math.Max(x1, b.Right); y0 = Math.Min(y0, b.Top); y1 = Math.Max(y1, b.Bottom);
+                }
+                foreach (var p in bases)
+                {
+                    bi.Shapes.Add(new VectorShape(p, null, new VectorColor(unchecked((int)0xFF000000)), 1f));
+                    v.BaseNodes.AddRange(NodePoints(p)); Grow(p);
+                }
+                foreach (var p in convs)
+                {
+                    ci.Shapes.Add(new VectorShape(p, new VectorColor(unchecked((int)0xFF000000)), null, 0f));
+                    v.ConvNodes.AddRange(NodePoints(p));
+                    if (frame <= 0) Grow(p);
+                }
+                v.BaseWire = VectorText.Wireframe(bi, unchecked((int)0xFFFFFF00));   // yellow: the initial shapes
+                v.ConvFill = ci;                                                    // black: the converted shapes
+                v.ConvWire = VectorText.Wireframe(ci, unchecked((int)0xFFFFFFFF));  // white: their wireframe
+                // the renderer's own stroke of each shape (the Show stroke layer): strokes first, then the bg masks that keep one half of a ring
+                var rl = new VectorImage();
+                foreach (var r in renders)
+                {
+                    if (!r.Path.IsEmpty) { var sh = new VectorShape { Path = r.Path, Fill = null, Stroke = new VectorColor(StrokeArgb), StrokeWidth = r.Width, Cap = StrokeCap(), Join = StrokeJoin(), Clip = r.Clip, StrokeSide = r.Side, Opacity = StrokeAlpha / 100f }; r.ApplyDash(sh); rl.Shapes.Add(sh); }
+                    if (!r.Open.IsEmpty) { var sh = new VectorShape { Path = r.Open, Fill = null, Stroke = new VectorColor(StrokeArgb), StrokeWidth = r.OpenWidth, Cap = StrokeCap(), Join = StrokeJoin(), Opacity = StrokeAlpha / 100f }; r.ApplyDash(sh); rl.Shapes.Add(sh); }
+                }
+                v.RenderLayer = rl;
+                if (frame > 0) { x0 -= frame; y0 -= frame; x1 += frame; y1 += frame; }
+                v.CX = (x0 + x1) / 2; v.CY = (y0 + y1) / 2; v.BW = x1 - x0; v.BH = y1 - y0;
+                return v;
+            }
+
+            static List<PointF> NodePoints(VectorPath p)
+            {
+                var list = new List<PointF>(); var d = p.Data; int di = 0;
+                foreach (var k in p.Kinds)
+                    switch (k)
+                    {
+                        case VectorPath.K.Move:
+                        case VectorPath.K.Line: list.Add(new PointF(d[di], d[di + 1])); di += 2; break;
+                        case VectorPath.K.Cubic: list.Add(new PointF(d[di + 4], d[di + 5])); di += 6; break;
+                    }
+                return list;
+            }
+
+            public static void Draw(Ctx c)
+            {
+                c.Canvas.ClearBuffer(BgArgb);                                     // background rgb 204 204 204
+                // name the producing implementation every frame: the black layer is a different program per flag, and the
+                // page's title claims the engine's, so an unlabelled view can silently be GDI+ or a hand-tuned grid
+                c.Info(NativeOutline.On ? "converted outline (black): GDI+ GraphicsPath.Widen  -- NOT the engine"
+                       : LegacyFineGrid ? "converted outline (black): engine VectorOffset.Outline on the fine grid (0.04 mm cells, 0.01 mm fit)  -- NOT the bake entry"
+                       : "converted outline (black): engine VectorOffset.Band  -- the same call the SVG bake makes");
+                c.Info($"cap {StrokeCap()} corner {StrokeJoin()} miter limit 4 | analytic route {(AnalyticRoute ? "on" : "OFF - the distance-field fallback rounds every corner and caps every end whatever the selectors say")}");
+                // the dash is a setting now, so the page says which one it is showing: an unlabelled dashed row cannot be told
+                // from a shape that happens to be dashed in the source file
+                c.Info($"dash: {(OneShape ? DashSetting(ChosenShape(), WidthMm) : DashRunNote())}");
+                c.Info(ShowRender ? $"green = the renderer's live stroke over the black at {StrokeAlpha}%: green beyond black is ink the conversion lost"
+                                  : "stroke layer HIDDEN - this view shows only the conversion's own output. Turn on Show stroke to compare the two routes.");
+                var v = OneShape ? SingleView() : TableView();
+                if (v.BW <= 0 || v.BH <= 0) return;
+                double fit = Math.Min(0.95 * c.W / v.BW, 0.95 * c.H / v.BH);     // the drawing fits 95 % of the viewport
+                double s = fit * c.Scale;                                         // zoom: the Scale slider / wheel
+                float ox = c.X, oy = c.Y;                                         // pan: the drawing's centre on the canvas (drag anywhere)
+                var m = System.Numerics.Matrix3x2.CreateTranslation((float)-v.CX, (float)-v.CY) * System.Numerics.Matrix3x2.CreateScale((float)s) * System.Numerics.Matrix3x2.CreateTranslation(ox, oy);
+                var o = new VectorRenderOptions { AA = c.Smooth, FastLines = c.FastLines };
+                v.ConvFill?.Draw(c.Canvas, m, o);                                 // baked outline (black)
+                if (ShowRender && v.RenderLayer != null)                          // the renderer's stroke, at the slider's opacity
+                {
+                    foreach (var sh in v.RenderLayer.Shapes) if (sh.Stroke != null) sh.Opacity = StrokeAlpha / 100f;
+                    v.RenderLayer.Draw(c.Canvas, m, o);
+                }
+                if (ShowStrokeOutline) v.ConvWire?.Draw(c.Canvas, m, o);          // baked wireframe (white)
+                v.Guides?.Draw(c.Canvas, m, o);                                   // column captions and dividers (table)
+                if (ShowBaseWire) v.BaseWire?.Draw(c.Canvas, m, o);               // base wireframe (yellow) is painted last, on top of everything
+                if (ShowBaseNodes) Dots(c, v, s, ox, oy, v.BaseNodes, unchecked((int)0xFFFF3030));
+                if (ShowStrokeNodes) Dots(c, v, s, ox, oy, v.ConvNodes, unchecked((int)0xFF2080FF));
+            }
+
+            static void Dots(Ctx c, View v, double s, float ox, float oy, List<PointF> pts, int colour)
+            {
+                foreach (var p in pts)
+                    c.Canvas.FillRect((float)((p.X - v.CX) * s + ox) - 2, (float)((p.Y - v.CY) * s + oy) - 2, 4, 4, colour);
+            }
+
+            /// <summary>The dash panel both outline pages share: which shapes the pattern applies to, the pattern, its units, its
+            /// phase and the seam rule. One builder for two pages, because they read the same settings and a control that behaves
+            /// differently on one of them is a trap. <paramref name="changed"/> is the caller's cache invalidation.</summary>
+            internal static SpriteGroupBox DashGroup(int x, int y, Action changed)
+            {
+                var g = new SpriteGroupBox { Text = "Dash pattern", Location = new Point(x, y), Size = new Size(296, 172) };
+                var scope = new SpriteCombo { Location = new Point(8, 24), Size = new Size(280, 24) };
+                scope.SetItems(new[] { "Apply to: the wavy blob only", "Apply to: every shape", "Apply to: none (solid)" }, DashScope);
+                var pat = new SpriteTextBox { Text = DashText, Placeholder = "5 3", Location = new Point(8, 54), Size = new Size(170, 24) };
+                var units = new SpriteCombo { Location = new Point(184, 54), Size = new Size(104, 24) };
+                units.SetItems(new[] { "x width", "mm" }, DashInWidths ? 0 : 1);
+                var seam = new SpriteCombo { Location = new Point(8, 84), Size = new Size(170, 24) };
+                seam.SetItems(new[] { "Seam: cut (SVG)", "Seam: wrap" }, (int)DashSeamChoice);
+                var off = new SpriteNumeric { Minimum = 0, Maximum = 1000, Decimals = 2, Step = 0.5m, Unit = "phase", Value = (decimal)DashOffset, Location = new Point(184, 84), Size = new Size(104, 24) };
+                var note = new SpriteLabel
+                {
+                    Style = LabelStyle.Muted, AutoSize = false, WordWrap = true, Location = new Point(8, 114), Size = new Size(280, 52),
+                    Text = "Pattern: alternating on / off lengths; an odd count is read twice, as SVG reads it. x width = multiples of the outline width (Corel scales its dashes with the pen); mm = the path's own units (SVG's stroke-dasharray, which the width does not scale). Seam: what a closed lap does where the pattern meets its own start - cut caps both halves there (at a wide stroke they read as one dash overlapping the first, which is what SVG and WPF draw), wrap joins them into the one dash they are on the loop.",
+                };
+                scope.SelectedIndexChanged += (_, _) => { DashScope = scope.SelectedIndex; changed(); };
+                pat.Committed += (_, _) => { DashText = pat.Text; changed(); };
+                units.SelectedIndexChanged += (_, _) => { DashInWidths = units.SelectedIndex == 0; changed(); };
+                seam.SelectedIndexChanged += (_, _) => { DashSeamChoice = (VectorDashSeam)seam.SelectedIndex; changed(); };
+                off.ValueChanged += (_, _) => { DashOffset = (float)off.Value; changed(); };
+                g.Controls.Add(scope); g.Controls.Add(pat); g.Controls.Add(units); g.Controls.Add(seam); g.Controls.Add(off); g.Controls.Add(note);
+                // the group follows the panel's width, and its two-column rows follow the group: the pattern field and the seam
+                // combo take three fifths, the units and phase fields the rest
+                void Fit()
+                {
+                    int w = Math.Max(120, g.ClientSize.Width - 16), two = Math.Max(60, w * 3 / 5), gap = 8;
+                    scope.Width = note.Width = w;
+                    pat.Width = seam.Width = two;
+                    units.Width = off.Width = Math.Max(40, w - two - gap);
+                    units.Left = off.Left = 8 + two + gap;
+                }
+                g.Resize += (_, _) => Fit();
+                Fit();
+                return g;
+            }
+
+            /// <summary>Test tab settings: the Table / One shape rocker, then one panel per mode (the flags are in both).</summary>
+            public static Control BuildSettings()
+            {
+                var root = new SpritePanel { Style = PanelStyle.Flat, Padding = Padding.Empty, Dock = DockStyle.Top, Height = 950 };
+                var flags = new List<(SpriteToggle T, Func<bool> Get)>();
+                SpriteToggle Box(Control host, int y, string text, Func<bool> get, Action<bool> set)
+                {
+                    var t = new SpriteToggle { Text = text, Style = ToggleStyle.CheckBox, Checked = get(), Size = new Size(280, 24), Location = new Point(8, y) };
+                    t.CheckedChanged += (_, _) => set(t.Checked);
+                    host.Controls.Add(t); flags.Add((t, get));
+                    return t;
+                }
+                var opacities = new List<SpriteSlider>();
+                void Flags(Control host, int y)
+                {
+                    // a running cursor: the rows below are the switches that decide which program drew the black layer, and
+                    // they must not overlap the opacity slider or the note under them
+                    int yy = y;
+                    void Row(string text, Func<bool> get, Action<bool> set, int gap = 28) { Box(host, yy, text, get, set); yy += gap; }
+                    Row("Show base wireframe", () => ShowBaseWire, b => ShowBaseWire = b);
+                    Row("Show stroke outline", () => ShowStrokeOutline, b => ShowStrokeOutline = b);
+                    Row("Show base nodes", () => ShowBaseNodes, b => ShowBaseNodes = b);
+                    Row("Show stroke nodes", () => ShowStrokeNodes, b => ShowStrokeNodes = b);
+                    Row("Show stroke (renderer)", () => ShowRender, b => ShowRender = b);
+                    Row("Analytic route (off: grid fallback)", () => AnalyticRoute,
+                        b => { AnalyticRoute = b; tableView = null; singleView = null; });
+                    Row("Production bake entry (off: fine grid)", () => !LegacyFineGrid,
+                        b => { LegacyFineGrid = !b; tableView = null; singleView = null; });
+                    // reference flag: outline conversion through System.Drawing GraphicsPath.Widen (NativeOutline.cs); rebuilds the views
+                    Row("Native outline (GDI+ Widen)", () => NativeOutline.On, b => { NativeOutline.On = b; tableView = null; singleView = null; });
+                    var cap = new SpriteCombo { Location = new Point(8, yy + 2), Size = new Size(280, 24) };
+                    cap.SetItems(new[] { "Cap: flat", "Cap: square", "Cap: round" }, NativeOutline.CapIndex);
+                    cap.SelectedIndexChanged += (_, _) => { NativeOutline.CapIndex = cap.SelectedIndex; tableView = null; singleView = null; };
+                    host.Controls.Add(cap);
+                    var join = new SpriteCombo { Location = new Point(8, yy + 34), Size = new Size(280, 24) };
+                    join.SetItems(new[] { "Corner: miter", "Corner: bevel", "Corner: round" }, NativeOutline.JoinIndex);
+                    join.SelectedIndexChanged += (_, _) => { NativeOutline.JoinIndex = join.SelectedIndex; tableView = null; singleView = null; };
+                    host.Controls.Add(join);
+                    var op = new SpriteSlider { Text = "Stroke opacity", Minimum = 0, Maximum = 100, Value = StrokeAlpha, Step = 1, Ticks = 4, ResetValue = 50, Size = new Size(280, 50), Location = new Point(8, yy + 64) };
+                    op.ValueChanged += (_, _) => StrokeAlpha = (int)op.Value;
+                    host.Controls.Add(op); opacities.Add(op);
+                }
+
+                var rocker = new SpriteToggle { Style = ToggleStyle.Rocker, OnText = "ONE SHAPE", OffText = "TABLE", Checked = OneShape, Size = new Size(280, 40), Location = new Point(8, 6) };
+
+                var table = new SpriteGroupBox { Text = "Table", Location = new Point(4, 52), Size = new Size(296, 434) };
+                Flags(table, 26);
+                var note = new SpriteLabel { Style = LabelStyle.Muted, AutoSize = false, WordWrap = true, Location = new Point(8, 376), Size = new Size(280, 52), Text = "Every shape in its column: centre 2 mm, outside 1 mm, inside 1 mm. Open shapes are centred in every column. The switches above decide which program drew the black layer; the info line names it." };
+                table.Controls.Add(note);
+
+                var one = new SpriteGroupBox { Text = "One shape", Location = new Point(4, 52), Size = new Size(296, 552) };
+                var shape = new SpriteCombo { Location = new Point(8, 26), Size = new Size(280, 24) };
+                shape.SetItems(NameList(), ShapeChoice);
+                var circle = new SpriteCombo { Location = new Point(8, 56), Size = new Size(280, 24), Visible = ShapeChoice == 6 };
+                circle.SetItems(CircleExtras, CircleChoice);
+                shape.SelectedIndexChanged += (_, _) => { ShapeChoice = shape.SelectedIndex; circle.Visible = ShapeChoice == 6; };
+                circle.SelectedIndexChanged += (_, _) => CircleChoice = circle.SelectedIndex;
+                one.Controls.Add(shape); one.Controls.Add(circle);
+                for (int i = 0; i < 3; i++)
+                {
+                    int k = i;
+                    var r = new SpriteRadio { Text = Positions[i], GroupName = "pos", Checked = PosChoice == i, Size = new Size(92, 24), Location = new Point(8 + i * 94, 88) };
+                    r.CheckedChanged += (_, _) => { if (r.Checked) PosChoice = k; };
+                    one.Controls.Add(r);
+                }
+                var width = new SpriteSlider { Text = "Outline width (0.1 mm)", Minimum = 1, Maximum = 100, Value = (int)Math.Round(WidthMm * 10), Step = 1, Ticks = 5, ResetValue = 20, Size = new Size(280, 50), Location = new Point(8, 118) };
+                width.ValueChanged += (_, _) => WidthMm = (double)width.Value / 10.0;
+                one.Controls.Add(width);
+                Flags(one, 176);
+
+                void ShowMode() { table.Visible = !OneShape; one.Visible = OneShape; foreach (var f in flags) f.T.Checked = f.Get(); foreach (var o in opacities) o.Value = StrokeAlpha; }
+                rocker.CheckedChanged += (_, _) => { OneShape = rocker.Checked; ShowMode(); };
+                ShowMode();
+
+                // the dash is shared by both modes and by the Stroke check page, so it sits under them rather than inside either
+                var dash = DashGroup(4, 612, () => { tableView = null; singleView = null; });
+
+                // the file group is shared too, and it sits last: loading a file replaces the shape list, so it must select the
+                // first loaded entry in the combo above (and switch to ONE SHAPE, the table's columns come from the embedded SVG)
+                var files = FileGroup(4, 792, ExportConversionSvg, () =>
+                {
+                    ShapeChoice = FirstLoadedIndex;
+                    shape.SetItems(NameList(), ShapeChoice);
+                    circle.Visible = ShapeChoice == 6;
+                    OneShape = rocker.Checked = true;
+                    ResetViews();
+                },
+                () => $"the conversion of \"{ChosenShape().Key}\" at {Positions[PosChoice].ToLowerInvariant()}, {WidthMm.ToString("0.##", System.Globalization.CultureInfo.InvariantCulture)} mm");
+
+                // the panel fits its width: the rocker and both groups follow the panel, their rows follow the group
+                void FitWidths()
+                {
+                    int w = root.ClientSize.Width;
+                    if (w <= 0) return;
+                    rocker.Width = Math.Max(120, w - 16);
+                    table.Width = one.Width = dash.Width = files.Width = Math.Max(120, w - 8);
+                    foreach (var g in new Control[] { table, one })
+                        foreach (Control c in g.Controls)
+                            if (c is not SpriteRadio) c.Width = Math.Max(60, g.ClientSize.Width - 16);
+                }
+                root.Controls.Add(rocker); root.Controls.Add(table); root.Controls.Add(one); root.Controls.Add(dash); root.Controls.Add(files);
+                root.Resize += (_, _) => FitWidths();
+                FitWidths();
+                return root;
+            }
+        }
+
+        /// <summary>Stroke check: the renderer's own stroke over the original curves. No outline conversion: every shape is a
+        /// VectorShape stroke (width, cap and corner from the Test tab). Outside / Inside use the engine's own clip, as the
+        /// VectorText outline positions do: a stroke of twice the width, clipped to the exterior / interior of the closed
+        /// contours. Open pieces (the OBD bar, corners, lines) are always centred at the full width. The wireframe of the
+        /// original curves is drawn on top. Native comparison (Windows): the same geometry drawn with GDI+, in orange. The
+        /// view is a mix of the two (the Mix slider), or their per-pixel difference (the Difference flag, or the middle
+        /// button held); holding the right button shows the native stroke alone.</summary>
+        internal static class StrokeCheckDemo
+        {
+            const int BgArgb = unchecked((int)0xFFCCCCCC), StrokeArgb = unchecked((int)0xFF1E88FF), NativeArgb = unchecked((int)0xFFFF8000);
+            const int WireArgb = unchecked((int)0xFFFFFF00), BlackArgb = unchecked((int)0xFF000000), NodeArgb = unchecked((int)0xFFFF3030);
+            static readonly string[] Positions = { "Center", "Outside", "Inside" };
+
+            public static int ShapeChoice, CircleChoice, PosChoice;         // PosChoice: 0 Center, 1 Outside, 2 Inside
+            public static double WidthMm = 2;
+            public static VectorCap Cap = VectorCap.Square;                 // Corel's reference: square caps, mitred corners
+            public static VectorJoin Join = VectorJoin.Miter;
+            public static bool ShowWire = true, ShowNodes;
+            public static int MixPct;                                       // 0 = our stroke only, 100 = the native stroke only
+            public static bool DiffFlag;                                    // the difference view replaces the mix (the middle button held does too)
+
+            /// <summary>What is drawn for one shape: the stroke layer, the same strokes as native items, the wireframe of the
+            /// original curves, and their nodes.</summary>
+            sealed class Scene
+            {
+                public VectorImage Strokes = new VectorImage(), Wire = new VectorImage();
+                public List<NativeStroke.Item> Native = new List<NativeStroke.Item>();
+                public List<PointF> Nodes = new List<PointF>();
+                public double CX, CY, BW, BH;
+            }
+
+            static Scene? scene; static string sceneKey = "";
+            static int[]? nativePixels; static string nativeKey = "", nativeError = "";
+
+            /// <summary>This page has its own shape and circle selectors, so it picks against its own fields: the shared
+            /// <see cref="OutlineConvertDemo.ChosenShape"/> reads the other page's. Both read the same grown key list, so a
+            /// shape loaded on either page is selectable on both.</summary>
+            static OutlineConvertDemo.Shape Chosen()
+            {
+                if (ShapeChoice == 6 && CircleChoice == 1) return new OutlineConvertDemo.Shape { Key = "star", Closed = true, Path = OutlineConvertDemo.Star() };
+                if (ShapeChoice == 6 && CircleChoice == 2) return new OutlineConvertDemo.Shape { Key = "arrow", Closed = true, Path = OutlineConvertDemo.Arrow() };
+                return OutlineConvertDemo.Shapes().First(x => x.Column == "CENTER" && x.Key == OutlineConvertDemo.KeyList()[ShapeChoice]);
+            }
+
+            /// <summary>The stroked picture this page draws, as a vector image in mm: what "Export to SVG" writes.</summary>
+            internal static VectorImage StrokeLayer() => Current().Strokes;
+
+            /// <summary>Export the stroke layer (not the conversion) so the two pages' exports mean what each page shows.</summary>
+            internal static string? ExportStrokeSvg(string file) => OutlineConvertDemo.SaveSvgPx(Current().Strokes.Clone(), file);
+
+            static Scene Current()
+            {
+                string key = $"{ShapeChoice}|{CircleChoice}|{PosChoice}|{WidthMm:0.###}|{(int)Cap}|{(int)Join}|{OutlineConvertDemo.DashKey()}";
+                if (scene != null && key == sceneKey) return scene;
+                sceneKey = key;
+                return scene = Build(Chosen(), PosChoice, WidthMm, Cap, Join);
+            }
+
+            /// <summary>Debug dump: create a file named dump_strokes.flag next to the exe; each stroke-layer build then
+            /// writes the exact paths it strokes (closed and open pieces, in mm) to stroke_dump/ as .txt and .svg.</summary>
+            static bool DumpEnabled() => File.Exists(Path.Combine(AppContext.BaseDirectory, "dump_strokes.flag"));
+
+            static void DumpStroke(VectorPath closed, float closedWidth, VectorPath open, float openWidth,
+                                   string key, int pos, double w, VectorCap cap, VectorJoin join)
+            {
+                var inv = System.Globalization.CultureInfo.InvariantCulture;
+                string N(double v) => v.ToString("0.########", inv);
+                string dir = Path.Combine(AppContext.BaseDirectory, "stroke_dump");
+                Directory.CreateDirectory(dir);
+                string safe = System.Text.RegularExpressions.Regex.Replace(key, "[^A-Za-z0-9]+", "_");
+                string stem = $"{safe}_pos{pos}_w{N(w)}_{cap}_{join}_{DateTime.Now:HHmmss}";
+                var txt = new System.Text.StringBuilder();
+                var pathData = new System.Text.StringBuilder();
+                double x0 = double.MaxValue, y0 = double.MaxValue, x1 = double.MinValue, y1 = double.MinValue;
+                void Pt(double x, double y) { x0 = Math.Min(x0, x); y0 = Math.Min(y0, y); x1 = Math.Max(x1, x); y1 = Math.Max(y1, y); }
+                void Emit(string label, VectorPath p, float width)
+                {
+                    txt.AppendLine(System.FormattableString.Invariant($"# {label}: width_mm {N(width)} cap {cap} join {join} miterlimit 4"));
+                    int di = 0; var d = p.Data;
+                    foreach (var k in p.Kinds)
+                    {
+                        switch (k)
+                        {
+                            case VectorPath.K.Move:
+                                txt.AppendLine(System.FormattableString.Invariant($"{label} M {N(d[di])} {N(d[di + 1])}"));
+                                pathData.Append(System.FormattableString.Invariant($"M{N(d[di])} {N(d[di + 1])}")); Pt(d[di], d[di + 1]); di += 2; break;
+                            case VectorPath.K.Line:
+                                txt.AppendLine(System.FormattableString.Invariant($"{label} L {N(d[di])} {N(d[di + 1])}"));
+                                pathData.Append(System.FormattableString.Invariant($"L{N(d[di])} {N(d[di + 1])}")); Pt(d[di], d[di + 1]); di += 2; break;
+                            case VectorPath.K.Cubic:
+                                txt.AppendLine(System.FormattableString.Invariant($"{label} C {N(d[di])} {N(d[di + 1])} {N(d[di + 2])} {N(d[di + 3])} {N(d[di + 4])} {N(d[di + 5])}"));
+                                pathData.Append(System.FormattableString.Invariant($"C{N(d[di])} {N(d[di + 1])} {N(d[di + 2])} {N(d[di + 3])} {N(d[di + 4])} {N(d[di + 5])}"));
+                                Pt(d[di], d[di + 1]); Pt(d[di + 2], d[di + 3]); Pt(d[di + 4], d[di + 5]); di += 6; break;
+                            default:
+                                txt.AppendLine(System.FormattableString.Invariant($"{label} Z"));
+                                pathData.Append('Z'); break;
+                        }
+                    }
+                    pathData.Append(' ');
+                }
+                if (closed != null && !closed.IsEmpty) Emit("closed", closed, closedWidth);
+                if (open != null && !open.IsEmpty) Emit("open", open, openWidth);
+                File.WriteAllText(Path.Combine(dir, stem + ".txt"), txt.ToString(), System.Text.Encoding.UTF8);
+                double pad = 2 + Math.Max(closedWidth, openWidth);
+                if (x0 > x1) { x0 = y0 = 0; x1 = y1 = 1; }
+                string svg =
+                    $"<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"{N(x1 - x0 + 2 * pad)}mm\" height=\"{N(y1 - y0 + 2 * pad)}mm\" " +
+                    $"viewBox=\"{N(x0 - pad)} {N(y0 - pad)} {N(x1 - x0 + 2 * pad)} {N(y1 - y0 + 2 * pad)}\">\n" +
+                    $"  <!-- {key}, pos {pos}, width_mm {N(w)}, cap {cap}, join {join}, miterlimit 4. Coordinates in mm (as stroked). -->\n" +
+                    (closed != null && !closed.IsEmpty ? $"  <path id=\"closed\" fill=\"none\" stroke=\"#000\" stroke-width=\"{N(closedWidth)}\" stroke-linecap=\"{cap.ToString().ToLowerInvariant()}\" stroke-linejoin=\"{join.ToString().ToLowerInvariant()}\" stroke-miterlimit=\"4\" d=\"{pathData}\"/>\n" : "") +
+                    "</svg>\n";
+                File.WriteAllText(Path.Combine(dir, stem + ".svg"), svg, System.Text.Encoding.UTF8);
+            }
+
+            static Scene Build(OutlineConvertDemo.Shape s, int pos, double w, VectorCap cap, VectorJoin join)
+            {
+                var sc = new Scene();
+                var r = OutlineConvertDemo.RenderOf(s, pos, w);
+                if (DumpEnabled())
+                {
+                    try { DumpStroke(r.Path, r.Width, r.Open, r.OpenWidth, s.Key, pos, w, cap, join); }
+                    catch (Exception ex)   // the dump is a debug aid: it must never break the page
+                    {
+                        try { File.WriteAllText(Path.Combine(AppContext.BaseDirectory, "stroke_dump_error.txt"), ex.ToString()); } catch (IOException) { }
+                    }
+                }
+                if (!r.Path.IsEmpty)
+                {
+                    var sh = new VectorShape(r.Path, null, new VectorColor(StrokeArgb), r.Width) { Cap = cap, Join = join, MiterLimit = 4f, Clip = r.Clip, StrokeSide = r.Side };
+                    r.ApplyDash(sh);
+                    sc.Strokes.Shapes.Add(sh);
+                    sc.Native.Add(new NativeStroke.Item { Path = r.Path, Width = r.Width, Dash = r.Dash, Clip = r.Clip });
+                }
+                if (!r.Open.IsEmpty)
+                {
+                    var sh = new VectorShape(r.Open, null, new VectorColor(StrokeArgb), r.OpenWidth) { Cap = cap, Join = join, MiterLimit = 4f };
+                    r.ApplyDash(sh);
+                    sc.Strokes.Shapes.Add(sh);
+                    sc.Native.Add(new NativeStroke.Item { Path = r.Open, Width = r.OpenWidth, Dash = r.Dash });
+                }
+
+                var baseImg = new VectorImage();
+                baseImg.Shapes.Add(new VectorShape(s.Path, null, new VectorColor(BlackArgb), 1f));
+                sc.Wire = VectorText.Wireframe(baseImg, WireArgb);
+                sc.Nodes = NodePoints(s.Path);
+
+                var b = s.Path.ControlBounds();
+                sc.CX = (b.Left + b.Right) / 2; sc.CY = (b.Top + b.Bottom) / 2;
+                sc.BW = Math.Abs(b.Right - b.Left) + 2 * w; sc.BH = Math.Abs(b.Bottom - b.Top) + 2 * w;   // room for the outside half
+                return sc;
+            }
+
+            static List<PointF> NodePoints(VectorPath p)
+            {
+                var list = new List<PointF>(); var d = p.Data; int di = 0;
+                foreach (var k in p.Kinds)
+                    switch (k)
+                    {
+                        case VectorPath.K.Move:
+                        case VectorPath.K.Line: list.Add(new PointF(d[di], d[di + 1])); di += 2; break;
+                        case VectorPath.K.Cubic: list.Add(new PointF(d[di + 4], d[di + 5])); di += 6; break;
+                    }
+                return list;
+            }
+
+            /// <summary>The native (GDI+) stroke of the same scene, at the same view, as one opaque frame; null when GDI+ is not
+            /// available here (then <see cref="nativeError"/> says why). Cached until the scene or the view changes.</summary>
+            static int[]? NativeFor(Ctx c, Scene sc, double s, double ox, double oy)
+            {
+                int w = c.Canvas.Width, h = c.Canvas.Height;
+                string key = $"{sceneKey}|{w}x{h}|{s:R}|{ox:R}|{oy:R}|{c.Smooth}";
+                if (key == nativeKey) return nativePixels;
+                nativeKey = key;
+                try { nativePixels = NativeStroke.Render(w, h, s, ox, oy, sc.CX, sc.CY, sc.Native, Cap, Join, c.Smooth, NativeArgb, BgArgb); nativeError = ""; }
+                catch (Exception ex) { nativePixels = null; nativeError = ex.GetType().Name + ": " + ex.Message; }
+                return nativePixels;
+            }
+
+            static int Lerp(int a, int b, int pct) => (a * (100 - pct) + b * pct + 50) / 100;
+            static int Diff(int a, int b) => Math.Abs(a - b);
+
+            /// <summary>Writes the view into the canvas: mode 0 = native only, 1 = |ours - native| per channel, 2 = mix.</summary>
+            static void Blend(Span<int> px, int[] nat, int mode, int pct)
+            {
+                int n = Math.Min(px.Length, nat.Length);
+                for (int i = 0; i < n; i++)
+                {
+                    int o = px[i], q = nat[i];
+                    if (mode == 0) { px[i] = q; continue; }
+                    if (mode == 1)
+                        px[i] = unchecked((int)0xFF000000) | (Diff((o >> 16) & 255, (q >> 16) & 255) << 16) | (Diff((o >> 8) & 255, (q >> 8) & 255) << 8) | Diff(o & 255, q & 255);
+                    else
+                        px[i] = unchecked((int)0xFF000000) | (Lerp((o >> 16) & 255, (q >> 16) & 255, pct) << 16) | (Lerp((o >> 8) & 255, (q >> 8) & 255, pct) << 8) | Lerp(o & 255, q & 255, pct);
+                }
+            }
+
+            public static void Draw(Ctx c)
+            {
+                c.Canvas.ClearBuffer(BgArgb);                                       // background rgb 204 204 204
+                var sc = Current();
+                if (sc.BW <= 0 || sc.BH <= 0) return;
+                double fit = Math.Min(0.95 * c.W / sc.BW, 0.95 * c.H / sc.BH);       // the shape fits 95 % of the viewport
+                double s = fit * c.Scale;                                             // zoom: the Scale slider / wheel
+                float ox = c.X, oy = c.Y;                                             // pan: drag anywhere
+                var m = System.Numerics.Matrix3x2.CreateTranslation((float)-sc.CX, (float)-sc.CY) * System.Numerics.Matrix3x2.CreateScale((float)s) * System.Numerics.Matrix3x2.CreateTranslation(ox, oy);
+                var o = new VectorRenderOptions { AA = c.Smooth, FastLines = c.FastLines };
+                sc.Strokes.Draw(c.Canvas, m, o);                                      // the renderer's strokes (blue)
+
+                // what is shown: right button held = native alone; middle button held or the Difference flag = |ours - native|;
+                // otherwise the mix. The native layer is only rendered when one of the three needs it.
+                bool right = c.HoldRight, diff = !right && (c.HoldMiddle || DiffFlag), mix = !right && !diff && MixPct > 0;
+                string view;
+                if (right) view = "showing: native (GDI+) only - right button held";
+                else if (diff) view = c.HoldMiddle ? "showing: difference |ours - native| - middle button held" : "showing: difference |ours - native| (flag on)";
+                else if (mix) view = $"showing: mix, {MixPct}% native (0 = ours, 100 = native)";
+                else view = "showing: ours only (hold right = native, middle = difference)";
+                c.Info("blue = our stroke (the renderer's own)     orange = native GDI+ stroke");
+                c.Info($"dash: {OutlineConvertDemo.DashSetting(Chosen(), WidthMm)}   (GDI+ takes the pattern in pen widths and has no seam rule: it is the outlier at the seam, not the reference)");
+                if (PosChoice != 0 && Cap != VectorCap.Butt && OutlineConvertDemo.RenderOf(Chosen(), PosChoice, WidthMm).Dash != null)
+                    c.Info("at inside / outside the engine caps a dash on the band's centre line, at half the doubled pen's radius; GDI+ cuts its dashes inside that pen and cannot, so here it is the outlier at the dash ends too");
+                c.Info(view);
+                if (right || diff || mix)
+                {
+                    var nat = NativeFor(c, sc, s, ox, oy);
+                    if (nat != null)
+                    {
+                        // diagnostic: how many pixels GDI+ actually painted (background = nothing drawn)
+                        int painted = 0; foreach (int px in nat) if (px != (unchecked((int)0xFF000000) | BgArgb)) painted++;
+                        c.Info($"native layer: {painted} px painted by GDI+");
+                        if (painted == 0)
+                        {
+                            // a reference that painted nothing cannot confirm anything: say so on the canvas, not only in a line
+                            c.Canvas.FillRect(6, 6, 300, 22, unchecked((int)0xFF0000D0));
+                            c.Label(10, 8, "NO REFERENCE: GDI+ painted 0 px - this view is ours only");
+                            c.Info("NO REFERENCE: GDI+ painted 0 px, the comparison is meaningless");
+                        }
+                        Blend(c.Canvas.Pixels, nat, right ? 0 : diff ? 1 : 2, MixPct);
+                    }
+                    else
+                    {
+                        // the reference failed to build: the difference / mix view would silently be our own picture, so banner it
+                        c.Canvas.FillRect(6, 6, 340, 22, unchecked((int)0xFF0000D0));
+                        c.Label(10, 8, "NO REFERENCE: native stroke failed - view is ours only");
+                        c.Info("native stroke not available here: " + nativeError);
+                    }
+                }
+
+                if (ShowWire) sc.Wire.Draw(c.Canvas, m, o);                           // the original curves' wireframe, on top
+                if (ShowNodes)
+                    foreach (var p in sc.Nodes)
+                        c.Canvas.FillRect((float)((p.X - sc.CX) * s + ox) - 2, (float)((p.Y - sc.CY) * s + oy) - 2, 4, 4, NodeArgb);
+            }
+
+            /// <summary>Test tab settings: the shape, the outline position and width, the cap and corner, what to show, and the
+            /// native comparison (mix or difference).</summary>
+            public static Control BuildSettings()
+            {
+                var root = new SpritePanel { Style = PanelStyle.Flat, Padding = Padding.Empty, Dock = DockStyle.Top, Height = 914 };
+
+                var shape = new SpriteGroupBox { Text = "Shape", Location = new Point(4, 6), Size = new Size(296, 124) };
+                var names = new SpriteCombo { Location = new Point(8, 26), Size = new Size(280, 24) };
+                names.SetItems(OutlineConvertDemo.NameList(), ShapeChoice);
+                var circle = new SpriteCombo { Location = new Point(8, 56), Size = new Size(280, 24), Visible = ShapeChoice == 6 };
+                circle.SetItems(OutlineConvertDemo.CircleExtras, CircleChoice);
+                names.SelectedIndexChanged += (_, _) => { ShapeChoice = names.SelectedIndex; circle.Visible = ShapeChoice == 6; };
+                circle.SelectedIndexChanged += (_, _) => CircleChoice = circle.SelectedIndex;
+                shape.Controls.Add(names); shape.Controls.Add(circle);
+                var posRadios = new SpriteRadio[3];
+                for (int i = 0; i < 3; i++)
+                {
+                    int k = i;
+                    var r = new SpriteRadio { Text = Positions[i], GroupName = "strokepos", Checked = PosChoice == i, Size = new Size(92, 24), Location = new Point(8 + i * 94, 88) };
+                    r.CheckedChanged += (_, _) => { if (r.Checked) PosChoice = k; };
+                    posRadios[i] = r;
+                    shape.Controls.Add(r);
+                }
+
+                var stroke = new SpriteGroupBox { Text = "Stroke", Location = new Point(4, 138), Size = new Size(296, 150) };
+                var width = new SpriteSlider { Text = "Outline width (0.1 mm)", Minimum = 1, Maximum = 100, Value = (int)Math.Round(WidthMm * 10), Step = 1, Ticks = 5, ResetValue = 20, Size = new Size(280, 50), Location = new Point(8, 26) };
+                width.ValueChanged += (_, _) => WidthMm = (double)width.Value / 10.0;
+                var cap = new SpriteCombo { Location = new Point(8, 84), Size = new Size(280, 24) };
+                cap.SetItems(new[] { "Cap: butt", "Cap: round", "Cap: square" }, (int)Cap);
+                cap.SelectedIndexChanged += (_, _) => Cap = (VectorCap)cap.SelectedIndex;
+                var join = new SpriteCombo { Location = new Point(8, 116), Size = new Size(280, 24) };
+                join.SetItems(new[] { "Corner: miter", "Corner: round", "Corner: bevel" }, (int)Join);
+                join.SelectedIndexChanged += (_, _) => Join = (VectorJoin)join.SelectedIndex;
+                stroke.Controls.Add(width); stroke.Controls.Add(cap); stroke.Controls.Add(join);
+
+                var show = new SpriteGroupBox { Text = "Show", Location = new Point(4, 296), Size = new Size(296, 88) };
+                var wire = new SpriteToggle { Text = "Wireframe of the original curves", Style = ToggleStyle.CheckBox, Checked = ShowWire, Size = new Size(280, 24), Location = new Point(8, 26) };
+                wire.CheckedChanged += (_, _) => ShowWire = wire.Checked;
+                var nodes = new SpriteToggle { Text = "Nodes of the original curves", Style = ToggleStyle.CheckBox, Checked = ShowNodes, Size = new Size(280, 24), Location = new Point(8, 54) };
+                nodes.CheckedChanged += (_, _) => ShowNodes = nodes.Checked;
+                show.Controls.Add(wire); show.Controls.Add(nodes);
+
+                var compare = new SpriteGroupBox { Text = "Native comparison", Location = new Point(4, 392), Size = new Size(296, 176) };
+                var mix = new SpriteSlider { Text = "Mix: ours (0) to native (100), %", Minimum = 0, Maximum = 100, Value = MixPct, Step = 1, Ticks = 5, ResetValue = 0, Size = new Size(280, 50), Location = new Point(8, 26) };
+                mix.ValueChanged += (_, _) => MixPct = (int)mix.Value;
+                var diffFlag = new SpriteToggle { Text = "Difference view (replaces the mix)", Style = ToggleStyle.CheckBox, Checked = DiffFlag, Size = new Size(280, 24), Location = new Point(8, 82) };
+                diffFlag.CheckedChanged += (_, _) => DiffFlag = diffFlag.Checked;
+                var hint = new SpriteLabel { Style = LabelStyle.Muted, AutoSize = false, WordWrap = true, Location = new Point(8, 110), Size = new Size(280, 60),
+                    Text = "Blue = our stroke, orange = native GDI+ stroke. Hold the right button: native only. Hold the middle button: difference." };
+                compare.Controls.Add(mix); compare.Controls.Add(diffFlag); compare.Controls.Add(hint);
+
+                root.Controls.Add(shape); root.Controls.Add(stroke); root.Controls.Add(show); root.Controls.Add(compare);
+                // the same dash setting the Outline Convert To Object page edits: one pair of statics, so the two pages cannot
+                // drift into showing different dashes for the same shape
+                var dash = OutlineConvertDemo.DashGroup(4, 576, () => scene = null);
+                root.Controls.Add(dash);
+                // the same file panel the other page uses, with this page's own export: what it writes is the live stroke, not the
+                // conversion, because that is what this page draws
+                var files = OutlineConvertDemo.FileGroup(4, 756, ExportStrokeSvg, () =>
+                {
+                    ShapeChoice = OutlineConvertDemo.FirstLoadedIndex;
+                    names.SetItems(OutlineConvertDemo.NameList(), ShapeChoice);
+                    circle.Visible = ShapeChoice == 6;
+                    scene = null;
+                },
+                () => $"the live stroke of \"{Chosen().Key}\" at {Positions[PosChoice].ToLowerInvariant()}, {WidthMm.ToString("0.##", System.Globalization.CultureInfo.InvariantCulture)} mm, {Cap.ToString().ToLowerInvariant()} cap, {Join.ToString().ToLowerInvariant()} corner");
+                root.Controls.Add(files);
+                // the groups follow the panel's width; the position radios share the Shape group's client width
+                void FitWidths()
+                {
+                    int w = root.ClientSize.Width;
+                    if (w <= 0) return;
+                    dash.Width = files.Width = Math.Max(120, w - 8);
+                    foreach (var g in new Control[] { shape, stroke, show, compare })
+                    {
+                        g.Width = Math.Max(120, w - 8);
+                        foreach (Control c in g.Controls)
+                            if (c is not SpriteRadio) c.Width = Math.Max(60, g.ClientSize.Width - 16);
+                    }
+                    int rw = Math.Max(40, (shape.ClientSize.Width - 16) / 3);
+                    for (int i = 0; i < posRadios.Length; i++)
+                    {
+                        posRadios[i].Size = new Size(rw, 24);
+                        posRadios[i].Location = new Point(8 + i * rw, 88);
+                    }
+                }
+                root.Resize += (_, _) => FitWidths();
+                FitWidths();
+                return root;
             }
         }
 

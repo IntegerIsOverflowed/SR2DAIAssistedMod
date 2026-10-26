@@ -222,6 +222,13 @@ namespace Sr2d64CSport
             }
             var shape = MakeShape(path, st, c, m, clip);
             if (shape == null) return;
+            // SR2D's own marker of an Inside / Outside outline: which side of the path its band lies on (a private attribute other
+            // viewers ignore, like data-visible-area). Such an outline is drawn by stroking the path at twice the band depth and
+            // clipping it to that side, so a reader that drops the attribute still draws the same band - but it would cap a dash
+            // with the doubled pen instead of the band, and the ends would reach twice as far past the dash.
+            string? sideAttr = (string?)e.Attribute("data-stroke-side");
+            if (sideAttr == "inside") shape.StrokeSide = VectorOutlinePosition.Inside;
+            else if (sideAttr == "outside") shape.StrokeSide = VectorOutlinePosition.Outside;
             if (maskClip != null && maskItems != null)
             {   // the mask (as an alpha clip) joins the element's clip-path; the bind re-derives it when the animation seeks
                 shape.Clip = shape.Clip == null ? maskClip : Merge(shape.Clip, maskClip);

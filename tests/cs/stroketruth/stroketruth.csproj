@@ -1,0 +1,43 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!--
+    Stroke truth harness: every case is rendered four ways and measured against an analytic truth.
+      truth  - per-pixel membership of the stroke region, built from the geometric definition of the caps/joins
+               (convex primitives + exact disc sectors + exact winding), supersampled; shares no code with any stroker
+      A      - the vector renderer's stroke (cs/Vector.Render.cs VectorRender.Stroke)
+      B      - the Sprite stroke API (cs/Sprite.Stroke.cs BuildStroke)
+      gdiplus- System.Drawing Pen / GraphicsPath (.NET native, what the user compares against)
+      wpf    - System.Windows.Media Pen (a second, independent Microsoft stroker)
+    Compiles the engine sources the same way the demo does, so internal hooks are reachable.
+  -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <UseWindowsForms>true</UseWindowsForms>
+    <UseWPF>true</UseWPF>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <Nullable>disable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <PlatformTarget>x64</PlatformTarget>
+    <Platforms>x64</Platforms>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+    <EnableNETAnalyzers>false</EnableNETAnalyzers>
+    <RootNamespace>Sr2d64CSport</RootNamespace>
+    <AssemblyName>stroketruth</AssemblyName>
+    <EnableWindowsTargeting>true</EnableWindowsTargeting>
+    <NoWarn>CA1416;CS0108;CS8618;CS0649;CS0414;CS0169;CS0162;CS0219;CS8600;CS8602;CS8603;CS8604;CS8625;CS0067;CS0618;CS8981</NoWarn>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="../../../cs/**/*.cs" />
+    <Compile Include="Program.cs;Fixtures.cs;Truth.cs;Refs.cs" />
+  </ItemGroup>
+  <ItemGroup>
+    <PackageReference Include="System.Drawing.Common" Version="10.0.0" />
+  </ItemGroup>
+  <ItemGroup>
+    <!-- the native rasteriser the engine P/Invokes; copied next to the exe so the harness runs standalone -->
+    <None Include="../../../native/bin/x64/SR2D64.dll" Condition="Exists('../../../native/bin/x64/SR2D64.dll')">
+      <Link>SR2D64.dll</Link>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+  </ItemGroup>
+</Project>

@@ -108,8 +108,17 @@ where dotnet >nul 2>nul
 if errorlevel 1 goto :no_dotnet
 dotnet build "%ROOT%\demo\SR2DDemo.csproj" -c Release -nologo -v m
 if errorlevel 1 goto :bench_failed
-rem locate the output exe (bin\x64\Release\<tfm>\ or bin\Release\<tfm>\)
-for /f "delims=" %%f in ('dir /b /s "%ROOT%\demo\bin\SR2DDemo.exe" 2^>nul ^| findstr /i "\\Release\\"') do set "BENCH_EXE=%%f"
+rem locate the exe this build wrote. Asking MSBuild for TargetPath and taking its folder is exact; the old recursive
+rem search matched every platform's output folder (bin\Release\<tfm>\ and bin\x64\Release\<tfm>\) and the last match
+rem won, so an exe left behind by a build with /p:Platform=x64 was reported - and offered to start - as the current one.
+set "BENCH_EXE="
+set "BENCH_DIR="
+rem the quoted -p switch is not decoration: inside for /f cmd splits an argument at "=", so -p:Configuration=Release
+rem reaches dotnet as "-p:Configuration=" plus a second project called Release (MSB1008) and the query says nothing.
+for /f "delims=" %%f in ('dotnet msbuild "%ROOT%\demo\SR2DDemo.csproj" -getProperty:TargetPath "-p:Configuration=Release" -nologo -v:q 2^>nul') do set "BENCH_DIR=%%~dpf"
+if defined BENCH_DIR if exist "%BENCH_DIR%SR2DDemo.exe" set "BENCH_EXE=%BENCH_DIR%SR2DDemo.exe"
+rem an SDK whose msbuild has no -getProperty says nothing here: fall back to the search so the step still finds an exe
+if not defined BENCH_EXE for /f "delims=" %%f in ('dir /b /s "%ROOT%\demo\bin\SR2DDemo.exe" 2^>nul ^| findstr /i "\\Release\\"') do set "BENCH_EXE=%%f"
 if not defined BENCH_EXE goto :bench_noexe
 for %%f in ("%BENCH_EXE%") do set "BENCH_DIR=%%~dpf"
 if exist "%ROOT%\native\bin\x64\SR2D64.dll" copy /y "%ROOT%\native\bin\x64\SR2D64.dll" "%BENCH_DIR%SR2D64.dll" >nul

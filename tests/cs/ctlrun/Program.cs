@@ -2053,6 +2053,14 @@ static class P {
     Console.WriteLine("  (diffuse edges: borders fold, no wrap, no ring bleed)");
   }
   static int Main() {
+    { if (System.Environment.GetEnvironmentVariable("CTL_BAKE_ONLY") != null) { OutlineSeamChecks.BakeRun(); return 0; } }
+    { var sp = System.Environment.GetEnvironmentVariable("CTL_STROKE_SVG"); if (!string.IsNullOrEmpty(sp)) { OutlineSeamChecks.WriteStrokeTest(sp); return 0; } }
+    { var rp = System.Environment.GetEnvironmentVariable("CTL_ROWS_SVG"); if (!string.IsNullOrEmpty(rp)) { OutlineSeamChecks.WriteRowsTest(rp); return 0; } }
+    { var bp = System.Environment.GetEnvironmentVariable("CTL_BAND_SVG"); if (!string.IsNullOrEmpty(bp)) { OutlineSeamChecks.WriteBandTest(bp); return 0; } }
+    { var pd = System.Environment.GetEnvironmentVariable("CTL_PNG_DIR"); if (!string.IsNullOrEmpty(pd)) { OutlineSeamChecks.WritePngPairs(pd, System.Environment.GetEnvironmentVariable("CTL_TABLE_SRC") ?? "/home/user/SR2D/demo/assets_builtin/outline_test_shapes.svg"); return 0; } }
+    { var rp2 = System.Environment.GetEnvironmentVariable("CTL_RENDER_SVG"); if (!string.IsNullOrEmpty(rp2)) { OutlineSeamChecks.WriteRenderTest(rp2, System.Environment.GetEnvironmentVariable("CTL_TABLE_SRC") ?? "/home/user/SR2D/demo/assets_builtin/outline_test_shapes.svg"); return 0; } }
+    { var tp = System.Environment.GetEnvironmentVariable("CTL_TABLE_SVG"); if (!string.IsNullOrEmpty(tp)) { OutlineSeamChecks.WriteTableTest(tp, System.Environment.GetEnvironmentVariable("CTL_TABLE_SRC") ?? "/home/user/SR2D/demo/assets_builtin/outline_test_shapes.svg"); return 0; } }
+    { var op = System.Environment.GetEnvironmentVariable("CTL_OFFSET_SVG"); if (!string.IsNullOrEmpty(op)) { OutlineSeamChecks.WriteOffsetTest(op); return 0; } }
     if (FrameCheck.Run() != 0) return 1;
     EdgeStrips();
     DiffuseEdges();
@@ -2118,6 +2126,8 @@ static class P {
     VectorTextChecks.Run();
     VectorTextChecks.DotsAndSimplify();
     OutlineSeamChecks.Run();
+    OutlineSeamChecks.BakeRun();
+    RasterFuzz.Run();
     MouseClickEvents();
     Looks();
     Views();

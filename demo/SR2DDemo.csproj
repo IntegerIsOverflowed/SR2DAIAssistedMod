@@ -78,6 +78,9 @@
     <Compile Include="..\cs\VectorText.cs" Link="cs\VectorText.cs" />
     <Compile Include="..\cs\Vector.Index.cs" Link="cs\Vector.Index.cs" />
     <Compile Include="..\cs\Vector.Render.cs" Link="cs\Vector.Render.cs" />
+    <Compile Include="..\cs\Vector.Offset.cs" Link="cs\Vector.Offset.cs" />
+    <Compile Include="..\cs\Vector.Arrange.cs" Link="cs\Vector.Arrange.cs" />
+    <Compile Include="..\cs\Vector.Fit.cs" Link="cs\Vector.Fit.cs" />
     <Compile Include="..\cs\Vector.Svg.cs" Link="cs\Vector.Svg.cs" />
     <Compile Include="..\cs\Vector.Anim.cs" Link="cs\Vector.Anim.cs" />
     <Compile Include="..\cs\Vector.SvgText.cs" Link="cs\Vector.SvgText.cs" />
@@ -104,6 +107,7 @@
   <ItemGroup>
     <!-- built-in pictures (Lenna + normal map); the procedural bricks need no files -->
     <EmbeddedResource Include="assets_builtin\*.webp" />
+    <EmbeddedResource Include="assets_builtin\outline_test_shapes.svg" />
     <!-- designer toolbox icons (32-bit BMPs; LogicalName is namespace-qualified, which is where ToolboxBitmap looks first) -->
     <EmbeddedResource Include="..\cs\icons\*.bmp" LogicalName="Sr2d64CSport.%(Filename).bmp" />
     <!-- the demo shows its own source per test ("Code" button): Tests.cs / ControlsDemo.cs ride along inside the exe -->

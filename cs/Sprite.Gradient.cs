@@ -117,7 +117,7 @@ namespace Sr2d64CSport
         /// <summary>Strokes a path with a gradient and a full <see cref="StrokeStyle"/>.</summary>
         public void StrokePath(VectorPath Path, VectorGradient Paint, StrokeStyle Style, bool AA = true, float Opacity = 1f)
         {
-            var s = new VectorShape { Path = Path, Fill = null, Stroke = Paint, StrokeWidth = Style.Width, Cap = (VectorCap)Style.Cap, Join = (VectorJoin)Style.Join, MiterLimit = Style.MiterLimit, Dash = Style.Dash, DashOffset = Style.DashOffset, Opacity = Opacity };
+            var s = new VectorShape { Path = Path, Fill = null, Stroke = Paint, StrokeWidth = Style.Width, Cap = (VectorCap)Style.Cap, Join = (VectorJoin)Style.Join, MiterLimit = Style.MiterLimit, Dash = Style.Dash, DashOffset = Style.DashOffset, DashSeam = Style.DashSeam, Opacity = Opacity };
             VectorRender.DrawShape(s, this, Matrix3x2.Identity, AA);
         }
         public void StrokePath(PathBuilder Path, VectorGradient Paint, StrokeStyle Style, bool AA = true, float Opacity = 1f) => StrokePath(VectorPath.From(Path), Paint, Style, AA, Opacity);

@@ -43,11 +43,13 @@ namespace Sr2d64CSport
         public float[]? Dash;
         /// <summary>Distance into the dash pattern at which the stroke starts (animate it to make "marching ants").</summary>
         public float DashOffset;
+        /// <summary>How the pattern meets the seam of a closed sub-path; see <see cref="VectorDashSeam"/>.</summary>
+        public VectorDashSeam DashSeam;
 
         public StrokeStyle() { }
-        public StrokeStyle(float width, LineCap cap = LineCap.Butt, LineJoin join = LineJoin.Miter, float miterLimit = 4f, float[]? dash = null, float dashOffset = 0)
-        { Width = width; Cap = cap; Join = join; MiterLimit = miterLimit; Dash = dash; DashOffset = dashOffset; }
-        public StrokeStyle Clone() => new StrokeStyle(Width, Cap, Join, MiterLimit, Dash == null ? null : (float[])Dash.Clone(), DashOffset);
+        public StrokeStyle(float width, LineCap cap = LineCap.Butt, LineJoin join = LineJoin.Miter, float miterLimit = 4f, float[]? dash = null, float dashOffset = 0, VectorDashSeam dashSeam = VectorDashSeam.Cut)
+        { Width = width; Cap = cap; Join = join; MiterLimit = miterLimit; Dash = dash; DashOffset = dashOffset; DashSeam = dashSeam; }
+        public StrokeStyle Clone() => new StrokeStyle(Width, Cap, Join, MiterLimit, Dash == null ? null : (float[])Dash.Clone(), DashOffset, DashSeam);
 
         /// <summary>Round caps + round joins ("pen" look, the safe choice for hand drawing).</summary>
         public static StrokeStyle Round(float width, float[]? dash = null) => new StrokeStyle(width, LineCap.Round, LineJoin.Round, 4f, dash);
@@ -170,7 +172,7 @@ namespace Sr2d64CSport
             {
                 var dp = tDashPts ??= new List<PointF>(512); dp.Clear();
                 var ds = tDashSubs ??= new List<(int, int, bool)>(64); ds.Clear();
-                if (SkApplyDash(pts, subs, s.Dash, s.DashOffset, dp, ds)) { pts = dp; subs = ds; }
+                if (SkApplyDash(pts, subs, s.Dash, s.DashOffset, s.DashSeam, dp, ds)) { pts = dp; subs = ds; }
             }
             var P = new List<PointF>(64);
             foreach (var (start, count, closedIn) in subs)
@@ -277,12 +279,15 @@ namespace Sr2d64CSport
         }
 
         const double SkMaxDashPieces = 200_000;
-        /// <summary>Cuts the polylines into dashes. Returns false (leave the input alone) for degenerate patterns or absurd piece counts.</summary>
-        static bool SkApplyDash(List<PointF> pts, List<(int start, int count, bool closed)> subs, float[] dash, float offset, List<PointF> o, List<(int, int, bool)> osubs)
+        /// <summary>Cuts the polylines into dash pieces, one open sub-path per piece. Returns false (leave the input alone) for
+        /// degenerate patterns or absurd piece counts. Same cutter as VectorRender.ApplyDash: an odd-length pattern is read as if
+        /// written twice, so its period is twice the sum of its values, and <paramref name="seam"/> decides what happens where a
+        /// closed lap meets the pattern's phase.</summary>
+        static bool SkApplyDash(List<PointF> pts, List<(int start, int count, bool closed)> subs, float[] dash, float offset, VectorDashSeam seam, List<PointF> o, List<(int, int, bool)> osubs)
         {
             float total = 0; foreach (var v in dash) { if (float.IsNaN(v) || float.IsInfinity(v)) return false; total += MathF.Max(0, v); }
             if (!(total > 0) || float.IsNaN(offset) || float.IsInfinity(offset)) return false;
-            if ((dash.Length & 1) != 0) { var d2 = new float[dash.Length * 2]; dash.CopyTo(d2, 0); dash.CopyTo(d2, dash.Length); dash = d2; total *= 2; }   // odd count repeats (SVG rule)
+            if ((dash.Length & 1) != 0) total *= 2;   // odd count repeats (SVG rule)
             double pathLen = 0;
             foreach (var (start, count, closed) in subs)
             {
@@ -293,30 +298,46 @@ namespace Sr2d64CSport
             foreach (var (start, count, closed) in subs)
             {
                 int n = count + (closed ? 1 : 0);
+                var pieces = new List<List<PointF>>();
                 int di = 0; float rem = MathF.Max(0, dash[0]); bool on = true;
                 float off = offset % total; if (off < 0) off += total;
-                int guard = 0;
-                while (off > 0 && guard++ < 4 * dash.Length) { if (off >= rem) { off -= rem; di = (di + 1) % dash.Length; rem = MathF.Max(0, dash[di]); on = !on; } else { rem -= off; off = 0; } }
-                int segStart = -1;
-                if (on) { segStart = o.Count; o.Add(pts[start]); }
-                else if (rem <= 0) { on = true; di = (di + 1) % dash.Length; rem = MathF.Max(0, dash[di]); segStart = o.Count; o.Add(pts[start]); }
+                while (off > 0) { if (off >= rem) { off -= rem; di = (di + 1) % dash.Length; rem = MathF.Max(0, dash[di]); on = !on; } else { rem -= off; off = 0; } }
+                List<PointF>? cur = on ? new List<PointF> { pts[start] } : null;
                 for (int i = 0; i < n - 1; i++)
                 {
                     PointF a = pts[start + i], b = pts[start + (i + 1) % count];
-                    float dx = b.X - a.X, dy = b.Y - a.Y, segLen = MathF.Sqrt(dx * dx + dy * dy), t = 0;
-                    if (segLen <= 0) continue;
-                    while (segLen - t > rem)
+                    float dx = b.X - a.X, dy = b.Y - a.Y, len = MathF.Sqrt(dx * dx + dy * dy), pos = 0;
+                    if (len <= 0) continue;
+                    while (len - pos > rem)
                     {
-                        t += rem; var p = new PointF(a.X + dx * t / segLen, a.Y + dy * t / segLen);
-                        if (on) { o.Add(p); int c = o.Count - segStart; if (c >= 1) osubs.Add((segStart, c, false)); segStart = -1; }
-                        else { segStart = o.Count; o.Add(p); }
+                        pos += rem; var p = new PointF(a.X + dx * pos / len, a.Y + dy * pos / len);
+                        if (on) { cur!.Add(p); pieces.Add(cur); cur = null; }
+                        else cur = new List<PointF> { p };
                         on = !on; di = (di + 1) % dash.Length; rem = MathF.Max(0, dash[di]);
-                        if (rem == 0 && on) { /* zero-length dash: a dot (round / square cap draws it) */ }
                     }
-                    rem -= segLen - t;
-                    if (on) o.Add(b);
+                    rem -= len - pos;
+                    if (on) cur!.Add(b);
                 }
-                if (on && segStart >= 0) { int c = o.Count - segStart; if (c >= 1) osubs.Add((segStart, c, false)); }
+                if (on && cur != null) pieces.Add(cur);
+                // a lap that ends exactly on a pattern boundary (a pattern chosen to divide the lap, or a phase that lands on
+                // one) leaves a piece whose two points are both the seam point: a dash of no length, which the cap would still
+                // paint as a dot. A dotted pattern's real dots are mid-walk, and a dot at the seam is the first piece already.
+                {
+                    var last = pieces.Count > 0 ? pieces[pieces.Count - 1] : null;
+                    if (last != null && last.Count > 0 && last[0] == pts[start] && last[last.Count - 1] == pts[start]) pieces.RemoveAt(pieces.Count - 1);
+                }
+                if (seam == VectorDashSeam.Wrap && closed && pieces.Count > 1)
+                {
+                    var head = pieces[0]; var tail = pieces[pieces.Count - 1];
+                    // the lap ended inside a dash that also covers its start: the two halves share the start point and are one
+                    // dash on the loop, so join them instead of capping each at the seam (which is what reads as an overlap)
+                    if (head.Count >= 2 && tail.Count >= 2 && head[0] == pts[start] && tail[tail.Count - 1] == pts[start])
+                    {
+                        for (int i = 1; i < head.Count; i++) tail.Add(head[i]);
+                        pieces.RemoveAt(0);
+                    }
+                }
+                foreach (var pc in pieces) { int s0 = o.Count; o.AddRange(pc); osubs.Add((s0, pc.Count, false)); }
             }
             return true;
         }

@@ -106,7 +106,6 @@ namespace Sr2d64CSport
         const float SpaceAdvance = 30f;
         const float MonoAdvance = 60f;
         const float MonoMaxWidth = 46f;
-        const int CurveSteps = 4;             // segments per rounded corner
 
         /// <summary>True when the glyph exists. Characters without a glyph are drawn as a gap.</summary>
         public static bool HasGlyph(char c) => Glyphs.ContainsKey(c);
@@ -127,7 +126,7 @@ namespace Sr2d64CSport
             {
                 float ox = pen + Lsb(c, style);
                 foreach (var st in GlyphStrokes(c, style))
-                    foreach (var p in st.P)
+                    foreach (var p in st.P.Concat(st.C.Where(q => q.HasValue).Select(q => q!.Value)))
                     {
                         float x = ox + p.X + (style.Italic ? p.Y * 0.2f : 0f);
                         lo = Math.Min(lo, x); hi = Math.Max(hi, x);
@@ -227,7 +226,17 @@ namespace Sr2d64CSport
             bool own = st.Closed && st.Side != VectorOutlinePosition.Center;
             var target = own ? new VectorPath() : path;
             target.MoveTo(map(st.P[0]));
-            for (int i = 1; i < st.P.Count; i++) target.LineTo(map(st.P[i]));
+            for (int i = 1; i < st.P.Count; i++)
+            {
+                if (i < st.C.Count && st.C[i] is PointF q)
+                {   // the rounded corner: one cubic with the same curve as the quadratic (control q)
+                    PointF p0 = st.P[i - 1], p1 = st.P[i];
+                    var c1 = new PointF(p0.X + 2f / 3f * (q.X - p0.X), p0.Y + 2f / 3f * (q.Y - p0.Y));
+                    var c2 = new PointF(p1.X + 2f / 3f * (q.X - p1.X), p1.Y + 2f / 3f * (q.Y - p1.Y));
+                    target.CurveTo(map(c1), map(c2), map(p1));
+                }
+                else target.LineTo(map(st.P[i]));
+            }
             if (st.Closed) target.Close();
             if (own) sides.Add((target, st.Side));
         }
@@ -247,9 +256,10 @@ namespace Sr2d64CSport
             bool anyOutside = false;
             foreach (var (contour, side) in sides)
             {
-                var shape = new VectorShape(contour, null, new VectorColor(style.Color), 2 * sw) { Join = style.Join, Cap = style.Cap, MiterLimit = 4f };
+                var shape = new VectorShape(contour, null, new VectorColor(style.Color), 2 * sw) { Join = style.Join, Cap = style.Cap, MiterLimit = 4f, StrokeSide = side };
                 if (side == VectorOutlinePosition.Inside) shape.Clip = new VectorClip(contour);
                 else { shape.Clip = OutsideClip(contour, sw * miter + 1f); anyOutside = true; }
+                shape.BandOf = contour; shape.BandSide = side;
                 img.Shapes.Add(shape);
             }
             RectangleF? box = null;
@@ -278,7 +288,7 @@ namespace Sr2d64CSport
         {
             var wire = new VectorImage { Title = pic.Title, ViewBox = pic.ViewBox, Width = pic.Width, Height = pic.Height };
             foreach (var s in pic.Shapes)
-                wire.Shapes.Add(new VectorShape(s.Path, null, new VectorColor(argb), 1f) { Hairline = true, Transform = s.Transform, BaseTransform = s.BaseTransform });
+                if (s.IsVisible) wire.Shapes.Add(new VectorShape(s.Path, null, new VectorColor(argb), 1f) { Hairline = true, Transform = s.Transform, BaseTransform = s.BaseTransform });
             return wire;
         }
 
@@ -315,6 +325,8 @@ namespace Sr2d64CSport
         sealed class Stroke
         {
             public List<PointF> P = new List<PointF>();
+            /// <summary>Per node: the quadratic control point of the curve that ends at this node (rounded corner), or null = straight line.</summary>
+            public List<PointF?> C = new List<PointF?>();
             public bool Closed;
             public VectorOutlinePosition Side;
         }
@@ -328,10 +340,10 @@ namespace Sr2d64CSport
             foreach (var raw in g.Strokes)
             {
                 var pts = raw.P.Select(p => new PointF(p.X * kx, p.Y)).ToList();
-                var rounded = Round(pts, raw.Closed, style.Radius, style.TipDrop);
+                var rounded = Round(pts, raw.Closed, style.Radius, style.TipDrop, out var ctrl);
                 if (!raw.Closed) rounded = LengthenOpen(rounded, style.StrokeFraction * CapHeight);   // dots (. : i ё) get the stroke width as length
                 // a closed outline keeps its nodes: Inside / Outside is drawn by a clip in Picture, not by moving the curve
-                list.Add(new Stroke { P = rounded, Closed = raw.Closed, Side = raw.Closed ? style.OutlinePosition : VectorOutlinePosition.Center });
+                list.Add(new Stroke { P = rounded, C = ctrl, Closed = raw.Closed, Side = raw.Closed ? style.OutlinePosition : VectorOutlinePosition.Center });
             }
             return list;
         }
@@ -367,15 +379,19 @@ namespace Sr2d64CSport
         /// whose control point is the corner; the cut distance is at most <paramref name="r"/> and at most half of each
         /// adjoining segment. An acute corner at the top or bottom of the stroke is cut no deeper than
         /// 2 * tip / sqrt((1 + cos) / 2), so the tip is not lowered by more than <paramref name="tip"/>.
-        /// Open ends are not rounded. Curves are returned as short segments.
+        /// Open ends are not rounded. Each rounded corner is one curve: its two cut points are nodes, and ctrl holds the
+        /// quadratic control point (the corner) for the node the curve ends at.
         /// </summary>
-        static List<PointF> Round(List<PointF> p, bool closed, float r, float tip)
+        static List<PointF> Round(List<PointF> p, bool closed, float r, float tip, out List<PointF?> ctrl)
         {
             int n = p.Count;
-            var result = new List<PointF>(n * (CurveSteps + 1));
+            var result = new List<PointF>(n + 8);
+            var cl = new List<PointF?>(n + 8);
+            void Add(PointF q, PointF? c = null) { result.Add(q); cl.Add(c); }
+            ctrl = cl;
             if (n < 3 || r <= 0f)
             {
-                result.AddRange(p);
+                foreach (var q in p) Add(q);
                 return result;
             }
             float ymax = p.Max(q => q.Y), ymin = p.Min(q => q.Y);
@@ -401,13 +417,8 @@ namespace Sr2d64CSport
             void Emit(int i)
             {
                 var (a, b, v, t) = Corner(i);
-                result.Add(a);
-                if (t <= 0f) return;
-                for (int k = 1; k <= CurveSteps; k++)
-                {
-                    float u = k / (float)CurveSteps, w = 1 - u;
-                    result.Add(new PointF(w * w * a.X + 2 * w * u * v.X + u * u * b.X, w * w * a.Y + 2 * w * u * v.Y + u * u * b.Y));
-                }
+                Add(a);
+                if (t > 0f) Add(b, v);
             }
 
             if (closed)
@@ -416,9 +427,9 @@ namespace Sr2d64CSport
             }
             else
             {
-                result.Add(p[0]);
+                Add(p[0]);
                 for (int i = 1; i < n - 1; i++) Emit(i);
-                result.Add(p[n - 1]);
+                Add(p[n - 1]);
             }
             return result;
         }

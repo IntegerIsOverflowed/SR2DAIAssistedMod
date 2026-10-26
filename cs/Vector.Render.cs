@@ -18,8 +18,11 @@ namespace Sr2d64CSport
         public float? Tolerance { get; set; }
         /// <summary>Draw strokes (default true) / fills (default true).</summary>
         public bool Strokes = true, Fills = true;
-        /// <summary>Thinnest stroke on screen in pixels (hairlines / zero-width PDF lines are widened to this).</summary>
-        public float MinStrokeWidth = 0.8f;
+        /// <summary>Anti-aliasing quality of this render: 4 (4 sub-scanlines) or 16 (16). 0 (default) = the global <see cref="Sprite.AaQuality"/>. Thin strokes
+        /// (below a quarter pixel) need 16 to keep their width horizontally; the cost is about four times the edge work.</summary>
+        public int AaQuality;
+        /// <summary>Thinnest stroke on screen in pixels. 0 (default): strokes keep their true width, so a 0.5 px line is 0.5 px of ink. Set above 0 to widen thin lines to this floor. The Hairline property is always one device pixel.</summary>
+        public float MinStrokeWidth = 0f;
         /// <summary>
         /// Thin strokes (at most 1 device pixel) are painted without anti-aliasing; their edges are hard. Faster: the
         /// stroke pass is about 40% less work on the map (bench: 133 ms -> 80 ms for 2,456 strokes). Fills keep the
@@ -28,6 +31,10 @@ namespace Sr2d64CSport
         public bool FastLines { get; set; }
         /// <summary>Ignore per-shape clips (faster previews).</summary>
         public bool IgnoreClips { get; set; }
+        /// <summary>Draw the outline of every visible shape on top, as a one-pixel hairline (geometry check; clips are not applied to it).</summary>
+        public bool Wireframe { get; set; }
+        /// <summary>Colour of the wireframe overlay (ARGB).</summary>
+        public int WireframeColor = unchecked((int)0xFFE0245E);
         /// <summary>Replace every paint by this colour (silhouette / shadow rendering); alpha is kept per shape.</summary>
         public int? ForceColor { get; set; }
         public static readonly VectorRenderOptions Default = new VectorRenderOptions();
@@ -153,41 +160,87 @@ namespace Sr2d64CSport
 
         // ------------------------------------------------------------------ stroking (local space, then transformed)
         /// <summary>Builds the outline of a stroke as positively oriented contours (union under non-zero winding).</summary>
-        public static void Stroke(List<PointF> pts, List<(int start, int count, bool closed)> subs, VectorShape s, float width, List<PointF> o, List<int> oCnt)
+        /// <param name="dashScale">Factor from the dash units (the shape's local units) to the points' units: the mean scale when the points are in device space.</param>
+        public static void Stroke(List<PointF> pts, List<(int start, int count, bool closed)> subs, VectorShape s, float width, List<PointF> o, List<int> oCnt, float dashScale = 1f)
         {
             float hw = width / 2;
             var dash = s.Dash != null && s.Dash.Length > 0 && AnyPositive(s.Dash) ? s.Dash : null;
             List<PointF>? dpts = null; List<(int, int, bool)>? dsubs = null;
-            if (dash != null) { dpts = new List<PointF>(); dsubs = new List<(int, int, bool)>(); if (ApplyDash(pts, subs, dash, s.DashOffset, dpts, dsubs)) { pts = dpts; subs = dsubs; } }
-            foreach (var (start, count, closed) in subs)
+            // Which side of the path this stroke keeps its band on, per sub-path of the list that gets stroked below: +1 the left
+            // of the direction of travel, -1 the right, 0 no side (a centred stroke, or an open sub-path, which has no inside).
+            // The nonzero fill the clip keeps lies left of a counter-clockwise ring and right of a clockwise one, so the sign is
+            // the sub-path's own area times the position's. A dash cap needs it: the cap belongs to the band, not to the pen.
+            int[]? side = null;
+            List<(int Src, float DirX, float DirY)>? piece = null;
+            if (s.StrokeSide != VectorOutlinePosition.Center)
             {
+                int face = s.StrokeSide == VectorOutlinePosition.Inside ? 1 : -1;
+                side = new int[subs.Count];
+                for (int i = 0; i < subs.Count; i++) side[i] = Winding(pts, subs[i]) * face;
+            }
+            if (dash != null)
+            {
+                // the dash pattern is in local units; scale it into the points' units (it was ignored before: device-space dashes filled their gaps)
+                var dd = new float[dash.Length]; for (int i = 0; i < dash.Length; i++) dd[i] = dash[i] * dashScale;
+                dpts = new List<PointF>(); dsubs = new List<(int, int, bool)>();
+                List<(int Src, float DirX, float DirY)>? from = side != null ? new List<(int, float, float)>() : null;
+                if (ApplyDash(pts, subs, dd, s.DashOffset * dashScale, s.DashSeam, dpts, dsubs, from))
+                {
+                    pts = dpts; subs = dsubs; piece = from;
+                    if (from != null && side != null)
+                    {   // a dash piece is open, so its side comes from the ring it was cut out of
+                        var remap = new int[dsubs.Count];
+                        for (int i = 0; i < remap.Length; i++) remap[i] = side[from[i].Src];
+                        side = remap;
+                    }
+                }
+            }
+            // the cap of a dashed Inside / Outside outline: half the pen's radius, on the band's centre line. A cap at the pen's
+            // full radius on the path is what a centred stroke of this pen draws; here the clip then cuts it along the path, so
+            // the end reaches twice as far past the dash as the same cap at the Center position and is flat on the path's side.
+            void EndDisc(PointF p, float ux, float uy, int keepSide)
+            {
+                if (keepSide == 0) { Disc(p.X, p.Y, hw, o, oCnt); return; }
+                Disc(p.X - keepSide * uy * hw * 0.5f, p.Y + keepSide * ux * hw * 0.5f, hw * 0.5f, o, oCnt);
+            }
+            for (int si = 0; si < subs.Count; si++)
+            {
+                var (start, count, closed) = subs[si];
+                int keep = side != null ? side[si] : 0;
+                float pdirX = 0, pdirY = 0;   // the direction of travel at this piece's start: all a piece of one point has of the path
+                if (piece != null && si < piece.Count) { pdirX = piece[si].DirX; pdirY = piece[si].DirY; }
                 if (count == 1 || (count == 2 && Same(pts[start], pts[start + 1])))
                 {   // a dot: round cap -> disc, square cap -> square, butt -> nothing
                     var p = pts[start];
-                    if (s.Cap == VectorCap.Round) Disc(p.X, p.Y, hw, o, oCnt);
-                    else if (s.Cap == VectorCap.Square) { int b = o.Count; o.Add(new PointF(p.X - hw, p.Y - hw)); o.Add(new PointF(p.X + hw, p.Y - hw)); o.Add(new PointF(p.X + hw, p.Y + hw)); o.Add(new PointF(p.X - hw, p.Y + hw)); Emit(o, oCnt, b); }
+                    if (s.Cap == VectorCap.Round) EndDisc(p, pdirX, pdirY, keep);
+                    else if (s.Cap == VectorCap.Square && s.SquareDotCap) { float e = keep == 0 ? hw : hw * 0.5f; int b = o.Count; o.Add(new PointF(p.X - e, p.Y - e)); o.Add(new PointF(p.X + e, p.Y - e)); o.Add(new PointF(p.X + e, p.Y + e)); o.Add(new PointF(p.X - e, p.Y + e)); Emit(o, oCnt, b); }
                     continue;
                 }
                 // remove duplicate consecutive points
                 var P = new List<PointF>(count); P.Add(pts[start]);
                 for (int i = 1; i < count; i++) if (!Same(P[^1], pts[start + i])) P.Add(pts[start + i]);
                 bool cl = closed; if (cl && P.Count > 2 && Same(P[0], P[^1])) P.RemoveAt(P.Count - 1);
-                if (P.Count < 2) { if (s.Cap == VectorCap.Round) Disc(P[0].X, P[0].Y, hw, o, oCnt); continue; }
+                if (P.Count < 2) { if (s.Cap == VectorCap.Round) EndDisc(P[0], pdirX, pdirY, keep); continue; }
                 if (P.Count == 2) cl = false;
                 int n = P.Count, segs = cl ? n : n - 1;
+                float capOut = keep == 0 ? hw : hw * 0.5f;      // how far past the dash end a square cap reaches
                 for (int i = 0; i < segs; i++)
                 {
                     PointF a = P[i], b = P[(i + 1) % n];
                     float dx = b.X - a.X, dy = b.Y - a.Y, len = MathF.Sqrt(dx * dx + dy * dy); if (len < 1e-9f) continue;
                     float ux = dx / len, uy = dy / len, nx = -uy * hw, ny = ux * hw;
                     float ea = 0, eb = 0;
-                    if (!cl && s.Cap == VectorCap.Square) { if (i == 0) ea = hw; if (i == segs - 1) eb = hw; }
+                    if (!cl && s.Cap == VectorCap.Square) { if (i == 0) ea = capOut; if (i == segs - 1) eb = capOut; }
                     float ax = a.X - ux * ea, ay = a.Y - uy * ea, bx = b.X + ux * eb, by = b.Y + uy * eb;
                     int st = o.Count;
                     o.Add(new PointF(ax + nx, ay + ny)); o.Add(new PointF(bx + nx, by + ny)); o.Add(new PointF(bx - nx, by - ny)); o.Add(new PointF(ax - nx, ay - ny));
                     Emit(o, oCnt, st);
                 }
-                if (!cl && s.Cap == VectorCap.Round) { Disc(P[0].X, P[0].Y, hw, o, oCnt); Disc(P[n - 1].X, P[n - 1].Y, hw, o, oCnt); }
+                if (!cl && s.Cap == VectorCap.Round)
+                {
+                    Unit(P[0], P[1], out float u0x, out float u0y); Unit(P[n - 2], P[n - 1], out float u1x, out float u1y);
+                    EndDisc(P[0], u0x, u0y, keep); EndDisc(P[n - 1], u1x, u1y, keep);
+                }
                 // joins
                 int first = cl ? 0 : 1, last = cl ? n - 1 : n - 2;
                 for (int i = first; i <= last; i++)
@@ -200,8 +253,17 @@ namespace Sr2d64CSport
                     float cross = d0x * d1y - d0y * d1x, dot = d0x * d1x + d0y * d1y;
                     float th = MathF.Atan2(MathF.Abs(cross), dot);
                     if (th < 1e-4f) continue;
-                    if (hw * hw * (th - MathF.Sin(th)) * 0.5f < 0.002f && s.Join != VectorJoin.Miter) continue;   // invisible wedge
-                    float sgn = cross < 0 ? 1f : -1f;                      // outer side
+                    // Skip a join only when its wedge (the triangle pc, pc+n0, pc+n1 that closes the notch on the outer side)
+                    // is negligible. The old test compared the arc with the triangle and dropped the whole wedge, which left
+                    // a visible notch at every shallow vertex of a stroke (seams, worst at small zooms where hw is a few px).
+                    // the round join's missing part is the sector hw^2 th / 2 (the wedge of a reversal is not negligible);
+                    // the bevel's is the triangle hw^2 sin(th) / 2
+                    float wedge = s.Join == VectorJoin.Round ? hw * hw * th * 0.5f : hw * hw * MathF.Sin(th) * 0.5f;
+                    if (wedge < 0.01f && s.Join != VectorJoin.Miter) continue;   // negligible wedge
+                    // outer side: the arc's midpoint must lie along the bulge d0 - d1 (at a 180 degree reversal the cross product
+                    // is zero, so the side cannot come from it; the arc then runs through the tip, ahead of the vertex)
+                    float bulx = d0x - d1x, buly = d0y - d1y;
+                    float sgn = OuterSign(d0x, d0y, th, bulx, buly);
                     float n0x = -d0y * hw * sgn, n0y = d0x * hw * sgn, n1x = -d1y * hw * sgn, n1y = d1x * hw * sgn;
                     int st = o.Count;
                     o.Add(pc); o.Add(new PointF(pc.X + n0x, pc.Y + n0y));
@@ -219,7 +281,7 @@ namespace Sr2d64CSport
                     {
                         float step = 2 * MathF.Acos(MathF.Max(-1f, 1 - 0.1f / MathF.Max(hw, 0.1f)));
                         int k = Math.Clamp((int)MathF.Ceiling(th / MathF.Max(step, 1e-3f)), 1, 128);
-                        float a = th / k * (cross < 0 ? -1f : 1f), ca = MathF.Cos(a), sa = MathF.Sin(a), x = n0x, y = n0y;
+                        float a = th / k * -sgn, ca = MathF.Cos(a), sa = MathF.Sin(a), x = n0x, y = n0y;
                         for (int j = 1; j < k; j++) { float t = x * ca - y * sa; y = x * sa + y * ca; x = t; o.Add(new PointF(pc.X + x, pc.Y + y)); }
                     }
                     o.Add(new PointF(pc.X + n1x, pc.Y + n1y));
@@ -227,8 +289,56 @@ namespace Sr2d64CSport
                 }
             }
         }
+        /// <summary>The side (+1 / -1) of the normal n = side * (-d0y, d0x) on which a join of turn angle th bulges. The join's
+        /// two outer normals sum to side * (rot90(d0) + rot90(d1)) and that sum has to face the bulge d0 - d1;
+        /// (rot90(d0) + rot90(d1)) . (d0 - d1) = -2 * cross(d0, d1), so the side is the sign of -cross. Since d1 = d0 - bulge,
+        /// cross(d0, d1) = -cross(d0, bulge), which is what the join has here.</summary>
+        /// <remarks>The previous test compared the arc's midpoint against the bulge. On the wrong side that midpoint sits
+        /// 180 - th degrees away from the bulge, so its dot is positive as soon as th exceeds 90 degrees and both candidates
+        /// passed: the first (-1) always won, and a right-hand turn of over 90 degrees (any acute corner: a star point, a
+        /// seam, a chevron) had its wedge built inside the band, where it is invisible - the miter tip vanished.
+        /// <see cref="LegacyJoinSideTest"/> restores that behaviour for the truth harness's before/after measurement.</remarks>
+        static float OuterSign(float d0x, float d0y, float th, float bulx, float buly)
+        {
+            if (LegacyJoinSideTest)
+            {
+                float half = th / 2;
+                foreach (float side in new[] { -1f, 1f })
+                {
+                    float x = -d0y * side, y = d0x * side, a = -side * half, c = MathF.Cos(a), sn = MathF.Sin(a);
+                    float mx = x * c - y * sn, my = x * sn + y * c;
+                    if (mx * bulx + my * buly > 0) return side;
+                }
+                return -1f;
+            }
+            return d0x * buly - d0y * bulx > 0 ? 1f : -1f;
+        }
+        /// <summary>Keeps the pre-fix join-side rule reachable so a measurement can compare the two (the truth harness's
+        /// --legacy-join); production never sets it. A property rather than a field because the compilations that do not
+        /// assign it - the demo, which only reads it through OuterSign - would warn about a field that is always false.</summary>
+        public static bool LegacyJoinSideTest { get; set; }
+
         static bool AnyPositive(float[] d) { foreach (var v in d) if (v > 0) return true; return false; }
         static bool Same(PointF a, PointF b) => MathF.Abs(a.X - b.X) < 1e-6f && MathF.Abs(a.Y - b.Y) < 1e-6f;
+        /// <summary>The unit vector from <paramref name="a"/> to <paramref name="b"/>, or (0,0) when they are the same point.</summary>
+        static void Unit(PointF a, PointF b, out float ux, out float uy)
+        {
+            float dx = b.X - a.X, dy = b.Y - a.Y, l = MathF.Sqrt(dx * dx + dy * dy);
+            ux = l < 1e-9f ? 0f : dx / l; uy = l < 1e-9f ? 0f : dy / l;
+        }
+        /// <summary>+1 when a closed sub-path's signed area is positive (its nonzero fill then lies to the left of the direction of
+        /// travel), -1 when it is negative, 0 for an open one.</summary>
+        static int Winding(List<PointF> pts, (int start, int count, bool closed) sub)
+        {
+            if (!sub.closed || sub.count < 3) return 0;
+            double a = 0;
+            for (int i = 0; i < sub.count; i++)
+            {
+                PointF p = pts[sub.start + i], q = pts[sub.start + (i + 1) % sub.count];
+                a += (double)p.X * q.Y - (double)q.X * p.Y;
+            }
+            return a >= 0 ? 1 : -1;
+        }
         static void Disc(float cx, float cy, float r, List<PointF> o, List<int> oCnt)
         {
             int n = r <= 1.5f ? 8 : Math.Clamp((int)MathF.Ceiling(MathF.PI / MathF.Max(MathF.Acos(MathF.Max(-1f, 1f - 0.1f / r)), 1e-3f)), 8, 256);
@@ -246,10 +356,17 @@ namespace Sr2d64CSport
         }
         /// <summary>Max dash pieces per stroke; beyond that (a microscopic pattern on a long path, a damaged file) the stroke is drawn solid, which is what it would look like anyway.</summary>
         const double MaxDashPieces = 200_000;
-        static bool ApplyDash(List<PointF> pts, List<(int start, int count, bool closed)> subs, float[] dash, float offset, List<PointF> o, List<(int, int, bool)> osubs)
+        /// <summary>Cuts the polylines into dash pieces, one open sub-path per piece. Returns false (draw the input solid) for a
+        /// degenerate pattern or an absurd piece count. The pattern alternates on / off and, as in SVG, an odd-length one is
+        /// read as if written twice, so its period is twice the sum of its values. <paramref name="oSrc"/>, when given, receives
+        /// one entry per piece: the index of the sub-path it was cut from, and the unit direction of travel at its start - which
+        /// is all a piece of a single point still carries of the path it came from.</summary>
+        static bool ApplyDash(List<PointF> pts, List<(int start, int count, bool closed)> subs, float[] dash, float offset,
+            VectorDashSeam seam, List<PointF> o, List<(int, int, bool)> osubs, List<(int Src, float DirX, float DirY)>? oSrc = null)
         {
             float total = 0; foreach (var v in dash) { if (float.IsNaN(v) || float.IsInfinity(v)) return false; total += MathF.Max(0, v); }
             if (!(total > 0) || float.IsNaN(offset) || float.IsInfinity(offset)) return false;
+            if ((dash.Length & 1) != 0) total *= 2;
             double pathLen = 0;
             foreach (var (start, count, closed) in subs)
             {
@@ -257,30 +374,67 @@ namespace Sr2d64CSport
                 for (int i = 0; i < n - 1; i++) { PointF a = pts[start + i], b = pts[start + (i + 1) % count]; pathLen += Math.Sqrt((double)(b.X - a.X) * (b.X - a.X) + (double)(b.Y - a.Y) * (b.Y - a.Y)); }
             }
             if (double.IsNaN(pathLen) || pathLen / total * dash.Length > MaxDashPieces) return false;
-            foreach (var (start, count, closed) in subs)
+            for (int si = 0; si < subs.Count; si++)
             {
+                var (start, count, closed) = subs[si];
                 int n = count + (closed ? 1 : 0);
+                var pieces = new List<List<PointF>>();
+                var dirs = oSrc != null ? new List<(float X, float Y)>() : null;
                 // dash state at the start of the sub-path
                 int di = 0; float rem = MathF.Max(0, dash[0]); bool on = true;
                 float off = offset % total; if (off < 0) off += total;
                 while (off > 0) { if (off >= rem) { off -= rem; di = (di + 1) % dash.Length; rem = MathF.Max(0, dash[di]); on = !on; } else { rem -= off; off = 0; } }
-                int segStart = -1;
-                if (on) { segStart = o.Count; o.Add(pts[start]); }
+                List<PointF>? cur = on ? new List<PointF> { pts[start] } : null;
+                (float X, float Y) curDir = (0, 0); bool dirSet = false;
                 for (int i = 0; i < n - 1; i++)
                 {
                     PointF a = pts[start + i], b = pts[start + (i + 1) % count];
                     float dx = b.X - a.X, dy = b.Y - a.Y, len = MathF.Sqrt(dx * dx + dy * dy), pos = 0;
+                    if (len <= 0) continue;
+                    var ud = (dx / len, dy / len);
+                    if (cur != null && !dirSet) { curDir = ud; dirSet = true; }
                     while (len - pos > rem)
                     {
                         pos += rem; var p = new PointF(a.X + dx * pos / len, a.Y + dy * pos / len);
-                        if (on) { o.Add(p); osubs.Add((segStart, o.Count - segStart, false)); segStart = -1; }
-                        else { segStart = o.Count; o.Add(p); }
-                        on = !on; di = (di + 1) % dash.Length; rem = MathF.Max(1e-6f, dash[di]);
+                        if (on) { cur!.Add(p); pieces.Add(cur); dirs?.Add(curDir); cur = null; dirSet = false; }
+                        else { cur = new List<PointF> { p }; curDir = ud; dirSet = true; }
+                        on = !on; di = (di + 1) % dash.Length; rem = MathF.Max(0, dash[di]);
                     }
                     rem -= len - pos;
-                    if (on) o.Add(b);
+                    if (on) cur!.Add(b);
                 }
-                if (on && segStart >= 0) { int c = o.Count - segStart; if (c >= 2) osubs.Add((segStart, c, false)); else o.RemoveRange(segStart, c); }
+                if (on && cur != null) { pieces.Add(cur); dirs?.Add(curDir); }
+                // a lap that ends exactly on a pattern boundary (a pattern chosen to divide the lap, or a phase that lands on
+                // one) leaves a piece whose two points are both the seam point: a dash of no length, which the cap would still
+                // paint as a dot. A dotted pattern's real dots are mid-walk, and a dot at the seam is the first piece already.
+                {
+                    var last = pieces.Count > 0 ? pieces[pieces.Count - 1] : null;
+                    if (last != null && last.Count > 0 && last[0] == pts[start] && last[last.Count - 1] == pts[start]) { pieces.RemoveAt(pieces.Count - 1); dirs?.RemoveAt(pieces.Count); }
+                }
+                if (seam == VectorDashSeam.Wrap && closed && pieces.Count > 1)
+                {
+                    var head = pieces[0]; var tail = pieces[pieces.Count - 1];
+                    // the lap ended inside a dash that also covers its start: the two halves share the start point and are one
+                    // dash on the loop, so join them instead of capping each at the seam (which is what reads as an overlap)
+                    if (head.Count >= 2 && tail.Count >= 2 && head[0] == pts[start] && tail[tail.Count - 1] == pts[start])
+                    {
+                        for (int i = 1; i < head.Count; i++) tail.Add(head[i]);
+                        pieces.RemoveAt(0); dirs?.RemoveAt(0);
+                    }
+                }
+                if (OutlineArrange.BandProbe != null)
+                {
+                    var ls = new System.Text.StringBuilder();
+                    foreach (var pc in pieces)
+                    {
+                        double l = 0; for (int i = 0; i + 1 < pc.Count; i++)
+                            { double dx = pc[i + 1].X - pc[i].X, dy = pc[i + 1].Y - pc[i].Y; l += Math.Sqrt(dx * dx + dy * dy); }
+                        ls.Append(l.ToString("0.##", System.Globalization.CultureInfo.InvariantCulture)).Append(' ');
+                    }
+                    OutlineArrange.Probe($"dash stroke pieces {pieces.Count} lens {ls}");
+                }
+                foreach (var pc in pieces) { int s0 = o.Count; o.AddRange(pc); osubs.Add((s0, pc.Count, false)); }
+                if (oSrc != null) for (int pi = 0; pi < pieces.Count; pi++) oSrc.Add((si, dirs![pi].X, dirs![pi].Y));
             }
             return true;
         }
@@ -306,7 +460,7 @@ namespace Sr2d64CSport
             if (s.Stroke != null)
             {
                 var o = new List<PointF>(); var oc = new List<int>();
-                Stroke(pts, subs, s, s.Hairline ? 1f : MathF.Max(s.StrokeWidth * MeanScale(s.Transform), 1f), o, oc);
+                Stroke(pts, subs, s, s.Hairline ? 1f : MathF.Max(s.StrokeWidth * MeanScale(s.Transform), 1f), o, oc, MeanScale(s.Transform));   // hit test: at least one pixel, so thin lines can be picked
                 var ss = new List<(int, int, bool)>(); int st = 0; foreach (var c in oc) { ss.Add((st, c, true)); st += c; }
                 return Inside(o, ss, p, false);
             }
@@ -329,7 +483,15 @@ namespace Sr2d64CSport
         }
 
         // ------------------------------------------------------------------ drawing
+        /// <summary>Draws a picture. With <see cref="VectorRenderOptions.Wireframe"/> the outline of every visible shape is drawn on top.</summary>
         public static void Draw(VectorImage img, Sprite dst, Matrix3x2 m, VectorRenderOptions o)
+        {
+            DrawShapes(img, dst, m, o);
+            if (o.Wireframe) DrawShapes(VectorText.Wireframe(img, o.WireframeColor), dst, m, WireframeOptions(o));
+        }
+        static VectorRenderOptions WireframeOptions(VectorRenderOptions o) =>
+            new VectorRenderOptions { AA = true, FastLines = o.FastLines, Opacity = o.Opacity, Premultiplied = o.Premultiplied, Tolerance = o.Tolerance };
+        static void DrawShapes(VectorImage img, Sprite dst, Matrix3x2 m, VectorRenderOptions o)
         {
             var clipRect = dst.LockRect; if (clipRect.Width <= 0 || clipRect.Height <= 0) return;
             bool premul = o.Premultiplied ?? dst.Premultiplied;
@@ -368,11 +530,12 @@ namespace Sr2d64CSport
             foreach (var s in img.Shapes) DrawOne(s, dst, m, o, clipRect, premul, tol);
         }
         [ThreadStatic] static VectorShape? tWin; [ThreadStatic] static VectorRenderOptions? tWinOpt;
-        static void CopyOpt(VectorRenderOptions a, VectorRenderOptions b) { b.AA = a.AA; b.FastLines = a.FastLines; b.Opacity = a.Opacity; b.Strokes = a.Strokes; b.Fills = a.Fills; b.MinStrokeWidth = a.MinStrokeWidth; b.ForceColor = a.ForceColor; b.Tolerance = a.Tolerance; b.Premultiplied = a.Premultiplied; }
+        static void CopyOpt(VectorRenderOptions a, VectorRenderOptions b) { b.AA = a.AA; b.FastLines = a.FastLines; b.Opacity = a.Opacity; b.Strokes = a.Strokes; b.Fills = a.Fills; b.MinStrokeWidth = a.MinStrokeWidth; b.AaQuality = a.AaQuality; b.ForceColor = a.ForceColor; b.Tolerance = a.Tolerance; b.Premultiplied = a.Premultiplied; }
         static void CopyInto(VectorShape from, VectorShape to)
         {
-            to.Path = from.Path; to.Fill = from.Fill; to.Stroke = from.Stroke; to.EvenOdd = from.EvenOdd; to.StrokeWidth = from.StrokeWidth; to.Cap = from.Cap; to.Join = from.Join;
-            to.MiterLimit = from.MiterLimit; to.Hairline = from.Hairline; to.Layer = from.Layer; to.Dash = from.Dash; to.DashOffset = from.DashOffset; to.Opacity = from.Opacity; to.Transform = from.Transform; to.Hidden = from.Hidden; to.IsText = from.IsText; to.IsImage = from.IsImage;
+            to.Path = from.Path; to.Fill = from.Fill; to.Stroke = from.Stroke; to.EvenOdd = from.EvenOdd; to.StrokeWidth = from.StrokeWidth; to.Cap = from.Cap; to.SquareDotCap = from.SquareDotCap; to.Join = from.Join;
+            to.MiterLimit = from.MiterLimit; to.Hairline = from.Hairline; to.Layer = from.Layer; to.Dash = from.Dash; to.DashOffset = from.DashOffset; to.DashSeam = from.DashSeam; to.Opacity = from.Opacity; to.Transform = from.Transform; to.Hidden = from.Hidden; to.IsText = from.IsText; to.IsImage = from.IsImage;
+            to.StrokeSide = from.StrokeSide;
         }
         /// <summary>Draws a single shape (the gradient fills of Sprite.Gradient.cs go through here).</summary>
         public static void DrawShape(VectorShape s, Sprite dst, Matrix3x2 m, bool aa)
@@ -423,15 +586,18 @@ namespace Sr2d64CSport
                 if (s.Stroke != null && o.Strokes)
                 {
                     op.Clear(); opc.Clear();
-                    if (IsUniform(t))
-                    {   // uniform scale / rotation: stroke straight in device space
-                        Stroke(pts, subs, s, sw, op, opc);
+                    if (IsUniform(t) || s.Hairline)
+                    {   // uniform scale / rotation: stroke straight in device space. A hairline is always device space:
+                        // one device pixel wide, its centreline snapped to pixel centres so the line covers exactly one row or column.
+                        var hp = pts;
+                        if (s.Hairline) { hp = new List<PointF>(pts.Count); foreach (var p in pts) hp.Add(new PointF(MathF.Floor(p.X) + 0.5f, MathF.Floor(p.Y) + 0.5f)); }
+                        Stroke(hp, subs, s, sw, op, opc, MeanScale(t));
                     }
                     else
                     {   // squished: stroke in local space (width in local units), then transform the outline
                         var lp = new List<PointF>(); var ls = Flatten(s.Path, Matrix3x2.Identity, tol / scale, lp);
                         float lw = s.Hairline ? 1f / MathF.Max(MeanScale(t), 1e-6f) : MathF.Max(s.StrokeWidth, o.MinStrokeWidth / MeanScale(t));
-                        Stroke(lp, ls, s, lw, op, opc);
+                        Stroke(lp, ls, s, lw, op, opc);   // local points: the dash is already in their units
                         for (int i = 0; i < op.Count; i++) { var v = Vector2.Transform(new Vector2(op[i].X, op[i].Y), t); op[i] = new PointF(v.X, v.Y); }
                         if (t.M11 * t.M22 - t.M12 * t.M21 < 0) { int st = 0; foreach (var c in opc) { op.Reverse(st, c); st += c; } }   // mirrored: keep positive orientation
                     }
@@ -466,11 +632,11 @@ namespace Sr2d64CSport
                     argb = (argb & 0xFFFFFF) | (a << 24);
                     var save = dst.LockRect; dst.SetLockRect(lr);
                     if (premul)   // LineOp.AlphaOver takes a STRAIGHT colour and writes premultiplied source-over (alpha accumulates)
-                        dst.FillPolygons(span, System.Runtime.InteropServices.CollectionsMarshal.AsSpan(cnt), argb, SR2D.LineOp.AlphaOver, aaOn, evenOdd);
+                        dst.FillPolygons(span, System.Runtime.InteropServices.CollectionsMarshal.AsSpan(cnt), argb, SR2D.LineOp.AlphaOver, aaOn, evenOdd, 128, o.AaQuality);
                     // AlphaOver (not AlphaBlend): source-over that also accumulates the destination alpha. AlphaBlend keeps
                     // the destination alpha, so a fill on a transparent sprite left its colour with alpha 0 (shown as black / blank).
                     // On an opaque destination both give the same colours.
-                    else dst.FillPolygons(span, System.Runtime.InteropServices.CollectionsMarshal.AsSpan(cnt), argb, a == 255 && !aaOn ? SR2D.LineOp.Set : SR2D.LineOp.AlphaOver, aaOn, evenOdd);
+                    else dst.FillPolygons(span, System.Runtime.InteropServices.CollectionsMarshal.AsSpan(cnt), argb, a == 255 && !aaOn ? SR2D.LineOp.Set : SR2D.LineOp.AlphaOver, aaOn, evenOdd, 128, o.AaQuality);
                     dst.SetLockRect(save);
                     return;
                 }
@@ -480,7 +646,7 @@ namespace Sr2d64CSport
                 var cov = Scratch(ref tCov, r0.Width, r0.Height);
                 cov.SetLockRect(0, r0.Width, 0, r0.Height); cov.ClearRect(0, r0.Width, 0, r0.Height, 0);
                 for (int i = 0; i < span.Length; i++) span[i] = new PointF(span[i].X - r0.X, span[i].Y - r0.Y);
-                cov.FillPolygons(span, System.Runtime.InteropServices.CollectionsMarshal.AsSpan(cnt), unchecked((int)0xFFFFFFFF), SR2D.LineOp.Set, aaOn, evenOdd);
+                cov.FillPolygons(span, System.Runtime.InteropServices.CollectionsMarshal.AsSpan(cnt), unchecked((int)0xFFFFFFFF), SR2D.LineOp.Set, aaOn, evenOdd, 128, o.AaQuality);
                 Sprite? clip = null;
                 if (softClip != null)
                 {
@@ -732,4 +898,5 @@ namespace Sr2d64CSport
             valid = false; return 0;
         }
     }
+
 }

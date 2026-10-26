@@ -113,11 +113,15 @@ namespace Sr2d64CSport
             {   // The background box goes down BEFORE the shadow: the plain overload fills it as its first
               // thing, so drawing it together with the text would paint over the shadow it just laid down
               // (the box has 2 * scale padding, which swallows a 1-2 px offset completely).
-                int pad = 2 * Math.Max(1, scale);
+                // The text itself is drawn unpadded below (bg = 0), so the box is grown around the text box on every side.
+                // (It used to start at the text's own corner, leaving the text flush against the left and top edges.)
+                // the margin is 4 px at scale 1 (2 * pad) on every side, so the text has the same space all round
+                int margin = 4 * Math.Max(1, scale);
                 var sz = MeasureText(text, scale, weight, letterSpacing, font);
-                int bw = sz.Width + 2 * pad, bh = sz.Height + 2 * pad;
+                int bw = sz.Width + 2 * margin, bh = sz.Height + 2 * margin;
                 int ax = (int)anchor % 3, ay = (int)anchor / 3;
-                Fill(x - (ax == 1 ? bw / 2 : ax == 2 ? bw : 0), y - (ay == 1 ? bh / 2 : ay == 2 ? bh : 0), bw, bh, bg, op, blendFactor);
+                int tlx = x - (ax == 1 ? sz.Width / 2 : ax == 2 ? sz.Width : 0), tly = y - (ay == 1 ? sz.Height / 2 : ay == 2 ? sz.Height : 0);
+                Fill(tlx - margin, tly - margin, bw, bh, bg, op, blendFactor);
             }
             int d = shadowOffset * Math.Max(1, scale);
             var shadow = DrawText(x + d, y + d, text, shadowColor, 0, scale, weight, letterSpacing, op, blendFactor, anchor, font);
