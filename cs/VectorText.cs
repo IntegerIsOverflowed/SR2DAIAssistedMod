@@ -256,7 +256,7 @@ namespace Sr2d64CSport
             bool anyOutside = false;
             foreach (var (contour, side) in sides)
             {
-                var shape = new VectorShape(contour, null, new VectorColor(style.Color), 2 * sw) { Join = style.Join, Cap = style.Cap, MiterLimit = 4f };
+                var shape = new VectorShape(contour, null, new VectorColor(style.Color), 2 * sw) { Join = style.Join, Cap = style.Cap, MiterLimit = 4f, StrokeSide = side };
                 if (side == VectorOutlinePosition.Inside) shape.Clip = new VectorClip(contour);
                 else { shape.Clip = OutsideClip(contour, sw * miter + 1f); anyOutside = true; }
                 shape.BandOf = contour; shape.BandSide = side;

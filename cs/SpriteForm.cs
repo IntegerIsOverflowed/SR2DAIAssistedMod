@@ -1411,7 +1411,58 @@ namespace Sr2d64CSport
             }
             base.WndProc(ref m);
             if (m.Msg == WM_GETMINMAXINFO) MaximizeOnNearestMonitor(m.LParam);   // after WinForms: its MaximizedBounds may be stale
+            if (m.Msg == WM_WINDOWPOSCHANGED) MaximizedClientCheck();
         }
+
+        const int WM_WINDOWPOSCHANGED = 0x0047;
+        const uint SWP_NOSIZE = 0x0001, SWP_NOMOVE = 0x0002, SWP_NOZORDER = 0x0004, SWP_NOACTIVATE = 0x0010, SWP_FRAMECHANGED = 0x0020;
+
+        int healTries;
+
+        /// <summary>
+        /// After the frame has been recomputed for a new window position: a window that sits in the maximized
+        /// rectangle must have the working area as its client. If it has its whole rectangle instead, the
+        /// WM_NCCALCSIZE that produced it answered without the clamp, because at that moment the style bits did not
+        /// say maximized (see <see cref="MaxGateProbe"/> for the gate that no longer relies on that bit alone), and
+        /// nothing will ask again by itself - the size WinForms then caches matches the size it laid out for, so no
+        /// WM_SIZE follows. Measured with the style bit cleared by hand (rig6): the recalculation answers with
+        /// client == window where the baseline was client 1536x816@0,0 inside a 1550x830@-7,-7 window, and putting
+        /// the bit back leaves that cached answer in place until a frame recalculation is forced, which moves the
+        /// client to 872x552@0,0 - so only a recalculation heals it, exactly as the double click on the caption does
+        /// in the bug report. One SWP_FRAMECHANGED is that click, done by the program; it is asked once per position
+        /// change and dropped if it does not converge.
+        /// </summary>
+        void MaximizedClientCheck()
+        {
+            // only where this unit owns the answer: with the frame off (nativeFrame) or with WM_NCCALCSIZE left to
+            // DefWindowProc (NcCalcProbe = 0) the client is not the working area by design and the check would
+            // recompute the frame on every position change, forever.
+            if (MaximizeHealProbe == 0 || !nativeFrame || NcCalcProbe == 0 || !barLive || !IsHandleCreated || fullscreen) return;
+            WinRect wr, cr;
+            if (!GetWindowRect(Handle, out wr) || !GetClientRect(Handle, out cr)) return;
+            WinMonitorInfo mi; int dpi;
+            if (!FrameMonitor(wr, out mi, out dpi)) return;
+            var work = mi.rcWork;
+            if (!CoversWorkAsMaximized(wr, work, MaximizedBorderAllowance(dpi))) { healTries = 0; return; }   // not the maximized frame
+            var origin = new WinPoint { X = 0, Y = 0 };
+            if (!ClientToScreen(Handle, ref origin)) return;
+            if (origin.X == work.Left && origin.Y == work.Top
+                && cr.Right - cr.Left == work.Right - work.Left && cr.Bottom - cr.Top == work.Bottom - work.Top)
+            { healTries = 0; return; }                                            // client is the working area, as it must be
+            if (++healTries > 2)
+            {
+                SayFrame($"maximized client still wrong after {healTries - 1} frame changes: client={origin.X},{origin.Y} {cr.Right - cr.Left}x{cr.Bottom - cr.Top} work={Rect(work)} - giving up");
+                return;
+            }
+            SayFrame($"maximized client is not the working area: client={origin.X},{origin.Y} {cr.Right - cr.Left}x{cr.Bottom - cr.Top} win={Rect(wr)} work={Rect(work)} -> recomputing the frame (try {healTries})");
+            _ = SetWindowPos(Handle, IntPtr.Zero, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED);
+        }
+
+        /// <summary>
+        /// A/B for <see cref="MaximizedClientCheck"/>: 1 (shipped) = verify the maximized client after every
+        /// position change and recompute the frame once if it is wrong; 0 = never. The demo reads <c>SR2D_MAXHEAL=0</c>.
+        /// </summary>
+        internal static int MaximizeHealProbe = 1;
 
         /// <summary>The frame messages of <see cref="NativeWindowFrame"/>; true when handled here.</summary>
         bool HideFrame(ref Message m)
@@ -1484,20 +1535,255 @@ namespace Sr2d64CSport
         /// screen on all four sides (measured on a 2048x1452 work area: a 2072x1476 window at -12,-12), and
         /// because the client now equals the window, that border would cut the bar's icon and its buttons off -
         /// so the rectangle is clamped back inside the monitor's working area.
+        /// <para>
+        /// Which rectangle is being clamped is the whole answer, so the gate reads it instead of asking the window
+        /// whether it is maximized: clamp only when this rectangle *is* the maximized frame of the monitor it
+        /// belongs to, i.e. it covers that working area and hangs out of it by no more than the border
+        /// (<see cref="CoversWorkAsMaximized"/>); the style bit is read only to log a disagreement between the two.
+        /// <see cref="MaxGateProbe"/> = 0 keeps the old gate - the
+        /// WS_MAXIMIZE style bit at the moment the message is answered. That is a question about a transition that
+        /// is still in progress: a window restored from the taskbar straight into its maximized state is moved,
+        /// resized and restyled in several frame recalculations, and a WM_NCCALCSIZE answered inside one of them
+        /// while the bit has not landed leaves the client as the whole inflated window - the form's content then
+        /// drawn from -9,-9, so its left and top edge is off screen and a band of the border's width is left
+        /// unpainted at the right. Nothing asks again by itself: WinForms lays the form out for the size it gets
+        /// and no further WM_SIZE follows, so only a real resize - the double click on the bar that the bug report
+        /// names as the way out - recomputes the frame. <see cref="MaximizedClientCheck"/> is the backstop that
+        /// does that recomputation instead.
+        /// </para>
+        /// <para>
+        /// The other half of the answer is which monitor the working area comes from, and while the window is
+        /// minimized the window's own position cannot tell: it sits at -32000,-32000, whose nearest monitor is the
+        /// top-left screen of the desktop. <see cref="FrameMonitor"/> takes the monitor from the rectangle instead,
+        /// which is why the clamp here is skipped or wrong on every screen but the leftmost when it does not.
+        /// </para>
         /// </summary>
         void ClientInsideMonitor(IntPtr lParam)
         {
-            if ((GetWindowLong(Handle, GWL_STYLE) & WS_MAXIMIZE) == 0) return;
-            var mi = new WinMonitorInfo { cbSize = Marshal.SizeOf<WinMonitorInfo>() };
-            if (!GetMonitorInfo(MonitorFromWindow(Handle, MONITOR_DEFAULTTONEAREST), ref mi)) return;
-            var work = fullscreen && !FullScreenExcludeTaskbar ? mi.rcMonitor : mi.rcWork;
             var p = Marshal.PtrToStructure<WinNccalcsizeParams>(lParam);
-            p.rgrc0.Left = Math.Max(p.rgrc0.Left, work.Left);
-            p.rgrc0.Top = Math.Max(p.rgrc0.Top, work.Top);
-            p.rgrc0.Right = Math.Min(p.rgrc0.Right, work.Right);
-            p.rgrc0.Bottom = Math.Min(p.rgrc0.Bottom, work.Bottom);
+            WinMonitorInfo mi; int dpi;
+            if (!FrameMonitor(p.rgrc0, out mi, out dpi)) return;
+            var work = fullscreen && !FullScreenExcludeTaskbar ? mi.rcMonitor : mi.rcWork;
+            bool zoomStyle = (GetWindowLong(Handle, GWL_STYLE) & WS_MAXIMIZE) != 0;
+            bool covers = CoversWorkAsMaximized(p.rgrc0, work, MaximizedBorderAllowance(dpi));
+            if (!(MaxGateProbe == 0 ? zoomStyle : covers))
+            {
+                // The style says this is a maximized window but the rectangle is not this monitor's maximized frame:
+                // either the window is still at the minimized position or the monitor was resolved from a position
+                // that is not its own. Clamping that pair cuts the client down to the strip where two working areas
+                // overlap - a few pixels wide, which is what "the graphics disappear" looks like - so answer with
+                // the rectangle as it came and let the backstop re-run this after the position settles.
+                if (MaxGateProbe != 0 && zoomStyle && FrameLog != null)
+                    SayFrame($"NCCALCSIZE style says maximized but the rectangle is not this monitor's maximized frame: rect={Rect(p.rgrc0)} work={Rect(work)} allowance={MaximizedBorderAllowance(dpi)}@{dpi}dpi - not clamped");
+                return;
+            }
+            if (!zoomStyle && FrameLog != null)
+                SayFrame($"NCCALCSIZE maximized frame without WS_MAXIMIZE in the style: rect={Rect(p.rgrc0)} work={Rect(work)} gate={(MaxGateProbe == 0 ? "old, skipped the clamp" : "new, clamped")}");
+            var c = ClampTo(p.rgrc0, work);
+            if (IsCollapsed(c))
+            {
+                SayFrame($"NCCALCSIZE clamp would collapse the client: rect={Rect(p.rgrc0)} work={Rect(work)}");
+                return;                                             // never answer with a client that has collapsed
+            }
+            p.rgrc0 = c;
             Marshal.StructureToPtr(p, lParam, false);
         }
+
+        static string Rect(WinRect r) => r.Left + "," + r.Top + " " + (r.Right - r.Left) + "x" + (r.Bottom - r.Top);
+
+        /// <summary>
+        /// True when a WM_NCCALCSIZE rectangle *is* the maximized frame rather than a window the user placed: it
+        /// spans the whole working area and sticks out of it by no more than the border the system puts off screen
+        /// when it maximizes (<c>SM_CXSIZEFRAME + SM_CXPADDEDBORDER</c>: 9 px per side at 125 % on the machine this
+        /// was measured on, a 1938x1038 window at -9,-9 over a 1920x1020 work area). A window the owner sized and
+        /// dragged himself is left exactly as he put it, including when he drags it past the edge.
+        /// </summary>
+        internal static bool CoversWorkAsMaximized(WinRect rc, WinRect work, int give)
+            => rc.Left <= work.Left && rc.Top <= work.Top && rc.Right >= work.Right && rc.Bottom >= work.Bottom
+            && work.Left - rc.Left <= give && work.Top - rc.Top <= give
+            && rc.Right - work.Right <= give && rc.Bottom - work.Bottom <= give;
+
+        /// <summary>The client rectangle the clamp answers with: the frame cut down to the working area.</summary>
+        internal static WinRect ClampTo(WinRect rc, WinRect work)
+            => new WinRect { Left = Math.Max(rc.Left, work.Left), Top = Math.Max(rc.Top, work.Top),
+                             Right = Math.Min(rc.Right, work.Right), Bottom = Math.Min(rc.Bottom, work.Bottom) };
+
+        /// <summary>A clamped rectangle that has no pixels left; answered, it would leave the window with nothing to
+        /// draw into, so the clamp is refused instead - and the answer is a rectangle the caller has to explain.</summary>
+        internal static bool IsCollapsed(WinRect rc) => rc.Right <= rc.Left || rc.Bottom <= rc.Top;
+
+        static int maxBorderCache = -1;
+        /// <summary>The invisible border a maximized window is placed outside the working area by, as the system
+        /// metrics report it. Not device pixels: see <see cref="MaximizedBorderAllowance"/>.</summary>
+        internal static int MaxBorder()
+        {
+            if (maxBorderCache < 0) maxBorderCache = GetSystemMetrics(SM_CXSIZEFRAME) + GetSystemMetrics(SM_CXPADDEDBORDER);
+            return maxBorderCache;
+        }
+
+        /// <summary>
+        /// How far past the working edge a rectangle may hang and still be counted as the maximized frame. The two
+        /// metrics do not scale with the display DPI (measured here at 125 %: they say 4 + 4 = 8 while the window
+        /// the system actually places is at -9,-9 around a 1920x1020 work area), so the sum is scaled to the DPI of
+        /// the monitor the frame belongs to (<see cref="FrameMonitor"/>) and rounded up, which leaves a pixel of
+        /// slack on top of the real border rather than a pixel short of it - being short of it means the clamp is
+        /// skipped and the client stays the whole window.
+        /// </summary>
+        internal static int MaximizedBorderAllowance(int dpi)
+        {
+            int px = MaxBorder();
+            if (dpi > 0 && dpi != 96) px = (int)Math.Ceiling(px * dpi / 96.0);
+            return Math.Max(2, px);
+        }
+
+        /// <summary>The DPI of a window, or 96 when the system call is not available.</summary>
+        internal static int WindowDpi(IntPtr hwnd)
+        {
+            try { int d = GetDpiForWindow(hwnd); return d > 0 ? d : 96; } catch { return 96; }
+        }
+
+        [DllImport("user32.dll")] static extern int GetDpiForWindow(IntPtr hwnd);
+
+        /// <summary>
+        /// The monitor whose working area a window frame belongs to, decided by the frame's own rectangle instead of
+        /// by asking the window where it is. That question has a wrong answer during exactly this transition: a
+        /// minimized window sits at -32000,-32000 - measured here, both WM_GETMINMAXINFO and WM_NCCALCSIZE are
+        /// answered from that position while the window is on its way back up, 15 times in one minimise/restore run
+        /// - and MONITOR_DEFAULTTONEAREST from that point is the top-left monitor of the desktop, whatever monitor the
+        /// window is going back to. On three screens in a row the left one then works by accident and the other two
+        /// are measured against the wrong working area, which is off by a taskbar or by a whole screen width:
+        /// WM_GETMINMAXINFO hands the system the neighboring screen's size to maximize to, and the rectangle that
+        /// comes back no longer matches this screen's working area, so the all-or-nothing clamp below either skips it
+        /// (client = the whole inflated window: content one border off the left and top edge, a band of the same
+        /// width unpainted at the right) or clamps it against the wrong screen (a client a few pixels wide).
+        /// <para>
+        /// So a rectangle that is not the minimized one is asked directly - the rectangle a frame message is *about*
+        /// is already the final one - and a minimized rectangle is replaced by the window's restore position from
+        /// GetWindowPlacement, which the system keeps precisely so that a window comes back on the screen it left.
+        /// Only when both are unusable does this fall back to the window position.
+        /// </para>
+        /// </summary>
+        bool FrameMonitor(WinRect rc, out WinMonitorInfo mi, out int dpi)
+        {
+            var info = new WinMonitorInfo { cbSize = Marshal.SizeOf<WinMonitorInfo>() };
+            IntPtr chosen = MaxMonitorProbe == 0 ? IntPtr.Zero : FrameRectMonitor(rc);
+            IntPtr byWindow = MonitorFromWindow(Handle, MONITOR_DEFAULTTONEAREST);
+            if (chosen == IntPtr.Zero) chosen = byWindow;
+            if (chosen == IntPtr.Zero || !GetMonitorInfo(chosen, ref info)) { mi = default(WinMonitorInfo); dpi = 0; return false; }
+            if (MaxMonitorProbe != 0 && chosen != byWindow && FrameLog != null)
+            {
+                var other = new WinMonitorInfo { cbSize = Marshal.SizeOf<WinMonitorInfo>() };
+                if (GetMonitorInfo(byWindow, ref other))
+                    SayFrame($"frame rectangle {Rect(rc)} is not on the monitor the window position gives ({Rect(other.rcMonitor)}); using the frame's monitor {Rect(info.rcMonitor)}");
+            }
+            mi = info;
+            dpi = MonitorDpi(chosen);
+            if (dpi == 0) dpi = WindowDpi(Handle);
+            return true;
+        }
+
+        /// <summary>One line for the trace: the monitor the frame is measured against and the plain window-position
+        /// answer next to it. On one screen they always agree; on several, a run that hangs is the run where the two
+        /// work areas printed here differ.</summary>
+        internal string FrameMonitorDump()
+        {
+            if (!IsHandleCreated) return "mon=-";
+            if (!GetWindowRect(Handle, out WinRect wr)) return "mon=?";
+            IntPtr frame = MaxMonitorProbe == 0 ? IntPtr.Zero : FrameRectMonitor(wr);
+            IntPtr byWindow = MonitorFromWindow(Handle, MONITOR_DEFAULTTONEAREST);
+            return "mon(frame)=" + MonitorDump(frame == IntPtr.Zero ? byWindow : frame) + " mon(window)=" + MonitorDump(byWindow);
+        }
+
+        static string MonitorDump(IntPtr h)
+        {
+            var mi = new WinMonitorInfo { cbSize = Marshal.SizeOf<WinMonitorInfo>() };
+            return h == IntPtr.Zero || !GetMonitorInfo(h, ref mi) ? "fail" : Rect(mi.rcWork) + "@" + MonitorDpi(h);
+        }
+
+        /// <summary>The monitor of this frame rectangle; zero when the rectangle is the minimized position and the
+        /// window's restore position is unusable too, leaving the caller to fall back on the window itself.</summary>
+        IntPtr FrameRectMonitor(WinRect rc)
+        {
+            // A minimized window is parked far outside every screen for the whole of its restore, so the rectangle
+            // only answers the question while the window is not iconic. IsIconic is the signal; the magnitude is only
+            // a backup, because a DPI-unaware process sees the parked position scaled (-32000 arrives as -25600 at
+            // 125 %, measured with the rig in this workspace) and cannot be recognised by one constant.
+            if (!IsIconic(Handle) && !IsMinimizedRect(rc))
+            {
+                IntPtr h = MonitorFromRect(ref rc, MONITOR_DEFAULTTONEAREST);
+                if (h != IntPtr.Zero) return h;
+            }
+            WinRect normal;
+            if (NormalPosition(out normal))
+            {
+                IntPtr h = MonitorFromRect(ref normal, MONITOR_DEFAULTTONEAREST);
+                if (h != IntPtr.Zero) return h;
+            }
+            return IntPtr.Zero;
+        }
+
+        /// <summary>
+        /// The position the window will be restored to. The system keeps it while the window is minimized or
+        /// maximized, and it is the only way to tell which screen a frame message about the minimized rectangle
+        /// belongs to. The docs call it workspace coordinates: at most a taskbar's offset, and only the screen is
+        /// read out of it, so the difference cannot land the rectangle on another monitor.
+        /// </summary>
+        bool NormalPosition(out WinRect rc)
+        {
+            rc = default(WinRect);
+            var wp = new WinWindowPlacement { length = Marshal.SizeOf<WinWindowPlacement>() };
+            if (!GetWindowPlacement(Handle, ref wp)) return false;
+            rc = wp.rcNormalPosition;
+            return !IsMinimizedRect(rc) && rc.Right > rc.Left && rc.Bottom > rc.Top;
+        }
+
+        static bool IsMinimizedRect(WinRect rc) => rc.Left <= -20000 || rc.Top <= -20000;
+
+        /// <summary>The DPI of a monitor, or 0 when the call is unavailable. The invisible maximized border is
+        /// measured in the monitor's DPI, not the window's, which matters when the screens are scaled differently.</summary>
+        static int MonitorDpi(IntPtr hMonitor)
+        {
+            try
+            {
+                uint x, y;
+                if (GetDpiForMonitor(hMonitor, MDT_EFFECTIVE_DPI, out x, out y) == 0 && x > 0) return (int)x;
+            }
+            catch { }
+            return 0;
+        }
+
+        /// <summary>
+        /// A/B for the maximise clamp; the demo reads <c>SR2D_MAXGATE=0</c> from the environment.
+        /// 1 (shipped) = clamp only when the rectangle handed to WM_NCCALCSIZE is the maximized frame of the monitor
+        /// it belongs to; 0 = the gate this unit shipped with, the WS_MAXIMIZE style bit alone, which clamps a
+        /// rectangle that has nothing to do with that working area whenever the two disagree - see
+        /// <see cref="MaxMonitorProbe"/>. The predicate is checked by <c>--framecheck &lt;file&gt;</c>, which prints
+        /// its truth table (exit code 0 = all cases as stated) without opening a window.
+        /// </summary>
+        internal static int MaxGateProbe = 1;
+
+        /// <summary>
+        /// A/B for the monitor a maximized frame is measured against; the demo reads <c>SR2D_MAXMON=0</c>.
+        /// 1 (shipped) = <see cref="FrameMonitor"/>: the frame's own rectangle decides, and a rectangle at the
+        /// minimized position is replaced by the window's restore position. 0 = the answer this unit shipped with,
+        /// MonitorFromWindow for every frame message - which while the window is minimized is the top-left monitor
+        /// of the desktop, so the second and third screen of a row maximize and clamp against the wrong one.
+        /// </summary>
+        internal static int MaxMonitorProbe = 1;
+
+        /// <summary>
+        /// Opt-in log of the frame decisions the unit test cannot see: the demo points this at its trace file
+        /// (SR2D_TRACE) and gets one line each time a WM_NCCALCSIZE arrives whose rectangle is the maximized frame
+        /// while the style bits do not say so yet, and each time <see cref="MaximizedClientCheck"/> recomputes the
+        /// frame. Nothing else - a normal resize answers silently.
+        /// </summary>
+        internal static Action<string>? FrameLog;
+
+        static void SayFrame(string what) { var f = FrameLog; if (f != null) f(what); }
+
+        const int SM_CXSIZEFRAME = 32, SM_CXPADDEDBORDER = 92;
+        [DllImport("user32.dll")] static extern int GetSystemMetrics(int index);
+
 
         const int WM_GETMINMAXINFO = 0x0024;
 
@@ -1517,8 +1803,10 @@ namespace Sr2d64CSport
         void MaximizeOnNearestMonitor(IntPtr lParam)
         {
             if (fullscreen || lParam == IntPtr.Zero) return;
-            var mi = new WinMonitorInfo { cbSize = Marshal.SizeOf<WinMonitorInfo>() };
-            if (!GetMonitorInfo(MonitorFromWindow(Handle, MONITOR_DEFAULTTONEAREST), ref mi)) return;
+            WinRect wr;
+            if (!GetWindowRect(Handle, out wr)) return;
+            WinMonitorInfo mi; int dpi;
+            if (!FrameMonitor(wr, out mi, out dpi)) return;
             var info = Marshal.PtrToStructure<WinMinMaxInfo>(lParam);
             info.ptMaxPosition = new WinPoint { X = mi.rcWork.Left - mi.rcMonitor.Left, Y = mi.rcWork.Top - mi.rcMonitor.Top };
             info.ptMaxSize = new WinPoint { X = mi.rcWork.Right - mi.rcWork.Left, Y = mi.rcWork.Bottom - mi.rcWork.Top };
@@ -1527,7 +1815,7 @@ namespace Sr2d64CSport
         }
 
         [StructLayout(LayoutKind.Sequential)]
-        struct WinRect { public int Left, Top, Right, Bottom; }
+        internal struct WinRect { public int Left, Top, Right, Bottom; }
 
         [StructLayout(LayoutKind.Sequential)]
         struct WinNccalcsizeParams { public WinRect rgrc0, rgrc1, rgrc2; public IntPtr lppos; }
@@ -1535,9 +1823,23 @@ namespace Sr2d64CSport
         [StructLayout(LayoutKind.Sequential)]
         struct WinMonitorInfo { public int cbSize; public WinRect rcMonitor; public WinRect rcWork; public int dwFlags; }
 
+        // The base version of WINDOWPLACEMENT, without the rcDevice / fNC fields added later: GetWindowPlacement
+        // fills what the caller's length declares it knows.
+        [StructLayout(LayoutKind.Sequential)]
+        struct WinWindowPlacement { public int length, flags, showCmd; public WinPoint ptMinPosition, ptMaxPosition; public WinRect rcNormalPosition; }
+
         [DllImport("user32.dll")] static extern int GetWindowLong(IntPtr hwnd, int index);
         [DllImport("user32.dll")] static extern IntPtr MonitorFromWindow(IntPtr hwnd, int flags);
+        [DllImport("user32.dll")] static extern IntPtr MonitorFromRect(ref WinRect lprc, int flags);
+        [DllImport("user32.dll")] static extern bool IsIconic(IntPtr hwnd);
+        [DllImport("user32.dll")] static extern bool GetWindowPlacement(IntPtr hwnd, ref WinWindowPlacement lpwndpl);
+        [DllImport("shcore.dll")] static extern int GetDpiForMonitor(IntPtr hmonitor, int dpiType, out uint dpiX, out uint dpiY);
+        const int MDT_EFFECTIVE_DPI = 0;
         [DllImport("user32.dll")] static extern bool GetMonitorInfo(IntPtr hMonitor, ref WinMonitorInfo lpmi);
+        [DllImport("user32.dll")] static extern bool GetWindowRect(IntPtr hwnd, out WinRect rc);
+        [DllImport("user32.dll")] static extern bool GetClientRect(IntPtr hwnd, out WinRect rc);
+        [DllImport("user32.dll")] static extern bool ClientToScreen(IntPtr hwnd, ref WinPoint pt);
+        [DllImport("user32.dll")] static extern bool SetWindowPos(IntPtr hwnd, IntPtr after, int x, int y, int cx, int cy, uint flags);
 
         const int GWL_STYLE = -16, WS_MAXIMIZE = 0x01000000, MONITOR_DEFAULTTONEAREST = 2;
 

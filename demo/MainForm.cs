@@ -139,7 +139,7 @@ namespace Sr2d64CSport
         static readonly string[] MaskNames = { "circle", "diamond", "stripes", "checker" };
         readonly SpriteButton btnWireColor = new SpriteButton();
         readonly SpriteButton btnSaveSvg = new SpriteButton(), btnSaveSvgObjects = new SpriteButton();
-        public const string DemoVersion = "0.56", DemoDate = "2026-10-20";   // shown in the title bar; change the version here
+        public const string DemoVersion = "0.60", DemoDate = "2026-10-24";   // shown in the title bar; change the version here
         int wireColor = unchecked((int)0xFFE0245E);     // the wireframe overlay colour (ARGB), picked with the Wireframe colour button
         readonly SpriteButton btnSuite = new SpriteButton(), btnCopy = new SpriteButton(), btnSave = new SpriteButton(), btnReset = new SpriteButton(), btnFile = new SpriteButton(), btnMeasure = new SpriteButton(), btnCode = new SpriteButton();
         readonly SpriteToggle chkProgress = Tick();      // slow tests: show phases / partial renders while a frame is being made
@@ -160,7 +160,62 @@ namespace Sr2d64CSport
 
         // WinForms' own WM_INPUTLANGCHANGE handler builds a CultureInfo for the new layout and crashes under
         // InvariantGlobalization (the demo builds with it off, but a published trimmed build may not) - swallow it here too.
-        protected override void WndProc(ref Message m) { if (m.Msg != 0x0051) base.WndProc(ref m); }
+        protected override void WndProc(ref Message m)
+        {
+            if (Trace.On) TraceMessage(in m);
+            if (m.Msg != 0x0051) base.WndProc(ref m);
+            // after the frame messages: the geometry the window manager ended up with, which is the thing the
+            // maximise clamp decides. Before the call only what it was asked about is visible.
+            if (Trace.On && (m.Msg is 0x0083 or 0x0005 or 0x0047 or 0x0024 or 0x007D or 0x0112))
+                Trace.Line("post " + Trace.Msg(m.Msg) + " " + WinState());
+        }
+
+        /// <summary>SR2D_TRACE: the window-state messages go out one per line, the noisy ones are counted.</summary>
+        void TraceMessage(in Message m)
+        {
+            switch (m.Msg)
+            {
+                case 0x0200: case 0x0020: case 0x0084: case 0x00A0: case 0x0113: case 0x0014:   // move, cursor, hit test, nc move, timer, erase
+                    Trace.Count(m.Msg); return;
+                case 0x000F:                                                                    // paint: counted, and its result logged only on state changes
+                    Trace.Count(m.Msg); return;
+            }
+            Trace.Line("wndproc " + Trace.Msg(m.Msg) + " w=0x" + m.WParam.ToInt64().ToString("X", CultureInfo.InvariantCulture) + " l=0x" + m.LParam.ToInt64().ToString("X", CultureInfo.InvariantCulture) + " " + WinState());
+        }
+
+        /// <summary>One snapshot line for the trace: what the form, the surface and the canvas believe right now, next to
+        /// what the window manager actually has (the real client rectangle and where its origin lands on screen).
+        /// Built on the UI thread; the watchdog pool thread reads <see cref="winStateSnap"/> instead of these properties.</summary>
+        string WinState()
+        {
+            string real = "-";
+            if (IsHandleCreated)
+            {
+                RECT cr, wr;
+                if (GetClientRect(Handle, out cr) && GetWindowRect(Handle, out wr))
+                {
+                    var o = new POINT();
+                    _ = ClientToScreen(Handle, ref o);
+                    real = $" real={cr.Right}x{cr.Bottom}@{o.X},{o.Y} win={wr.Right - wr.Left}x{wr.Bottom - wr.Top}@{wr.Left},{wr.Top}";
+                }
+            }
+            string s = "state=" + WindowState + (IsFullScreen ? "/FULL" : "") + " bounds=" + Bounds.Width + "x" + Bounds.Height
+                 + " client=" + ClientSize.Width + "x" + ClientSize.Height + real
+                 + " surf=" + surf.ClientSize.Width + "x" + surf.ClientSize.Height
+                 + " canvas=" + (canvas == null ? "-" : canvas.Width + "x" + canvas.Height) + " gdi=" + (canvas?.IsGdiSurface ?? false)
+                 + " " + FrameMonitorDump();
+            winStateSnap = s;
+            return s;
+        }
+
+        volatile string winStateSnap = "(not yet)";
+        internal string LastWinState => winStateSnap;
+
+        [StructLayout(LayoutKind.Sequential)] struct RECT { public int Left, Top, Right, Bottom; }
+        [StructLayout(LayoutKind.Sequential)] struct POINT { public int X, Y; }
+        [DllImport("user32")] static extern bool GetClientRect(IntPtr hWnd, out RECT lpRect);
+        [DllImport("user32")] static extern bool GetWindowRect(IntPtr hWnd, out RECT lpRect);
+        [DllImport("user32")] static extern bool ClientToScreen(IntPtr hWnd, ref POINT lpPoint);
 
         [DllImport("winmm")] static extern uint timeBeginPeriod(uint ms);
         [DllImport("winmm")] static extern uint timeEndPeriod(uint ms);
@@ -173,8 +228,17 @@ namespace Sr2d64CSport
         [DllImport("user32")] static extern int ReleaseDC(IntPtr hWnd, IntPtr hDC);
         [DllImport("gdi32")] static extern bool BitBlt(IntPtr hdc, int x, int y, int cx, int cy, IntPtr hdcSrc, int x1, int y1, uint rop);
 
+        /// <summary>One of the engine's A/B switches from the environment, left at its shipped value when unset.</summary>
+        static int Probe(string name, int current)
+            => int.TryParse(Environment.GetEnvironmentVariable(name), NumberStyles.Integer, CultureInfo.InvariantCulture, out int v) ? v : current;
+
         public MainForm()
         {
+            string? tracePath = Environment.GetEnvironmentVariable("SR2D_TRACE");
+            if (!string.IsNullOrEmpty(tracePath)) { Trace.Open(tracePath); SpriteForm.FrameLog = s => Trace.Line("FRAME  " + s); }
+            SpriteForm.MaxGateProbe = Probe("SR2D_MAXGATE", SpriteForm.MaxGateProbe);                 // which question decides the maximised clamp
+            SpriteForm.MaximizeHealProbe = Probe("SR2D_MAXHEAL", SpriteForm.MaximizeHealProbe);        // the frame-recompute backstop
+            SpriteForm.MaxMonitorProbe = Probe("SR2D_MAXMON", SpriteForm.MaxMonitorProbe);             // which monitor the frame is measured against
             Text = "SR2D demo";
             StripeStyle = StripeBarsStyle.TopAndBottomLines;   // colored edges (top and bottom lines) instead of full bars
             WindowState = FormWindowState.Maximized;        // starts maximised as a window (the taskbar stays); the sprite title bar is the base class's
@@ -195,6 +259,7 @@ namespace Sr2d64CSport
             Shown += (_, _) =>
             {
                 RebuildCanvas();          // "fit to window" needs the final layout size
+                if (Trace.On) { Trace.Line("shown " + WinState()); Trace.StartWatchdog(Handle, () => LastWinState); }
                 if (ShotsDir == null) return;
                 try { RunShots(ShotsDir); } catch (Exception ex) { Log("shots failed: " + ex); }
                 Close();
@@ -207,8 +272,12 @@ namespace Sr2d64CSport
             running = true;
             Application.Idle += (_, _) =>
             {
+                long idleT0 = Trace.On ? Stopwatch.GetTimestamp() : 0;
+                int passes = 0;
+                long nextBeat = 500;
                 while (running && !inSuite)
                 {
+                    passes++;
                     if (PeekMessage(out _, IntPtr.Zero, 0, 0x01FF, 0) != 0 || PeekMessage(out _, IntPtr.Zero, 0x0201, 0x7FFFFFFF, 0) != 0) break;   // real work pending
                     for (int f = 0; f < 4 && running && !inSuite; f++)
                     {
@@ -220,7 +289,15 @@ namespace Sr2d64CSport
                     // is generated - the search box (and every text control) lost most keystrokes (a character slipped
                     // through only when it happened to be pumped by the main loop)
                     while (PeekMessage(out var nm, IntPtr.Zero, 0, 0, PM_REMOVE) != 0) { TranslateMessage(ref nm); DispatchMessage(ref nm); }
+                    // SR2D_TRACE: the state of the window once a second while the loop spins, so a freeze that
+                    // involves no messages at all still shows what the form and the real window each think.
+                    if (Trace.On)
+                    {
+                        long el = (long)((Stopwatch.GetTimestamp() - idleT0) * 1000.0 / Stopwatch.Frequency);
+                        if (el >= nextBeat) { nextBeat = el + 1000; Trace.Line("HEARTBEAT " + WinState()); }
+                    }
                 }
+                if (Trace.On) Trace.Pump("idle exit after " + passes + " pass(es) in " + ((Stopwatch.GetTimestamp() - idleT0) * 1000.0 / Stopwatch.Frequency).ToString("0", CultureInfo.InvariantCulture) + "ms " + WinState());
             };;
         }
 
@@ -259,7 +336,7 @@ namespace Sr2d64CSport
             surf.Dock = DockStyle.Fill; surf.BackColor = Color.Black; surf.Painter = _ => { };
             surf.MouseMove += (_, e) => SurfaceMove(e);
             surf.MouseDown += (_, e) => SurfaceDown(e);
-            surf.MouseUp += (_, e) => { if (e.Button == MouseButtons.Left) { dragging = false; orbiting = false; edgeDrag = 0; rotating = false; shadowDrag = false; painting = false; frame.MouseUp(); } if (e.Button == MouseButtons.Middle) panning = false; };
+            surf.MouseUp += (_, e) => { if (e.Button == MouseButtons.Left) { dragging = false; orbiting = false; edgeDrag = 0; rotating = false; shadowDrag = false; painting = false; frame.MouseUp(); } if (e.Button == MouseButtons.Middle) panning = false; ctx.HoldRight &= e.Button != MouseButtons.Right; ctx.HoldMiddle &= e.Button != MouseButtons.Middle; };
             surf.MouseWheel += (_, e) => SurfaceWheel(e);
             surf.MouseEnter += (_, _) => surf.Focus();     // wheel events go to the focused control
             surf.MouseLeave += (_, _) => { if (!dragging && !orbiting && edgeDrag == 0) surf.Cursor = Cursors.Default; };
@@ -290,8 +367,8 @@ namespace Sr2d64CSport
             Combo(setupStack, "Sprite size", cbSprite, new[] { "64", "128", "256", "512" }, 2, (_, _) => RebuildAssets());
             Combo(setupStack, "Test picture", cbAssets, new[] { "Lenna (photo + normal map)", "Bricks (legacy procedural)" }, 0, (_, _) => RebuildAssets());
             resizeTimer.Interval = 150;
-            resizeTimer.Tick += (_, _) => { resizeTimer.Stop(); if (cbCanvas.SelectedIndex == 0) RebuildCanvas(); };
-            surf.Resize += (_, _) => { resizeTimer.Stop(); resizeTimer.Start(); };
+            resizeTimer.Tick += (_, _) => { resizeTimer.Stop(); if (Trace.On) Trace.Line("resizeTimer tick " + WinState()); if (cbCanvas.SelectedIndex == 0) RebuildCanvas(); };
+            surf.Resize += (_, _) => { if (Trace.On) Trace.Line("surf.Resize " + surf.ClientSize.Width + "x" + surf.ClientSize.Height); resizeTimer.Stop(); resizeTimer.Start(); };
             Combo(setupStack, "SIMD kernels", cbSimd, new[] { "auto", "force SSE2", "force AVX2" }, 0, (_, _) => ApplySimd());
             cbSimd.Enabled = Caps.HasSimdInfo;
             Check(setupStack, chkClear, "Clear canvas each frame", true);
@@ -649,6 +726,11 @@ namespace Sr2d64CSport
         void SurfaceDown(MouseEventArgs e)
         {
             lastMx = e.X; lastMy = e.Y;
+            if (current != null && current.HoldMouse && (e.Button == MouseButtons.Right || e.Button == MouseButtons.Middle))
+            {   // held-view keys (the test reads them each frame): no teleport, no pan while they are down
+                if (e.Button == MouseButtons.Right) ctx.HoldRight = true; else ctx.HoldMiddle = true;
+                return;
+            }
             if (current != null && current.Camera)
             {
                 if (e.Button == MouseButtons.Left) { orbiting = true; surf.Cursor = SpriteCursors.Rotate; if (current.FreeOpIndex >= 0 && cbOp.SelectedIndex != current.FreeOpIndex) cbOp.SelectedIndex = current.FreeOpIndex; }
@@ -1058,13 +1140,20 @@ namespace Sr2d64CSport
         {
             if (assets == null || temp == null) return;
             int cw, ch;
-            if (cbCanvas.SelectedIndex == 0) { cw = Math.Max(64, surf.ClientSize.Width); ch = Math.Max(64, surf.ClientSize.Height); }
+            if (cbCanvas.SelectedIndex == 0)
+            {
+                // minimised: the surface has no size. Keep the last canvas rather than rebuilding at 64 x 64 and again
+                // at full size on restore (two allocations and two slow first frames while the window comes back).
+                if (surf.ClientSize.Width <= 0 || surf.ClientSize.Height <= 0) { if (Trace.On) Trace.Line("RebuildCanvas skipped: zero surface " + WinState()); return; }
+                cw = Math.Max(64, surf.ClientSize.Width); ch = Math.Max(64, surf.ClientSize.Height);
+            }
             else { var cs = cbCanvas.Items[cbCanvas.SelectedIndex].Split('x'); cw = int.Parse(cs[0].Trim(), System.Globalization.CultureInfo.InvariantCulture); ch = int.Parse(cs[1].Trim(), System.Globalization.CultureInfo.InvariantCulture); }
-            if (canvas != null && canvas.Width == cw && canvas.Height == ch && canvas.IsGdiSurface == chkGdi.Checked) return;
+            if (canvas != null && canvas.Width == cw && canvas.Height == ch && canvas.IsGdiSurface == chkGdi.Checked) { if (Trace.On) Trace.Line($"RebuildCanvas unchanged {cw}x{ch}"); return; }
             canvas?.Dispose();
             foreach (var bt in bandTemps.Values) bt.Dispose();
             bandTemps.Clear();
             canvas = new Sprite(cw, ch, chkGdi.Checked);
+            if (Trace.On) Trace.Line($"RebuildCanvas -> {cw}x{ch} gdi={chkGdi.Checked} " + WinState());
             ctx = new Ctx { Canvas = canvas, Temp = temp, A = assets, Frame = frame };   // Frame is a process-wide field: a fresh context must not publish null to readers between the rebuild and the next selection
             mouseX = cw / 2; mouseY = ch / 2;
             surf.Invalidate();
@@ -1116,14 +1205,26 @@ namespace Sr2d64CSport
 
         // -------------------------------------------------------------- frame
         double lastFrameStart, nextFrameDue;
+        string lastBlocked = "";
         void Frame()
         {
             // the output bench's fullscreen form (demo/OutputDemo.cs) takes the whole window over: the bench renders
             // nothing here while it is up, every frame of this loop goes to that form instead.
+            string? blocked = null; int nap = 5;
             if (OutputDemo.FullscreenOpen) { OutputDemo.TickFullscreen(); return; }
-            if (canvas == null || current == null || codeShown) { System.Threading.Thread.Sleep(5); return; }
-            for (int i = 0; i < Application.OpenForms.Count; i++)       // a modal dialog owns the message loop now; keep
-                if (Application.OpenForms[i] is { } open && open.Modal) { System.Threading.Thread.Sleep(5); return; }   // rendering behind it starved its input (the OK / Cancel clicks "came late")
+            if (canvas == null || current == null || codeShown) blocked = "no canvas/test or code view";
+            // minimised (or zero-sized): nothing is visible, so render nothing; the loop idles until the window is back
+            else if (WindowState == FormWindowState.Minimized || surf.ClientSize.Width <= 0 || surf.ClientSize.Height <= 0) { blocked = "minimised / zero surface"; nap = 20; }
+            else
+                for (int i = 0; i < Application.OpenForms.Count; i++)       // a modal dialog owns the message loop now; keep
+                    if (Application.OpenForms[i] is { } open && open.Modal) { blocked = "modal dialog open"; break; }   // rendering behind it starved its input (the OK / Cancel clicks "came late")
+            if (blocked != null)
+            {
+                if (Trace.On && blocked != lastBlocked) { lastBlocked = blocked; Trace.Line("RENDER blocked: " + blocked + " " + WinState()); }
+                System.Threading.Thread.Sleep(nap);
+                return;
+            }
+            if (Trace.On && lastBlocked.Length > 0) { Trace.Line("RENDER resumed after: " + lastBlocked + " " + WinState()); lastBlocked = ""; }
             double now = clock.Elapsed.TotalMilliseconds;
             if (chkVsync.Checked)
             {
@@ -1226,6 +1327,7 @@ namespace Sr2d64CSport
 
             double renderMs = (t1 - t0) * 1000.0 / Stopwatch.Frequency;
             double presentMs = (t2 - t1) * 1000.0 / Stopwatch.Frequency;
+            if (Trace.On && renderMs + presentMs > 200) Trace.Line($"SLOW FRAME {renderMs:0} ms render + {presentMs:0} ms present ({current.Name})");
             emaRender = emaRender < 0 ? renderMs : emaRender * 0.9 + renderMs * 0.1;
             fpsFrames++; fpsAccumMs += frameDelta; renderAccumMs += renderMs; presentAccumMs += presentMs;
             if (now - lastFpsUpdate > 250)
@@ -1272,6 +1374,7 @@ namespace Sr2d64CSport
         void RenderSlowFrame()
         {
             if (canvas == null || current == null) return;
+            if (Trace.On) Trace.Line("RenderSlowFrame start (" + current.Name + ") " + WinState());
             FillCtx();
             slowFrameNo = slowTotal - slowLeft + 1; slowPhase = "";
             ctx.Progress = chkProgress.Checked ? SlowProgress : null;   // off: the test runs as one opaque call (what a game would do)

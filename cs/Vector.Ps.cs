@@ -569,7 +569,7 @@ namespace Sr2d64CSport
                     s.Path = gs.Path.Transformed(inv); s.Transform = m; s.StrokeWidth = gs.LineWidth; s.Dash = gs.Dash == null ? null : (float[])gs.Dash.Clone(); s.DashOffset = gs.DashOffset;
                     s.Clip = gs.Clip?.Transformed(inv);
                 }
-                if (s.StrokeWidth <= 0) s.StrokeWidth = 0;   // hairline: the renderer widens to MinStrokeWidth
+                if (s.StrokeWidth <= 0) { s.StrokeWidth = 0; s.Hairline = true; }   // width 0 = the thinnest line the device draws (one device pixel)
                 img.Shapes.Add(s);
             }
             NewPath();

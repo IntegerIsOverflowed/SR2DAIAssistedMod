@@ -78,6 +78,8 @@ namespace Sr2d64CSport
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private int PolyFlags(bool aa) => aa ? (AaQuality >= 16 ? 5 : 1) : 0;
+        /// <summary>Flags for one call: quality 16 or 4 (any other value, 0 included, means the global <see cref="AaQuality"/>).</summary>
+        private int PolyFlags(bool aa, int quality) => aa ? ((quality == 0 ? AaQuality : quality) >= 16 ? 5 : 1) : 0;
 
         private void Poly(ref Geo g, int c, SR2D.LineOp op, bool aa, int k)
         {
@@ -104,14 +106,14 @@ namespace Sr2d64CSport
 
         /// <summary>Several contours filled in one call (non-zero winding → union; a reversed inner
         /// contour makes a hole). <paramref name="Counts"/> holds the vertex count of each contour.</summary>
-        public void FillPolygons(ReadOnlySpan<PointF> Points, ReadOnlySpan<int> Counts, int c, SR2D.LineOp Op = SR2D.LineOp.Set, bool AA = false, bool EvenOdd = false, int BlendFactor = 128)
+        public void FillPolygons(ReadOnlySpan<PointF> Points, ReadOnlySpan<int> Counts, int c, SR2D.LineOp Op = SR2D.LineOp.Set, bool AA = false, bool EvenOdd = false, int BlendFactor = 128, int Quality = 0)
         {
             int n = Points.Length; if (n < 3 || Counts.Length == 0 || meRight <= meLeft || meBottom <= meTop) return;
             var g = Geo.Get(n, Counts.Length);
             for (int i = 0; i < n; i++) g.Pt(Points[i].X, Points[i].Y);
             for (int i = 0; i < Counts.Length; i++) g.Cnt[g.C++] = Counts[i];
             fixed (float* xy = g.XY) fixed (int* cnt = g.Cnt)
-                SR2D.Native.DrawPoly(pBuf, meWidth, meLeft, meTop, meRight, meBottom, xy, cnt, g.C, c, OpWord(Op), BlendFactor, PolyFlags(AA) | (EvenOdd ? 2 : 0));
+                SR2D.Native.DrawPoly(pBuf, meWidth, meLeft, meTop, meRight, meBottom, xy, cnt, g.C, c, OpWord(Op), BlendFactor, PolyFlags(AA, Quality) | (EvenOdd ? 2 : 0));
         }
 
         /// <summary>Polygon outline (closed polyline) with the given width.</summary>

@@ -29,6 +29,16 @@ namespace Sr2d64CSport
     public enum VectorCap : byte { Butt, Round, Square }
     /// <summary>Stroke line join.</summary>
     public enum VectorJoin : byte { Miter, Round, Bevel }
+    /// <summary>How a dash pattern meets the start of a closed subpath, whose lap ends wherever the pattern happens to be.
+    /// <see cref="Cut"/> leaves the pattern discontinuous there - the dash before the start point and the one after it are
+    /// two pieces with caps of their own, which at a wide stroke read as one dash overlapping the first: this is what SVG
+    /// and WPF do, so it is the default and what an imported file renders as. <see cref="Wrap"/> joins those two pieces into
+    /// the single dash they are on the loop, so nothing is capped at the start point. A third rule - scaling the pattern so
+    /// a whole number of periods closes the lap - was built and measured out: it is the only rule that changes dash lengths,
+    /// which no renderer does, and the stroke and the conversion then agreed less (worst dashed ink integral 1.55 % against
+    /// 0.75 % for Cut), because each route offsets the contour through its own flattening of it. Wrap has no spelling in SVG,
+    /// so an exported file leaves the seam to the reader, which cuts it.</summary>
+    public enum VectorDashSeam : byte { Cut, Wrap }
     /// <summary>What a gradient does outside 0..1.</summary>
     public enum VectorSpread : byte { Pad, Reflect, Repeat }
 
@@ -107,6 +117,10 @@ namespace Sr2d64CSport
 
         public bool IsEmpty => Kinds.Count == 0;
         public int SegmentCount => Kinds.Count;
+        /// <summary>Nodes: the end point of each line and curve segment (a closed subpath returns to its start node, which is counted once).</summary>
+        public int NodeCount { get { int n = 0; foreach (var k in Kinds) if (k == K.Line || k == K.Cubic) n++; return n; } }
+        /// <summary>Subpaths: one per move-to.</summary>
+        public int SubpathCount { get { int n = 0; foreach (var k in Kinds) if (k == K.Move) n++; return n; } }
         public PointF Current => new PointF(curX, curY);
         public PointF SubPathStart => new PointF(startX, startY);
         public bool HasOpenSubPath => open;
@@ -127,7 +141,23 @@ namespace Sr2d64CSport
             float x0 = curX, y0 = curY;
             return CurveTo(x0 + 2f / 3 * (cx - x0), y0 + 2f / 3 * (cy - y0), x + 2f / 3 * (cx - x), y + 2f / 3 * (cy - y), x, y);
         }
-        public VectorPath Close() { if (open && Kinds.Count > 0 && Kinds[^1] != K.Close) { Kinds.Add(K.Close); curX = startX; curY = startY; } open = false; return this; }
+        /// <summary>Closes the subpath. Float path data (relative curves summed in float32) can end a few ulp from the subpath start;
+        /// that leaves a tiny closing segment whose direction is noise, and the stroke join there spikes. Such an endpoint is
+        /// snapped onto the start, so the closing edge has zero length.</summary>
+        public VectorPath Close()
+        {
+            if (open && Kinds.Count > 0 && Kinds[^1] != K.Close)
+            {
+                if (Kinds[^1] != K.Move && Data.Count >= 2)
+                {
+                    float tol = 1e-5f * MathF.Max(1f, MathF.Max(MathF.Abs(startX), MathF.Abs(startY)));
+                    int n = Data.Count;
+                    if (MathF.Abs(Data[n - 2] - startX) <= tol && MathF.Abs(Data[n - 1] - startY) <= tol) { Data[n - 2] = startX; Data[n - 1] = startY; }
+                }
+                Kinds.Add(K.Close); curX = startX; curY = startY;
+            }
+            open = false; return this;
+        }
         /// <summary>SVG elliptical arc (endpoint parameterisation) converted to cubics.</summary>
         public VectorPath ArcTo(float rx, float ry, float rotDeg, bool largeArc, bool sweep, float x, float y)
         {
@@ -325,9 +355,34 @@ namespace Sr2d64CSport
         public bool EvenOdd;
         public float StrokeWidth = 1f;
         public VectorCap Cap = VectorCap.Butt;
+        /// <summary>Zero-length subpath (a dot) with a square cap. Default false: nothing is drawn, as MuPDF and cairo do.
+        /// true: an axis-aligned square of side StrokeWidth, the square the SVG 2 cap shape gives when the direction is taken as
+        /// undefined (compatibility flag; the square's orientation is a choice, not a standard). Round caps are unaffected.</summary>
+        public bool SquareDotCap;
         public VectorJoin Join = VectorJoin.Miter;
         public float MiterLimit = 4f;
         public float[]? Dash; public float DashOffset;
+        /// <summary>How the pattern meets the seam of a closed subpath; see <see cref="VectorDashSeam"/>.</summary>
+        public VectorDashSeam DashSeam;
+        /// <summary>The dash pattern of this shape, set the way an editor of the container would set it: lengths in the
+        /// shape's own user units (SVG semantics - the stroke width does not scale them), the phase at each subpath start,
+        /// and the seam rule. A pattern is refused whole rather than half-applied: a null, empty, negative, non-finite or
+        /// all-zero one clears the dash instead, leaving the shape solid, because a stroke that is dashed by a pattern no
+        /// renderer can lay out is worse than one that is not dashed at all.</summary>
+        public void SetDash(float[]? pattern, float offset = 0f, VectorDashSeam seam = VectorDashSeam.Cut)
+        {
+            if (pattern == null || pattern.Length == 0 || float.IsNaN(offset) || float.IsInfinity(offset)) { ClearDash(); return; }
+            float total = 0;
+            foreach (var v in pattern)
+            {
+                if (float.IsNaN(v) || float.IsInfinity(v) || v < 0) { ClearDash(); return; }
+                total += v;
+            }
+            if (!(total > 0)) { ClearDash(); return; }
+            Dash = (float[])pattern.Clone(); DashOffset = offset; DashSeam = seam;
+        }
+        /// <summary>Back to a solid stroke: no pattern, no phase, and the seam rule is moot.</summary>
+        public void ClearDash() { Dash = null; DashOffset = 0; DashSeam = VectorDashSeam.Cut; }
         /// <summary>Multiplies the alpha of fill and stroke (0..1).</summary>
         public float Opacity = 1f;
         /// <summary>Local -> image coordinates.</summary>
@@ -347,6 +402,13 @@ namespace Sr2d64CSport
         public bool Hidden;
         /// <summary>VectorText outline band (Inside / Outside of a closed glyph contour): the contour it is the stroke of, and the side. Null for other shapes; the SVG export without clips bakes these.</summary>
         public VectorPath? BandOf; public VectorOutlinePosition BandSide;
+        /// <summary>Which side of <see cref="Path"/> the stroke's band lies on. An Inside / Outside outline is drawn by stroking the
+        /// path at twice the band depth and clipping to that side, so the pen is twice as wide as the band the picture shows. Only
+        /// the ends of a dashed stroke read this: a cap belongs to the band, not to the pen, so it is built at half the pen's
+        /// radius on the band's centre line. Left on the pen it is a disc of the pen's radius on the path, and the clip cuts it in
+        /// half - the end then reaches twice as far past the dash as the same cap at the Center position and is flat on the path's
+        /// side. Center (the default) is an ordinary centred stroke and caps on the path.</summary>
+        public VectorOutlinePosition StrokeSide;
         /// <summary>Hairline stroke: the stroke is one device pixel wide at every zoom (map outlines). StrokeWidth is ignored.</summary>
         public bool Hairline;
         /// <summary>Map layer the shape came from (OpenMapTiles name such as "building"); null for other shapes. The map level
@@ -659,16 +721,25 @@ namespace Sr2d64CSport
                 if (!s.IsVisible && !s.Hidden) continue;    // hidden shapes are written (display="none") so a round trip keeps them
                 if (bakeOutlines && s.BandOf != null && s.Stroke != null)
                 {
-                    var d = new StringBuilder();
-                    foreach (var poly in VectorBands.Bake(s.BandOf, s, s.StrokeWidth, s.BandSide == VectorOutlinePosition.Inside))
+                    // the band the stroke paints: same width, same side, same cap and corner rule (curves stay curves). Filled with
+                    // the default nonzero rule, which is what VectorOffset.Orient orients the rings for; declaring even-odd here
+                    // would punch a hole wherever two rings of the compound overlap (adjacent dashes of a dashed band).
+                    // A dashed outline bakes through DashedBand, which takes the pattern, the phase and the seam rule the stroke
+                    // itself takes: Band has no dash arguments, so baking a dashed outline through it would export it solid.
+                    VectorPath band;
+                    if (s.Dash != null && s.Dash.Length > 0)
                     {
-                        for (int i = 0; i < poly.Count; i++) d.Append(ci, $"{(i == 0 ? "M" : "L")}{F(poly[i].X)} {F(poly[i].Y)}");
-                        d.Append('Z');
+                        // the side contours are stroked twice as wide and clipped to their side, so the outline they show is
+                        // half the pen: the width DashedBand takes, which is the width of the band it has to build
+                        double bw = s.BandSide == VectorOutlinePosition.Center ? s.StrokeWidth : s.StrokeWidth / 2.0;
+                        var dp = new double[s.Dash.Length]; for (int i = 0; i < dp.Length; i++) dp[i] = s.Dash[i];
+                        band = VectorOffset.DashedBand(s.BandOf, dp, s.DashOffset, s.DashSeam, bw, bw / 8.0, VectorOffset.BakeTol,
+                            s.BandSide, s.Cap, s.Join, s.MiterLimit);
                     }
-                    if (d.Length == 0) continue;
-                    body.Append("<path d=\"").Append(d).Append('"');
+                    else band = VectorOffset.Band(s.BandOf, s.StrokeWidth, s.BandSide, s.Cap, s.Join, s.MiterLimit);
+                    if (band.IsEmpty) continue;
+                    body.Append("<path d=\"").Append(band.ToSvgData()).Append('"');
                     Paint(s.Stroke, "fill", body);
-                    if (s.EvenOdd) body.Append(" fill-rule=\"evenodd\"");
                     if (s.Opacity < 1) body.Append(ci, $" opacity=\"{F(s.Opacity)}\"");
                     if (s.Hidden) body.Append(" display=\"none\"");
                     if (!s.Transform.IsIdentity) body.Append(ci, $" transform=\"{Mat(s.Transform)}\"");
@@ -700,6 +771,7 @@ namespace Sr2d64CSport
                     if (s.Join != VectorJoin.Miter) body.Append(ci, $" stroke-linejoin=\"{s.Join.ToString().ToLowerInvariant()}\"");
                     if (Math.Abs(s.MiterLimit - 4f) > 1e-3f) body.Append(ci, $" stroke-miterlimit=\"{F(s.MiterLimit)}\"");
                     if (s.Dash != null && s.Dash.Length > 0) { body.Append(" stroke-dasharray=\""); for (int i = 0; i < s.Dash.Length; i++) { if (i > 0) body.Append(' '); body.Append(F(s.Dash[i])); } body.Append('"'); if (s.DashOffset != 0) body.Append(ci, $" stroke-dashoffset=\"{F(s.DashOffset)}\""); }
+                    if (s.StrokeSide != VectorOutlinePosition.Center) body.Append(ci, $" data-stroke-side=\"{s.StrokeSide.ToString().ToLowerInvariant()}\"");   // SR2D's own: which side of the path this stroke's band lies on (the reader takes it back; other viewers draw the doubled pen's dash caps)
                 }
                 if (s.Opacity < 1) body.Append(ci, $" opacity=\"{F(s.Opacity)}\"");
                 if (s.Hidden) body.Append(" display=\"none\"");

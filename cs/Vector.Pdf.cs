@@ -979,6 +979,7 @@ namespace Sr2d64CSport
                         if (gs.Dash != null) { s.Dash = new float[gs.Dash.Length]; for (int i = 0; i < gs.Dash.Length; i++) s.Dash[i] = gs.Dash[i] * scale; s.DashOffset = gs.DashOffset * scale; }
                     }
                     else { s.Path = path.Transformed(inv); s.Transform = m; s.StrokeWidth = gs.LineWidth; s.Dash = gs.Dash == null ? null : (float[])gs.Dash.Clone(); s.DashOffset = gs.DashOffset; s.Clip = gs.Clip?.Transformed(inv); }
+                    if (gs.LineWidth <= 0) s.Hairline = true;   // ISO 32000-1 8.4.3.2: width 0 = the thinnest line the device draws (one device pixel)
                     img.Shapes.Add(s);
                 }
             }
