@@ -986,7 +986,22 @@ namespace Sr2d64CSport
             t = (qp.X * s.Y - qp.Y * s.X) / denom;
             u = (qp.X * r.Y - qp.Y * r.X) / denom;
             const double eps = 1e-9;
-            return t > eps && t < 1 - eps && u > eps && u < 1 - eps;
+            if (!(t > eps && t < 1 - eps && u > eps && u < 1 - eps)) return false;
+            // Segments meeting at a shared endpoint only intersect at that node. For near-tangent
+            // edges the division above is numerically unstable: the same geometry can evaluate just
+            // inside the eps window after a page translation, spawning a phantom crossing node that
+            // corrupts the face cycles (observed: both holes of a self-touching figure-8 vanish once
+            // the shape sits ~180 mm from the origin). The T-junction pass already owns endpoint
+            // contacts, using the same 1e-9 mm geometric tolerance. Squared distances keep the guard
+            // out of the sqrt path of the per-pair crossing loop.
+            const double onTol2 = 1e-9 * 1e-9;
+            double d00x = p0.X - q0.X, d00y = p0.Y - q0.Y;
+            double d01x = p0.X - q1.X, d01y = p0.Y - q1.Y;
+            double d10x = p1.X - q0.X, d10y = p1.Y - q0.Y;
+            double d11x = p1.X - q1.X, d11y = p1.Y - q1.Y;
+            if (d00x * d00x + d00y * d00y <= onTol2 || d01x * d01x + d01y * d01y <= onTol2 ||
+                d10x * d10x + d10y * d10y <= onTol2 || d11x * d11x + d11y * d11y <= onTol2) return false;
+            return true;
         }
     }
 }

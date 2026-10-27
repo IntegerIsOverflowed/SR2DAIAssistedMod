@@ -306,6 +306,28 @@ namespace Sr2d64CSport
                 int di = 0, start = outPts.Count; bool open = false, closed = false;
                 float cx = 0, cy = 0, sx = 0, sy = 0;
                 var tmp = new List<PointF>(0);
+                // Kind-boundary alignment: a cubic sharing a node with a line segment keeps its end chord
+                // on the analytic Bezier tangent there, so the Sprite stroke's join matches the vector
+                // renderer and the outline conversion. Pure-line / pure-curve paths keep the old count.
+                var alignStart = new bool[kinds.Count];
+                var alignEnd = new bool[kinds.Count];
+                for (int i = 0; i < kinds.Count; i++)
+                {
+                    if ((K)kinds[i] != K.Cubic) continue;
+                    if (i > 0 && (K)kinds[i - 1] == K.Line) alignStart[i] = true;
+                    if (i + 1 < kinds.Count && (K)kinds[i + 1] == K.Line) alignEnd[i] = true;
+                }
+                int firstSeg = -1;
+                for (int i = 0; i < kinds.Count; i++)
+                {
+                    if ((K)kinds[i] == K.Move) firstSeg = i + 1;
+                    else if ((K)kinds[i] == K.Close && firstSeg >= 0 && i - 1 > firstSeg)
+                    {
+                        if ((K)kinds[firstSeg] == K.Cubic && (K)kinds[i - 1] == K.Line) alignStart[firstSeg] = true;
+                        if ((K)kinds[i - 1] == K.Cubic && (K)kinds[firstSeg] == K.Line) alignEnd[i - 1] = true;
+                        firstSeg = -1;
+                    }
+                }
                 for (int ki = 0; ki < kinds.Count; ki++)
                 {
                     var k = (K)kinds[ki];
@@ -321,7 +343,7 @@ namespace Sr2d64CSport
                         case K.Quad:
                             { float ax = data[di++], ay = data[di++], x = data[di++], y = data[di++]; FlattenQuad(cx, cy, ax, ay, x, y, outPts); cx = x; cy = y; break; }
                         case K.Cubic:
-                            { float ax = data[di++], ay = data[di++], bx = data[di++], by = data[di++], x = data[di++], y = data[di++]; FlattenCubic(cx, cy, ax, ay, bx, by, x, y, outPts); cx = x; cy = y; break; }
+                            { float ax = data[di++], ay = data[di++], bx = data[di++], by = data[di++], x = data[di++], y = data[di++]; FlattenCubic(cx, cy, ax, ay, bx, by, x, y, outPts, alignStart[ki], alignEnd[ki]); cx = x; cy = y; break; }
                         case K.Arc:
                             { float rx = data[di++], ry = data[di++], rot = data[di++]; int fl = (int)data[di++]; float x = data[di++], y = data[di++]; FlattenArc(cx, cy, rx, ry, rot, (fl & 1) != 0, (fl & 2) != 0, x, y, outPts); cx = x; cy = y; break; }
                         case K.Smooth:
@@ -368,19 +390,66 @@ namespace Sr2d64CSport
         // Number of segments for a Bézier from the control polygon's "bend" (Wang's formula):
         // n >= sqrt( (3/4 * max second difference) / tol )  for cubics.
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        private static int CubicSegments(float x0, float y0, float x1, float y1, float x2, float y2, float x3, float y3)
+        private static int CubicSegments(float x0, float y0, float x1, float y1, float x2, float y2, float x3, float y3,
+                                         bool alignStart = false, bool alignEnd = false)
         {
             float ddx = MathF.Max(MathF.Abs(x0 - 2 * x1 + x2), MathF.Abs(x1 - 2 * x2 + x3));
             float ddy = MathF.Max(MathF.Abs(y0 - 2 * y1 + y2), MathF.Abs(y1 - 2 * y2 + y3));
             float dd = MathF.Sqrt(ddx * ddx + ddy * ddy);
             int n = (int)MathF.Ceiling(MathF.Sqrt(0.75f * dd / MathF.Max(CurveTolerance, 0.01f)));
-            return Math.Clamp(n, 1, 512);
+            n = Math.Clamp(n, 1, 512);
+            if (alignStart || alignEnd) n = AlignCubicEnds(x0, y0, x1, y1, x2, y2, x3, y3, n, alignStart, alignEnd);
+            return n;
+        }
+
+        /// <summary>Raises n until the first/last chord follows the analytic Bezier end tangent within
+        /// <see cref="VectorRender.TangentAlignAngle"/>: the Sprite stroker's join at a Line&lt;-&gt;Cubic node then
+        /// takes the same direction as the vector renderer and the outline conversion. A cusp (zero end
+        /// derivative) has no tangent and keeps the ordinary chord rule.</summary>
+        private static int AlignCubicEnds(float x0, float y0, float x1, float y1, float x2, float y2, float x3, float y3,
+                                          int n, bool alignStart, bool alignEnd)
+        {
+            float t0x = x1 - x0, t0y = y1 - y0, t1x = x3 - x2, t1y = y3 - y2;
+            bool can0 = alignStart && t0x * t0x + t0y * t0y > 1e-12f;
+            bool can1 = alignEnd && t1x * t1x + t1y * t1y > 1e-12f;
+            if (!can0 && !can1) return n;
+            if (can0) { float l = MathF.Sqrt(t0x * t0x + t0y * t0y); t0x /= l; t0y /= l; }
+            if (can1) { float l = MathF.Sqrt(t1x * t1x + t1y * t1y); t1x /= l; t1y /= l; }
+            float cosLimit = MathF.Cos(VectorRender.TangentAlignAngle);
+            while (n < 512)
+            {
+                bool ok0 = true, ok1 = true;
+                if (can0)
+                {
+                    BezAt(x0, y0, x1, y1, x2, y2, x3, y3, 1f / n, out float qx, out float qy);
+                    float cx = qx - x0, cy = qy - y0, cl = MathF.Sqrt(cx * cx + cy * cy);
+                    if (cl > 1e-9f) { cx /= cl; cy /= cl; ok0 = cx * t0x + cy * t0y >= cosLimit; }
+                }
+                if (can1)
+                {
+                    BezAt(x0, y0, x1, y1, x2, y2, x3, y3, 1f - 1f / n, out float qx, out float qy);
+                    float cx = x3 - qx, cy = y3 - qy, cl = MathF.Sqrt(cx * cx + cy * cy);
+                    if (cl > 1e-9f) { cx /= cl; cy /= cl; ok1 = cx * t1x + cy * t1y >= cosLimit; }
+                }
+                if (ok0 && ok1) break;
+                n++;
+            }
+            return n;
+        }
+
+        private static void BezAt(float x0, float y0, float x1, float y1, float x2, float y2, float x3, float y3,
+                                  float t, out float x, out float y)
+        {
+            float u = 1 - t, b0 = u * u * u, b1 = 3 * u * u * t, b2 = 3 * u * t * t, b3 = t * t * t;
+            x = b0 * x0 + b1 * x1 + b2 * x2 + b3 * x3;
+            y = b0 * y0 + b1 * y1 + b2 * y2 + b3 * y3;
         }
 
         /// <summary>Appends the cubic (without its first point) as line segments.</summary>
-        private static void FlattenCubic(float x0, float y0, float x1, float y1, float x2, float y2, float x3, float y3, List<PointF> o)
+        private static void FlattenCubic(float x0, float y0, float x1, float y1, float x2, float y2, float x3, float y3,
+                                         List<PointF> o, bool alignStart = false, bool alignEnd = false)
         {
-            int n = CubicSegments(x0, y0, x1, y1, x2, y2, x3, y3);
+            int n = CubicSegments(x0, y0, x1, y1, x2, y2, x3, y3, alignStart, alignEnd);
             // forward differencing
             float h = 1f / n, h2 = h * h, h3 = h2 * h;
             float ax = -x0 + 3 * x1 - 3 * x2 + x3, bx = 3 * x0 - 6 * x1 + 3 * x2, cx = -3 * x0 + 3 * x1;

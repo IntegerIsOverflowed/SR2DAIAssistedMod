@@ -826,6 +826,21 @@ namespace Sr2d64CSport
         /// page can A/B the node count this buys against the accuracy it costs instead of arguing about it.</summary>
         public static double BakeTol = BandTol * 0.025;
 
+        /// <summary>Flatness (mm) of the adaptive cubic sampling on a smooth contour: a sampled chord stays within this of
+        /// the curve - about 0.004 px at 96 dpi. The legacy rule fixed one chord per 0.01 mm of control polygon regardless
+        /// of curvature, so a smooth custom shape reached the offset/arrange/fit stages with tens of thousands of points
+        /// and the fitter paid for every one. The adaptive count is the Wang flatness formula the render flatteners already
+        /// use, raised to the longest chord allowed, and never above the legacy count. 0.001 mm also keeps the fitted node
+        /// count at or below the legacy one: at twice the flatness the polyline facets alone made the fitter split runs
+        /// that one cubic used to cover.</summary>
+        const double AdaptiveFlat = 0.001;
+        /// <summary>Longest chord (mm) the adaptive sampling emits. A bevel at a sparsely sampled corner then cuts no more
+        /// than this far from the node; 0.5 mm matches OutlineArrange.CapsuleMaxStep.</summary>
+        const double AdaptiveMaxChord = 0.5;
+        /// <summary>A boundary whose two pieces meet past this tangent jump keeps the exact legacy sampling and the tight
+        /// fit tolerance: the offset of a hairpin corner is direction-sensitive, so it is not worth coarsening there.</summary>
+        static readonly double AdaptiveSharpTurn = 60.0 * Math.PI / 180.0;
+
         /// <summary>Filled region grown by d (d &gt; 0) or shrunk by -d, or null when the contour has an open subpath.</summary>
         /// <summary>False: always use the old offset code (A/B checks).</summary>
         public static bool FastPath = true;
@@ -833,8 +848,9 @@ namespace Sr2d64CSport
 
         static VectorPath? FastFilled(VectorPath contour, double d, double tol, double s = 1, double miter = 4)
         {
-            if (!FastPath || d == 0 || !TryFlatten(contour, out var rings, out _, s)) return null;
-            return FromRings(OutlineArrange.Filled(OutlineArrange.Region(rings), d / s, miter), tol, s);
+            if (!FastPath || d == 0 || !TryFlatten(contour, out var rings, out _, s, false, out bool sharp)) return null;
+            // a smooth contour's chords already spend the AdaptiveFlat budget, so the fit may spend it as well
+            return FromRings(OutlineArrange.Filled(OutlineArrange.Region(rings), d / s, miter), sharp ? tol : tol + AdaptiveFlat, s);
         }
 
         /// <summary>Band between the outer offset (dOuter) and the inner offset (dInner), or null when the contour has an open subpath.</summary>
@@ -844,12 +860,13 @@ namespace Sr2d64CSport
             // keepOpen: this entry is the stroke. An open subpath is then the centre line of a band of half-width
             // (dOuter - dInner) / 2, drawn with the caps and joins asked for, which is what the stroker renders; the
             // distance-field tracer it replaces gave every corner a round join and every end a round cap whatever was asked.
-            if (!TryFlatten(contour, out var rings, out var lines, s, true)) return null;
+            if (!TryFlatten(contour, out var rings, out var lines, s, true, out bool sharp)) return null;
             var region = OutlineArrange.Region(rings);
             // zero-area subpaths (a line drawn inside a shape) get a band of their own, as thick as the ring (dOuter - dInner),
             // centred on the line: 2 mm for the centre, 1 mm for outside and inside. Its ends follow cap and may leave the shape.
             var bars = StrokePieces(lines, (dOuter - dInner) / 2 / s, cap, join, miter);
-            return FromRings(OutlineArrange.Band(region, dOuter / s, dInner / s, miter, 1.0, bars, join), tol, s);
+            // a smooth contour's chords already spend the AdaptiveFlat budget, so the fit may spend it as well
+            return FromRings(OutlineArrange.Band(region, dOuter / s, dInner / s, miter, 1.0, bars, join), sharp ? tol : tol + AdaptiveFlat, s);
         }
 
         /// <summary>False: the piece-per-segment bars with separate join pieces. Kept reachable so the rig can A/B the two
@@ -1331,13 +1348,83 @@ namespace Sr2d64CSport
             return ring;
         }
 
+        /// <summary>True when the contour must keep the legacy fixed sampling: it has no cubic at all (an all-line
+        /// polygon, whose offset is already exact), or two consecutive pieces meet with a tangent jump past
+        /// <see cref="AdaptiveSharpTurn"/>. The offset of a hairpin node is direction-sensitive, so coarsening its
+        /// incident chords would move its bevel away from the node.</summary>
+        static bool ClassifySharp(VectorPath p, double inv)
+        {
+            bool anyCubic = false, haveTan = false, sharp = false;
+            Pt2 prevTan = new Pt2(0, 0);
+            double x = 0, y = 0;
+            int di = 0;
+            foreach (var k in p.Kinds)
+            {
+                switch (k)
+                {
+                    case VectorPath.K.Move:
+                        x = p.Data[di] * inv; y = p.Data[di + 1] * inv; di += 2;
+                        haveTan = false; prevTan = new Pt2(0, 0);
+                        break;
+                    case VectorPath.K.Line:
+                        {
+                            double ex = p.Data[di] * inv, ey = p.Data[di + 1] * inv; di += 2;
+                            Pt2 tan = new Pt2(ex - x, ey - y);
+                            double l = tan.Length;
+                            if (l >= 1e-12)
+                            {
+                                tan = tan * (1.0 / l);
+                                if (haveTan)
+                                {
+                                    double cosA = Math.Max(-1.0, Math.Min(1.0, prevTan.X * tan.X + prevTan.Y * tan.Y));
+                                    if (Math.Acos(cosA) > AdaptiveSharpTurn) sharp = true;
+                                }
+                                prevTan = tan; haveTan = true;
+                            }
+                            x = ex; y = ey;
+                        }
+                        break;
+                    case VectorPath.K.Cubic:
+                        {
+                            double c1x = p.Data[di] * inv, c1y = p.Data[di + 1] * inv;
+                            double c2x = p.Data[di + 2] * inv, c2y = p.Data[di + 3] * inv;
+                            double ex = p.Data[di + 4] * inv, ey = p.Data[di + 5] * inv;
+                            di += 6;
+                            anyCubic = true;
+                            Pt2 start = new Pt2(c1x - x, c1y - y);
+                            double ls = start.Length;
+                            if (ls >= 1e-12)
+                            {
+                                start = start * (1.0 / ls);
+                                if (haveTan)
+                                {
+                                    double cosA = Math.Max(-1.0, Math.Min(1.0, prevTan.X * start.X + prevTan.Y * start.Y));
+                                    if (Math.Acos(cosA) > AdaptiveSharpTurn) sharp = true;
+                                }
+                            }
+                            Pt2 end = new Pt2(ex - c2x, ey - c2y);
+                            double le = end.Length;
+                            if (le >= 1e-12) { prevTan = end * (1.0 / le); haveTan = true; }
+                            x = ex; y = ey;
+                        }
+                        break;
+                    case VectorPath.K.Close:
+                        haveTan = false; prevTan = new Pt2(0, 0);
+                        break;
+                }
+            }
+            return sharp || !anyCubic;
+        }
+
         /// <summary>
-        /// The subpaths of a path as dense polylines (mm; cubics sampled at about 0.01 mm): the closed ones with area in
-        /// rings, the open and the zero-area ones in lines. Without keepOpen an open subpath that encloses area fails the
-        /// flatten, because a region offset cannot be built from it; with keepOpen it is returned as a line, which is the
-        /// centre line of the band the stroker draws.
+        /// The subpaths of a path as dense polylines (mm): the closed ones with area in rings, the open and the zero-area
+        /// ones in lines. Cubics of a smooth contour are sampled adaptively (see <see cref="AdaptiveFlat"/>) instead of at
+        /// one chord per 0.01 mm of control polygon; a contour carrying any sharp node - or no cubic at all - keeps the
+        /// legacy fixed sampling and is reported through sharpContour so the fit tolerance stays tight there. Without
+        /// keepOpen an open subpath that encloses area fails the flatten, because a region offset cannot be built from it;
+        /// with keepOpen it is returned as a line, which is the centre line of the band the stroker draws.
         /// </summary>
-        static bool TryFlatten(VectorPath p, out List<List<Pt2>> rings, out List<List<Pt2>> lines, double s = 1, bool keepOpen = false)
+        static bool TryFlatten(VectorPath p, out List<List<Pt2>> rings, out List<List<Pt2>> lines, double s, bool keepOpen, out bool sharpContour)
         {
             double inv = 1.0 / s;
             rings = new List<List<Pt2>>();
@@ -1346,6 +1433,8 @@ namespace Sr2d64CSport
             bool open = false;
             int di = 0;
             double px = 0, py = 0, sx = 0, sy = 0;
+            // classify before sampling: a later sharp node must put the whole contour on the legacy route
+            sharpContour = ClassifySharp(p, inv);
             foreach (var k in p.Kinds)
             {
                 switch (k)
@@ -1369,7 +1458,19 @@ namespace Sr2d64CSport
                             double ctrl = Math.Sqrt((c1x - px) * (c1x - px) + (c1y - py) * (c1y - py))
                                         + Math.Sqrt((c2x - c1x) * (c2x - c1x) + (c2y - c1y) * (c2y - c1y))
                                         + Math.Sqrt((ex - c2x) * (ex - c2x) + (ey - c2y) * (ey - c2y));
-                            int n = Math.Max(8, (int)(ctrl / 0.01));
+                            int nLegacy = Math.Max(8, (int)(ctrl / 0.01));
+                            int n = nLegacy;
+                            if (!sharpContour)
+                            {
+                                // Wang flatness count (the render flatteners' formula) and the longest-chord cap,
+                                // clamped to the legacy count so this path is only ever coarser than before
+                                double ddx = Math.Max(Math.Abs(px - 2 * c1x + c2x), Math.Abs(c1x - 2 * c2x + ex));
+                                double ddy = Math.Max(Math.Abs(py - 2 * c1y + c2y), Math.Abs(c1y - 2 * c2y + ey));
+                                double dd = Math.Sqrt(ddx * ddx + ddy * ddy);
+                                int nWang = (int)Math.Ceiling(Math.Sqrt(0.75 * dd / AdaptiveFlat));
+                                int nChord = (int)Math.Ceiling(ctrl / AdaptiveMaxChord);
+                                n = Math.Min(nLegacy, Math.Max(8, Math.Max(nWang, nChord)));
+                            }
                             for (int i = 1; i <= n; i++)
                             {
                                 double t = i / (double)n, m = 1 - t;
