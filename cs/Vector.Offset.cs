@@ -844,6 +844,10 @@ namespace Sr2d64CSport
         /// <summary>Filled region grown by d (d &gt; 0) or shrunk by -d, or null when the contour has an open subpath.</summary>
         /// <summary>False: always use the old offset code (A/B checks).</summary>
         public static bool FastPath = true;
+        /// <summary>Optional CorelDRAW-style "Reduce Nodes" curve optimization pass after fitting (merges smooth cubic pairs within <see cref="ReduceNodesTolerance"/>).</summary>
+        public static bool ReduceNodes = false;
+        /// <summary>Maximum curve deviation (mm) allowed when <see cref="ReduceNodes"/> merges adjacent smooth segments (default 0.025 mm, ~0.1 px at 96 dpi).</summary>
+        public static double ReduceNodesTolerance = 0.045;
 
 
         static VectorPath? FastFilled(VectorPath contour, double d, double tol, double s = 1, double miter = 4)
@@ -880,13 +884,219 @@ namespace Sr2d64CSport
             if (h <= 0) return pieces;
             foreach (var ln in lines)
             {
-                var ring = StrokeRing(ln, h, cap, join, miterLimit);
-                if (ring.Count < 3) continue;
+                var poly = new List<Pt2>();
+                foreach (var q in ln)
+                    if (poly.Count == 0 || (q - poly[poly.Count - 1]).Length > 1e-9) poly.Add(q);
+                if (poly.Count < 2) continue;
+                if (Collinear(poly, out _, out _))
+                {
+                    var ring = StrokeRing(poly, h, cap, join, miterLimit);
+                    if (ring.Count < 3) continue;
+                    double area = 0;
+                    for (int k = 0; k < ring.Count; k++) { var p = ring[k]; var q = ring[(k + 1) % ring.Count]; area += p.X * q.Y - q.X * p.Y; }
+                    if (Math.Abs(area) < 1e-12) continue;
+                    if (area < 0) ring.Reverse();
+                    pieces.Add(ring);
+                }
+                else
+                {
+                    pieces.AddRange(StrokeSubchains(poly, h, cap, cap, join, miterLimit, 0, 0));
+                }
+            }
+            return pieces;
+        }
+
+        /// <summary>
+        /// Splits an open polyline into monotone non-folding sub-chains and emits each sub-chain as a simple
+        /// positively-oriented contour with inline caps and outer join wedges at split vertices.
+        /// </summary>
+        static List<List<Pt2>> StrokeSubchains(IList<Pt2> pts, double hw, VectorCap capStart, VectorCap capEnd, int join, double miterLimit, int keepStart, int keepEnd)
+        {
+            var poly = new List<Pt2>();
+            foreach (var q in pts)
+                if (poly.Count == 0 || (q - poly[poly.Count - 1]).Length > 1e-9) poly.Add(q);
+            var pieces = new List<List<Pt2>>();
+            if (poly.Count < 2 || hw <= 0) return pieces;
+            int n = poly.Count, segs = n - 1;
+            var u = new Pt2[segs];
+            var nm = new Pt2[segs];
+            for (int i = 0; i < segs; i++)
+            {
+                Pt2 d = poly[i + 1] - poly[i];
+                double l = d.Length;
+                if (l < 1e-12) return pieces;
+                u[i] = d * (1.0 / l);
+                nm[i] = new Pt2(-u[i].Y, u[i].X);
+            }
+            void Add(List<Pt2> r)
+            {
                 double area = 0;
-                for (int k = 0; k < ring.Count; k++) { var p = ring[k]; var q = ring[(k + 1) % ring.Count]; area += p.X * q.Y - q.X * p.Y; }
-                if (Math.Abs(area) < 1e-12) continue;
-                if (area < 0) ring.Reverse();
-                pieces.Add(ring);
+                for (int k = 0; k < r.Count; k++) { var p = r[k]; var q = r[(k + 1) % r.Count]; area += p.X * q.Y - q.X * p.Y; }
+                if (Math.Abs(area) < 1e-12) return;
+                if (area < 0) r.Reverse();
+                pieces.Add(r);
+            }
+            int start = 0;
+            double cumTurn = 0;
+            for (int i = 1; i <= segs; i++)
+            {
+                bool split = (i == segs);
+                if (!split)
+                {
+                    double l0 = (poly[i] - poly[i - 1]).Length, l1 = (poly[i + 1] - poly[i]).Length;
+                    double cross = u[i - 1].X * u[i].Y - u[i - 1].Y * u[i].X;
+                    double cos = u[i - 1].X * u[i].X + u[i - 1].Y * u[i].Y;
+                    double den = 1.0 + cos;
+                    double stepTurn = Math.Atan2(Math.Abs(cross), cos);
+                    double sBack = den > 1e-9 ? hw * Math.Abs(cross) / den : 1e30;
+                    cumTurn += stepTurn;
+                    if (sBack > 0.9 * Math.Min(l0, l1) || cumTurn > 45.0 * Math.PI / 180.0 || stepTurn > 20.0 * Math.PI / 180.0)
+                        split = true;
+                }
+                if (split)
+                {
+                    double capOut0 = keepStart == 0 ? hw : hw * 0.5;
+                    double capOut1 = keepEnd == 0 ? hw : hw * 0.5;
+                    double ea = (start == 0 && capStart == VectorCap.Square) ? capOut0 : 0.0;
+                    double eb = (i == segs && capEnd == VectorCap.Square) ? capOut1 : 0.0;
+                    var plus = new List<Pt2>();
+                    var minus = new List<Pt2>();
+                    for (int k = start; k <= i; k++)
+                    {
+                        if (k == start)
+                        {
+                            Pt2 p0 = poly[start] - u[start] * ea;
+                            plus.Add(p0 + nm[start] * hw);
+                            minus.Add(p0 - nm[start] * hw);
+                        }
+                        else if (k == i)
+                        {
+                            Pt2 p1 = poly[i] + u[i - 1] * eb;
+                            plus.Add(p1 + nm[i - 1] * hw);
+                            minus.Add(p1 - nm[i - 1] * hw);
+                        }
+                        else
+                        {
+                            double l0 = (poly[k] - poly[k - 1]).Length, l1 = (poly[k + 1] - poly[k]).Length;
+                            double cross = u[k - 1].X * u[k].Y - u[k - 1].Y * u[k].X;
+                            double cos = u[k - 1].X * u[k].X + u[k - 1].Y * u[k].Y;
+                            double den = 1.0 + cos;
+                            double sBack = hw * Math.Abs(cross) / den;
+                            if (cross < 0 || sBack <= 0.95 * Math.Min(l0, l1))
+                                plus.Add(poly[k] + (nm[k - 1] + nm[k]) * (hw / den));
+                            else
+                            {
+                                plus.Add(poly[k] + nm[k - 1] * hw);
+                                plus.Add(poly[k] + nm[k] * hw);
+                            }
+                            if (cross > 0 || sBack <= 0.95 * Math.Min(l0, l1))
+                                minus.Add(poly[k] - (nm[k - 1] + nm[k]) * (hw / den));
+                            else
+                            {
+                                minus.Add(poly[k] - nm[k - 1] * hw);
+                                minus.Add(poly[k] - nm[k] * hw);
+                            }
+                        }
+                    }
+                    var ring = new List<Pt2>(plus);
+                    if (i == segs && capEnd == VectorCap.Round)
+                    {
+                        if (keepEnd == 0)
+                        {
+                            CapArc(ring, poly[segs], nm[segs - 1], u[segs - 1], hw, VectorCap.Round);
+                        }
+                        else
+                        {
+                            Pt2 q = poly[segs], nSide = nm[segs - 1] * keepEnd, uOut = u[segs - 1];
+                            double a0 = Math.Atan2(nSide.Y, nSide.X);
+                            double dd = 2 * NormAngle(Math.Atan2(uOut.Y, uOut.X) - a0);
+                            Pt2 c = q + nSide * (hw * 0.5);
+                            if (keepEnd == 1)
+                            {
+                                for (int k = 1; k <= ArcHalf; k++)
+                                {
+                                    double t = a0 + dd * k / ArcHalf;
+                                    ring.Add(new Pt2(c.X + hw * 0.5 * Math.Cos(t), c.Y + hw * 0.5 * Math.Sin(t)));
+                                }
+                            }
+                            else
+                            {
+                                ring.Add(q);
+                                for (int k = ArcHalf - 1; k >= 1; k--)
+                                {
+                                    double t = a0 + dd * k / ArcHalf;
+                                    ring.Add(new Pt2(c.X + hw * 0.5 * Math.Cos(t), c.Y + hw * 0.5 * Math.Sin(t)));
+                                }
+                            }
+                        }
+                    }
+                    for (int k = minus.Count - 1; k >= 0; k--) ring.Add(minus[k]);
+                    if (start == 0 && capStart == VectorCap.Round)
+                    {
+                        if (keepStart == 0)
+                        {
+                            CapArc(ring, poly[0], nm[0] * -1.0, u[0] * -1.0, hw, VectorCap.Round);
+                        }
+                        else
+                        {
+                            Pt2 q = poly[0], nSide = nm[0] * keepStart, uOut = u[0] * -1.0;
+                            double a0 = Math.Atan2(nSide.Y, nSide.X);
+                            double dd = 2 * NormAngle(Math.Atan2(uOut.Y, uOut.X) - a0);
+                            Pt2 c = q + nSide * (hw * 0.5);
+                            if (keepStart == 1)
+                            {
+                                ring.Add(q);
+                                for (int k = ArcHalf - 1; k >= 1; k--)
+                                {
+                                    double t = a0 + dd * k / ArcHalf;
+                                    ring.Add(new Pt2(c.X + hw * 0.5 * Math.Cos(t), c.Y + hw * 0.5 * Math.Sin(t)));
+                                }
+                            }
+                            else
+                            {
+                                for (int k = 1; k <= ArcHalf; k++)
+                                {
+                                    double t = a0 + dd * k / ArcHalf;
+                                    ring.Add(new Pt2(c.X + hw * 0.5 * Math.Cos(t), c.Y + hw * 0.5 * Math.Sin(t)));
+                                }
+                            }
+                        }
+                    }
+                    ring.Reverse();
+                    Add(ring);
+
+                    if (i < segs)
+                    {
+                        double cross = u[i - 1].X * u[i].Y - u[i - 1].Y * u[i].X;
+                        double cos = u[i - 1].X * u[i].X + u[i - 1].Y * u[i].Y;
+                        double den = 1.0 + cos;
+                        if (cross * cross >= 1e-12 && den > 1e-9)
+                        {
+                            double s = cross > 0 ? -1.0 : 1.0;
+                            Pt2 n0 = nm[i - 1] * s, n1 = nm[i] * s;
+                            var w = new List<Pt2> { poly[i], poly[i] + n0 * hw };
+                            if (join == 2)
+                            {
+                                double a0 = Math.Atan2(n0.Y, n0.X), a1 = Math.Atan2(n1.Y, n1.X);
+                                double dd = NormAngle(a1 - a0);
+                                int steps = Math.Max(2, (int)Math.Round(ArcHalf * Math.Abs(dd) / Math.PI));
+                                for (int k = 1; k < steps; k++)
+                                {
+                                    double t = a0 + dd * k / steps;
+                                    w.Add(new Pt2(poly[i].X + hw * Math.Cos(t), poly[i].Y + hw * Math.Sin(t)));
+                                }
+                            }
+                            else if (join == 0 && Math.Sqrt(2.0 / den) <= Math.Max(1.0, miterLimit))
+                            {
+                                w.Add(poly[i] + (n0 + n1) * (hw / den));
+                            }
+                            w.Add(poly[i] + n1 * hw);
+                            Add(w);
+                        }
+                    }
+                    start = i;
+                    cumTurn = 0;
+                }
             }
             return pieces;
         }
@@ -987,7 +1197,19 @@ namespace Sr2d64CSport
                 bool outer = s * cross < 0;      // with n = rot90-ccw(u) the outside of a positive turn is the -n side
                 if (!outer)
                 {
-                    // the inner side: the two offset lines always cross, and that crossing is the boundary
+                    double l0 = (poly[i] - poly[i - 1]).Length, l1 = (poly[i + 1] - poly[i]).Length;
+                    double sBack = h * Math.Abs(cross) / den;
+                    if (sBack <= 0.95 * Math.Min(l0, l1))
+                        walk.Add(poly[i] + (n0 + n1) * (h / den));
+                    else
+                    {
+                        walk.Add(poly[i] + n0 * h);
+                        walk.Add(poly[i] + n1 * h);
+                    }
+                    continue;
+                }
+                if (den > 1e-9 && Math.Sqrt(2 / den) <= OutlineArrange.SmoothBisectorLimit)
+                {
                     walk.Add(poly[i] + (n0 + n1) * (h / den));
                     continue;
                 }
@@ -1004,7 +1226,7 @@ namespace Sr2d64CSport
                         walk.Add(new Pt2(poly[i].X + h * Math.Cos(t), poly[i].Y + h * Math.Sin(t)));
                     }
                 }
-                else if (join == 0 && den > 1e-9 && Math.Sqrt(2 / den) <= Math.Max(1.0, miterLimit))
+                else if (den > 1e-9 && Math.Sqrt(2 / den) <= (join == 0 ? Math.Max(OutlineArrange.SmoothBisectorLimit, miterLimit) : OutlineArrange.SmoothBisectorLimit))
                     walk.Add(poly[i] + (n0 + n1) * (h / den));
                 else
                 {
@@ -1024,19 +1246,18 @@ namespace Sr2d64CSport
         /// sgn = +1 keeps the +n side (n = rot90-ccw of the direction of travel), -1 the other.
         /// </summary>
         static List<Pt2> StrokeRingSide(IList<Pt2> pts, double h, VectorCap cap, int join, double miterLimit, int sgn)
+            => StrokeRingSide(pts, h, cap, cap, join, miterLimit, sgn);
+
+        static List<Pt2> StrokeRingSide(IList<Pt2> pts, double h, VectorCap capStart, VectorCap capEnd, int join, double miterLimit, int sgn)
         {
             var poly = new List<Pt2>();
             foreach (var q in pts)
                 if (poly.Count == 0 || (q - poly[poly.Count - 1]).Length > 1e-9) poly.Add(q);
             if (poly.Count < 2) return new List<Pt2>();
-            // Which end of the sweep is an end of the path (its cap) and which is only an extreme a 180-degree turnaround
-            // reaches (the corner's shape). A dash slice of a straight run has both of its ends capped.
             bool loTurn = false, hiTurn = false;
             bool coll = Collinear(poly, out Pt2 baseP, out Pt2 axis);
             if (coll)
             {
-                // the same sweep as StrokeRing: reduce to the interval the line covers; an extreme only a turnaround
-                // reaches has no cap of its own there, only the join's end
                 double lo = double.MaxValue, hi = double.MinValue;
                 var t = new double[poly.Count];
                 for (int i = 0; i < poly.Count; i++)
@@ -1062,42 +1283,41 @@ namespace Sr2d64CSport
             var walk = new List<Pt2>();
             OffsetWalk(poly, u, nm, h, join, miterLimit, sgn, walk);
             var ring = new List<Pt2>(walk);
-            HalfCap(ring, poly[n - 1], nm[n - 2] * sgn, u[n - 2], h, hiTurn ? TurnCap(join) : cap, hiTurn);
+            HalfCap(ring, poly[n - 1], nm[n - 2] * sgn, u[n - 2], h, hiTurn ? TurnCap(join) : capEnd, hiTurn);
             for (int i = n - 1; i >= 0; i--) AddNew(ring, poly[i]);
             var sc = new List<Pt2>();
-            HalfCap(sc, poly[0], nm[0] * sgn, u[0] * -1, h, loTurn ? TurnCap(join) : cap, loTurn);
-            for (int i = sc.Count - 1; i >= 0; i--) AddNew(ring, sc[i]);   // reversed: the cap reads outward from the centre line
-            Unfold(ring);
+            HalfCap(sc, poly[0], nm[0] * sgn, u[0] * -1, h, loTurn ? TurnCap(join) : capStart, loTurn);
+            for (int i = sc.Count - 1; i >= 0; i--) AddNew(ring, sc[i]);
+            Unfold(ring, -sgn);
             return ring;
         }
 
         /// <summary>
-        /// Cuts the self-intersection loops out of a closed ring. Where the contour bends towards the kept side with a radius
-        /// below h, the offset doubles back on itself: the walk traces a small loop whose winding is opposite the ring's, so
-        /// a nonzero fill cancels it and the bar comes back with a wedge missing. The boundary of the union of the primitives
-        /// is the envelope - the offset with the loop spliced off at its crossing - which is what this leaves. The loop can
-        /// reach into the start cap (the first offset points fall behind the cap face), so it runs on the closed ring.
+        /// Cuts the self-intersection loops out of a closed ring. Searches from the outermost crossing (j from n - 1 down to i + 2)
+        /// so a multi-sample fold on a smooth curve is spliced off in one pass, and keeps the loop whose signed area matches
+        /// <paramref name="wantSign"/> so at large widths an inverted fold loop larger than the dash never replaces the dash itself.
         /// </summary>
-        static void Unfold(List<Pt2> ring)
+        static void Unfold(List<Pt2> ring, int wantSign = 0)
         {
-            for (int pass = 0; pass < 16; pass++)
+            for (int pass = 0; pass < 64; pass++)
             {
                 int n = ring.Count;
                 bool cut = false;
                 for (int i = 0; i < n && !cut; i++)
-                    for (int j = i + 2; j < n; j++)
+                    for (int j = n - 1; j >= i + 2; j--)
                     {
                         if (i == 0 && j == n - 1) continue;
                         if (!SegSeg(ring[i], ring[(i + 1) % n], ring[j], ring[(j + 1) % n], out Pt2 x)) continue;
-                        // the crossing splits the ring in two closed pieces; the fold loop is the small reversed one, the
-                        // envelope the big one - and the loop can sit on either side of the split (at the start cap it does)
                         var a = new List<Pt2> { x };
                         for (int k = i + 1; k <= j; k++) a.Add(ring[k]);
                         var b = new List<Pt2> { x };
                         for (int k = j + 1; k <= n + i; k++) b.Add(ring[k % n]);
                         double aa = Area(a), bb = Area(b);
                         ring.Clear();
-                        ring.AddRange(Math.Abs(aa) >= Math.Abs(bb) ? a : b);
+                        if (wantSign != 0 && (aa * wantSign > 0) != (bb * wantSign > 0))
+                            ring.AddRange(aa * wantSign > 0 ? a : b);
+                        else
+                            ring.AddRange(Math.Abs(aa) >= Math.Abs(bb) ? a : b);
                         cut = true;
                         break;
                     }
@@ -1424,19 +1644,118 @@ namespace Sr2d64CSport
         /// keepOpen an open subpath that encloses area fails the flatten, because a region offset cannot be built from it;
         /// with keepOpen it is returned as a line, which is the centre line of the band the stroker draws.
         /// </summary>
+        static Pt2 CubicPt(double p0x, double p0y, double c1x, double c1y, double c2x, double c2y, double p3x, double p3y, double t)
+        {
+            double m = 1.0 - t;
+            return new Pt2(
+                m * m * m * p0x + 3 * m * m * t * c1x + 3 * m * t * t * c2x + t * t * t * p3x,
+                m * m * m * p0y + 3 * m * m * t * c1y + 3 * m * t * t * c2y + t * t * t * p3y);
+        }
+
+        static Pt2 CubicStartTan(double p0x, double p0y, double c1x, double c1y, double c2x, double c2y, double p3x, double p3y)
+        {
+            Pt2 d = new Pt2(c1x - p0x, c1y - p0y);
+            if (d.Length < 1e-9) d = new Pt2(c2x - p0x, c2y - p0y);
+            if (d.Length < 1e-9) d = new Pt2(p3x - p0x, p3y - p0y);
+            double l = d.Length;
+            return l > 1e-12 ? d * (1.0 / l) : new Pt2(0, 0);
+        }
+
+        static Pt2 CubicEndTan(double p0x, double p0y, double c1x, double c1y, double c2x, double c2y, double p3x, double p3y)
+        {
+            Pt2 d = new Pt2(p3x - c2x, p3y - c2y);
+            if (d.Length < 1e-9) d = new Pt2(p3x - c1x, p3y - c1y);
+            if (d.Length < 1e-9) d = new Pt2(p3x - p0x, p3y - p0y);
+            double l = d.Length;
+            return l > 1e-12 ? d * (1.0 / l) : new Pt2(0, 0);
+        }
+
         static bool TryFlatten(VectorPath p, out List<List<Pt2>> rings, out List<List<Pt2>> lines, double s, bool keepOpen, out bool sharpContour)
         {
             double inv = 1.0 / s;
             rings = new List<List<Pt2>>();
             lines = new List<List<Pt2>>();
+            bool anyCubic = false;
+            foreach (var k in p.Kinds) if (k == VectorPath.K.Cubic) { anyCubic = true; break; }
+            sharpContour = !anyCubic;
+
+            int nk = p.Kinds.Count;
+            var alignStart = new bool[nk];
+            var alignEnd = new bool[nk];
+            {
+                int di0 = 0, subFirst = -1, prevSeg = -1;
+                Pt2 firstStartTan = new Pt2(0, 0), prevEndTan = new Pt2(0, 0);
+                double x = 0, y = 0, subSx = 0, subSy = 0;
+                const double cosSharpJoin = 0.9659258262890683; // cos(15 deg)
+                for (int ki = 0; ki < nk; ki++)
+                {
+                    switch (p.Kinds[ki])
+                    {
+                        case VectorPath.K.Move:
+                            x = subSx = p.Data[di0] * inv; y = subSy = p.Data[di0 + 1] * inv; di0 += 2;
+                            subFirst = -1; prevSeg = -1;
+                            break;
+                        case VectorPath.K.Line:
+                            {
+                                double ex = p.Data[di0] * inv, ey = p.Data[di0 + 1] * inv; di0 += 2;
+                                Pt2 d = new Pt2(ex - x, ey - y);
+                                double l = d.Length;
+                                if (l > 1e-9)
+                                {
+                                    Pt2 tan = d * (1.0 / l);
+                                    if (prevSeg >= 0 && (prevEndTan.X * tan.X + prevEndTan.Y * tan.Y) < cosSharpJoin)
+                                    { alignEnd[prevSeg] = true; alignStart[ki] = true; }
+                                    if (subFirst < 0) { subFirst = ki; firstStartTan = tan; }
+                                    prevSeg = ki; prevEndTan = tan;
+                                }
+                                x = ex; y = ey;
+                                break;
+                            }
+                        case VectorPath.K.Cubic:
+                            {
+                                double c1x = p.Data[di0] * inv, c1y = p.Data[di0 + 1] * inv;
+                                double c2x = p.Data[di0 + 2] * inv, c2y = p.Data[di0 + 3] * inv;
+                                double ex = p.Data[di0 + 4] * inv, ey = p.Data[di0 + 5] * inv; di0 += 6;
+                                Pt2 sTan = CubicStartTan(x, y, c1x, c1y, c2x, c2y, ex, ey);
+                                Pt2 eTan = CubicEndTan(x, y, c1x, c1y, c2x, c2y, ex, ey);
+                                if (prevSeg >= 0 && (prevEndTan.X * sTan.X + prevEndTan.Y * sTan.Y) < cosSharpJoin)
+                                { alignEnd[prevSeg] = true; alignStart[ki] = true; }
+                                if (subFirst < 0) { subFirst = ki; firstStartTan = sTan; }
+                                prevSeg = ki; prevEndTan = eTan;
+                                x = ex; y = ey;
+                                break;
+                            }
+                        case VectorPath.K.Close:
+                            if (subFirst >= 0 && prevSeg >= 0)
+                            {
+                                Pt2 closeVec = new Pt2(subSx - x, subSy - y);
+                                double cl = closeVec.Length;
+                                if (cl > 1e-6)
+                                {
+                                    Pt2 cTan = closeVec * (1.0 / cl);
+                                    if ((prevEndTan.X * cTan.X + prevEndTan.Y * cTan.Y) < cosSharpJoin) alignEnd[prevSeg] = true;
+                                    if ((cTan.X * firstStartTan.X + cTan.Y * firstStartTan.Y) < cosSharpJoin) alignStart[subFirst] = true;
+                                }
+                                else if ((prevEndTan.X * firstStartTan.X + prevEndTan.Y * firstStartTan.Y) < cosSharpJoin)
+                                {
+                                    alignEnd[prevSeg] = true; alignStart[subFirst] = true;
+                                }
+                            }
+                            subFirst = -1; prevSeg = -1;
+                            x = subSx; y = subSy;
+                            break;
+                    }
+                }
+            }
+
             var cur = new List<Pt2>();
             bool open = false;
             int di = 0;
             double px = 0, py = 0, sx = 0, sy = 0;
-            // classify before sampling: a later sharp node must put the whole contour on the legacy route
-            sharpContour = ClassifySharp(p, inv);
-            foreach (var k in p.Kinds)
+            const double cosTanLimit = 0.9999904807207345; // cos(0.25 deg)
+            for (int ki = 0; ki < nk; ki++)
             {
+                var k = p.Kinds[ki];
                 switch (k)
                 {
                     case VectorPath.K.Move:
@@ -1459,33 +1778,73 @@ namespace Sr2d64CSport
                                         + Math.Sqrt((c2x - c1x) * (c2x - c1x) + (c2y - c1y) * (c2y - c1y))
                                         + Math.Sqrt((ex - c2x) * (ex - c2x) + (ey - c2y) * (ey - c2y));
                             int nLegacy = Math.Max(8, (int)(ctrl / 0.01));
-                            int n = nLegacy;
-                            if (!sharpContour)
+                            double ddx = Math.Max(Math.Abs(px - 2 * c1x + c2x), Math.Abs(c1x - 2 * c2x + ex));
+                            double ddy = Math.Max(Math.Abs(py - 2 * c1y + c2y), Math.Abs(c1y - 2 * c2y + ey));
+                            double dd = Math.Sqrt(ddx * ddx + ddy * ddy);
+                            int nWang = (int)Math.Ceiling(Math.Sqrt(0.75 * dd / AdaptiveFlat));
+                            int nChord = (int)Math.Ceiling(ctrl / AdaptiveMaxChord);
+                            int n = Math.Min(nLegacy, Math.Max(8, Math.Max(nWang, nChord)));
+                            if (alignStart[ki] || alignEnd[ki])
                             {
-                                // Wang flatness count (the render flatteners' formula) and the longest-chord cap,
-                                // clamped to the legacy count so this path is only ever coarser than before
-                                double ddx = Math.Max(Math.Abs(px - 2 * c1x + c2x), Math.Abs(c1x - 2 * c2x + ex));
-                                double ddy = Math.Max(Math.Abs(py - 2 * c1y + c2y), Math.Abs(c1y - 2 * c2y + ey));
-                                double dd = Math.Sqrt(ddx * ddx + ddy * ddy);
-                                int nWang = (int)Math.Ceiling(Math.Sqrt(0.75 * dd / AdaptiveFlat));
-                                int nChord = (int)Math.Ceiling(ctrl / AdaptiveMaxChord);
-                                n = Math.Min(nLegacy, Math.Max(8, Math.Max(nWang, nChord)));
+                                Pt2 sTan = CubicStartTan(px, py, c1x, c1y, c2x, c2y, ex, ey);
+                                Pt2 eTan = CubicEndTan(px, py, c1x, c1y, c2x, c2y, ex, ey);
+                                bool can0 = alignStart[ki] && sTan.Length > 0.5;
+                                bool can1 = alignEnd[ki] && eTan.Length > 0.5;
+                                while (n < 256 && (can0 || can1))
+                                {
+                                    bool ok0 = true, ok1 = true;
+                                    if (can0)
+                                    {
+                                        Pt2 ch0 = CubicPt(px, py, c1x, c1y, c2x, c2y, ex, ey, 1.0 / n) - new Pt2(px, py);
+                                        if (ch0.Length > 1e-9) ok0 = (ch0.X * sTan.X + ch0.Y * sTan.Y) / ch0.Length >= cosTanLimit;
+                                    }
+                                    if (can1)
+                                    {
+                                        Pt2 ch1 = new Pt2(ex, ey) - CubicPt(px, py, c1x, c1y, c2x, c2y, ex, ey, 1.0 - 1.0 / n);
+                                        if (ch1.Length > 1e-9) ok1 = (ch1.X * eTan.X + ch1.Y * eTan.Y) / ch1.Length >= cosTanLimit;
+                                    }
+                                    if (ok0 && ok1) break;
+                                    n++;
+                                }
                             }
-                            for (int i = 1; i <= n; i++)
+                            var ts = new List<double>(n + 1);
+                            for (int i = 0; i <= n; i++) ts.Add((double)i / n);
+                            const double cosMaxTurn = 0.9990482215818578; // cos(2.5 deg)
+                            for (int pass = 0; pass < 8; pass++)
                             {
-                                double t = i / (double)n, m = 1 - t;
-                                cur.Add(new Pt2(m * m * m * px + 3 * m * m * t * c1x + 3 * m * t * t * c2x + t * t * t * ex,
-                                                m * m * m * py + 3 * m * m * t * c1y + 3 * m * t * t * c2y + t * t * t * ey));
+                                var nextTs = new List<double>(ts.Count * 2) { ts[0] };
+                                bool splitAny = false;
+                                for (int i = 0; i + 1 < ts.Count; i++)
+                                {
+                                    double t0 = ts[i], t1 = ts[i + 1], tm = 0.5 * (t0 + t1);
+                                    Pt2 A = CubicPt(px, py, c1x, c1y, c2x, c2y, ex, ey, t0);
+                                    Pt2 M = CubicPt(px, py, c1x, c1y, c2x, c2y, ex, ey, tm);
+                                    Pt2 B = CubicPt(px, py, c1x, c1y, c2x, c2y, ex, ey, t1);
+                                    Pt2 d0 = M - A, d1 = B - M;
+                                    double l0 = d0.Length, l1 = d1.Length;
+                                    if (l0 > 1e-6 && l1 > 1e-6 && (d0.X * d1.X + d0.Y * d1.Y) < cosMaxTurn * l0 * l1)
+                                    {
+                                        nextTs.Add(tm);
+                                        splitAny = true;
+                                    }
+                                    nextTs.Add(t1);
+                                }
+                                ts = nextTs;
+                                if (!splitAny) break;
                             }
+                            for (int i = 1; i < ts.Count; i++)
+                                cur.Add(CubicPt(px, py, c1x, c1y, c2x, c2y, ex, ey, ts[i]));
                             px = ex; py = ey;
                             break;
                         }
                     case VectorPath.K.Close:
                         if (open && cur.Count >= 2)
                         {
+                            while (cur.Count > 2 && (cur[cur.Count - 1] - cur[0]).Length < 1e-4)
+                                cur.RemoveAt(cur.Count - 1);
                             double ar = 0;
                             for (int m = 0; m < cur.Count; m++) { var q = cur[(m + 1) % cur.Count]; ar += cur[m].X * q.Y - q.X * cur[m].Y; }
-                            if (Math.Abs(ar) < 1e-9) lines.Add(cur);       // zero area: a line, not a region
+                            if (Math.Abs(ar) < 1e-9) lines.Add(cur);
                             else if (cur.Count >= 3) rings.Add(cur);
                         }
                         open = false;
@@ -1497,8 +1856,6 @@ namespace Sr2d64CSport
             return true;
         }
 
-        /// <summary>An open subpath that encloses no area (a drawn line) is taken as a line; any other open subpath is not,
-        /// unless keepOpen: then it is the centre line of the band asked for.</summary>
         static bool TakeOpenLine(List<Pt2> cur, List<List<Pt2>> lines, bool keepOpen = false)
         {
             if (cur.Count < 2) return false;
@@ -1510,13 +1867,12 @@ namespace Sr2d64CSport
             return true;
         }
 
-        /// <summary>Fits each ring (cubics where the ring curves, line segments where it is straight; see Vector.Fit.cs) and writes closed subpaths.</summary>
         static VectorPath FromRings(List<List<Pt2>> rings, double tol, double s = 1)
         {
             var result = new VectorPath();
             foreach (var ring in rings)
             {
-                var segs = OutlineFit.FitLoop(ring, 0.05, tol);
+                var segs = OutlineFit.FitLoop(ring, 0.05, tol, ReduceNodes, ReduceNodesTolerance / s);
                 if (segs.Count == 0) continue;
                 result.MoveTo((float)(segs[0].P0.X * s), (float)(segs[0].P0.Y * s));
                 foreach (var g in segs)
@@ -1596,25 +1952,40 @@ namespace Sr2d64CSport
             }
             Finish();
             var polys = new List<List<V>>();
-            foreach (var (s, sg) in loops)
+            var areas = new double[loops.Count];
+            for (int idx = 0; idx < loops.Count; idx++)
             {
+                var (s, sg) = loops[idx];
                 var P = new List<V> { s }; V prev = s;
                 foreach (var g in sg)
                 {
-                    if (g.Cubic) for (int q = 1; q <= 8; q++) P.Add(Bz(prev, g.C1, g.C2, g.End, q / 8.0));
+                    if (g.Cubic) for (int q = 1; q <= 32; q++) P.Add(Bz(prev, g.C1, g.C2, g.End, q / 32.0));
                     else P.Add(g.End);
                     prev = g.End;
                 }
                 polys.Add(P);
+                areas[idx] = PolyArea(P);
             }
             var result = new VectorPath();
             for (int i = 0; i < loops.Count; i++)
             {
                 var s = loops[i].Start; var segs2 = loops[i].Segs;
-                V q = polys[i][Math.Min(1, polys[i].Count - 1)];
+                var Pi = polys[i];
+                int bestK = 0; double bestLen = -1;
+                for (int k = 0; k < Pi.Count; k++)
+                {
+                    double l = (Pi[(k + 1) % Pi.Count] - Pi[k]).Len;
+                    if (l > bestLen) { bestLen = l; bestK = k; }
+                }
+                V pa = Pi[bestK], pb = Pi[(bestK + 1) % Pi.Count], pd = pb - pa;
+                double pl = pd.Len;
+                double sgnI = areas[i] >= 0 ? 1.0 : -1.0;
+                V q = pl > 1e-12 ? (pa + pb) * 0.5 + new V(-pd.Y / pl * sgnI * 1e-5, pd.X / pl * sgnI * 1e-5) : pa;
+                double absAreaI = Math.Abs(areas[i]);
                 int depth = 0;
-                for (int j = 0; j < loops.Count; j++) if (j != i && Inside(q, polys[j])) depth++;
-                bool wantPositive = depth % 2 == 0, isPositive = PolyArea(polys[i]) > 0;
+                for (int j = 0; j < loops.Count; j++)
+                    if (j != i && Math.Abs(areas[j]) > absAreaI && Inside(q, polys[j])) depth++;
+                bool wantPositive = depth % 2 == 0, isPositive = areas[i] > 0;
                 if (isPositive != wantPositive) segs2 = Reverse(s, segs2);
                 result.MoveTo((float)s.X, (float)s.Y);
                 for (int n = 0; n < segs2.Count; n++)
@@ -1736,16 +2107,23 @@ namespace Sr2d64CSport
         {
             int jc = join == VectorJoin.Bevel ? 1 : join == VectorJoin.Round ? 2 : 0;   // the arrangement's 0 miter, 1 bevel, 2 round
             var loops = new List<(List<V> Pts, int Sgn)>();
+            var rawClosedRings = new List<List<Pt2>>();
             foreach (var L in ReadClosed(closed))
             {
                 var pts = new List<V>();
                 foreach (var sg in L)
-                    for (int k = 0; k < 48; k++) pts.Add(Bez(sg, k / 48.0));
+                {
+                    if (sg.Cub) for (int k = 0; k < 48; k++) pts.Add(Bez(sg, k / 48.0));
+                    else pts.Add(sg.P0);
+                }
                 if (pts.Count < 2) continue;
+                var ringPt2 = new List<Pt2>(pts.Count);
+                foreach (var v in pts) ringPt2.Add(new Pt2(v.X, v.Y));
+                if (ringPt2.Count >= 3) rawClosedRings.Add(ringPt2);
                 pts.Add(pts[0]);
                 double a = 0;
                 for (int i = 0; i + 1 < pts.Count; i++) a += pts[i].X * pts[i + 1].Y - pts[i + 1].X * pts[i].Y;
-                loops.Add((pts, a >= 0 ? 1 : -1));   // a nonzero fill lies left of a ccw ring and right of a cw one
+                loops.Add((pts, a >= 0 ? 1 : -1));
             }
             var ringsOut = new List<List<Pt2>>();
             static double Area(List<List<Pt2>> rs)
@@ -1754,6 +2132,19 @@ namespace Sr2d64CSport
                 foreach (var r in rs)
                     for (int k = 0; k < r.Count; k++) { var p = r[k]; var q = r[(k + 1) % r.Count]; a += (p.X * q.Y - q.X * p.Y) * 0.5; }
                 return a;
+            }
+            static int WindingAtLoops(List<(List<V> Pts, int Sgn)> allLoops, double x, double y)
+            {
+                int wn = 0;
+                foreach (var (lp, _) in allLoops)
+                    for (int i = 0; i + 1 < lp.Count; i++)
+                    {
+                        V a = lp[i], b = lp[i + 1];
+                        double cr = (b.X - a.X) * (y - a.Y) - (b.Y - a.Y) * (x - a.X);
+                        if (a.Y <= y) { if (b.Y > y && cr > 0) wn++; }
+                        else if (b.Y <= y && cr < 0) wn--;
+                    }
+                return wn;
             }
             foreach (var (pts, sgnLoop) in loops)
             {
@@ -1767,7 +2158,7 @@ namespace Sr2d64CSport
                     var slice = new List<Pt2>();
                     void At(double d)
                     {
-                        double e = d >= per ? d - per : d;                       // a wrapped dash runs past the seam
+                        double e = d >= per ? d - per : d;
                         int i = Array.BinarySearch(cum, e);
                         if (i < 0) i = ~i - 1;
                         i = Math.Clamp(i, 0, pts.Count - 2);
@@ -1786,11 +2177,27 @@ namespace Sr2d64CSport
                     At(b);
                     List<List<Pt2>> pieces;
                     if (side == VectorOutlinePosition.Center)
-                        pieces = StrokePieces(new List<List<Pt2>> { slice }, w / 2, cap, jc, miterLimit);
+                        pieces = StrokeSubchains(slice, w / 2, cap, cap, jc, miterLimit, 0, 0);
                     else
                     {
-                        var half = StrokeRingSide(slice, w, cap, jc, miterLimit, sgnLoop * (side == VectorOutlinePosition.Inside ? 1 : -1));
-                        pieces = half.Count >= 3 ? new List<List<Pt2>> { half } : new List<List<Pt2>>();
+                        int faceSign = side == VectorOutlinePosition.Inside ? 1 : -1;
+                        int SideAtSeg(Pt2 pa, Pt2 pb, int fallback)
+                        {
+                            double dx = pb.X - pa.X, dy = pb.Y - pa.Y, dl = Math.Sqrt(dx * dx + dy * dy);
+                            if (dl <= 1e-9) return fallback;
+                            double eps = Math.Max(1e-3, pixel * 0.5);
+                            double mx = (pa.X + pb.X) * 0.5, my = (pa.Y + pb.Y) * 0.5;
+                            double nx = -dy / dl * eps, ny = dx / dl * eps;
+                            int wl = WindingAtLoops(loops, mx + nx, my + ny);
+                            int wr = WindingAtLoops(loops, mx - nx, my - ny);
+                            if (wl != 0 && wr == 0) return faceSign;
+                            if (wr != 0 && wl == 0) return -faceSign;
+                            return fallback;
+                        }
+                        int defaultKeep = sgnLoop * faceSign;
+                        int keepStart = slice.Count >= 2 ? SideAtSeg(slice[0], slice[1], defaultKeep) : defaultKeep;
+                        int keepEnd = slice.Count >= 2 ? SideAtSeg(slice[slice.Count - 2], slice[slice.Count - 1], defaultKeep) : defaultKeep;
+                        pieces = StrokeSubchains(slice, w, cap, cap, jc, miterLimit, keepStart, keepEnd);
                         OutlineArrange.Probe($"dash span {a:0.##}..{b:0.##} slice {slice.Count} pts half {pieces.Count} rings area {Area(pieces):0.##}");
                         if (OutlineArrange.BandProbe != null)
                         {
@@ -1801,10 +2208,34 @@ namespace Sr2d64CSport
                     ringsOut.AddRange(pieces);
                 }
             }
-            // no Orient: adjacent dashes of one contour keep the same winding, so where their cap extensions meet on a tight
-            // concave run the nonzero fill unions them, exactly as the stroker paints the overlap. Orient orients by nesting,
-            // and a cap overlap is not nesting - it read one dash as a hole of its neighbour and cancelled the shared wedge.
-            var result = FromRings(ringsOut, tol, 1);
+            if (ringsOut.Count > 0)
+            {
+                if (side == VectorOutlinePosition.Center)
+                {
+                    if (ringsOut.Count > 1) ringsOut = OutlineArrange.Union(ringsOut, 1);
+                }
+                else if (rawClosedRings.Count > 0)
+                {
+                    var region = OutlineArrange.Region(rawClosedRings);
+                    if (region.Count > 0)
+                    {
+                        var dashUnion = ringsOut.Count > 1 ? OutlineArrange.Union(ringsOut, 1) : ringsOut;
+                        if (side == VectorOutlinePosition.Inside)
+                        {
+                            var both = new List<List<Pt2>>(dashUnion);
+                            both.AddRange(region);
+                            ringsOut = OutlineArrange.Arrange(both).BoundaryRings(f => f.Winding >= 2);
+                        }
+                        else
+                        {
+                            var diff = new List<List<Pt2>>(dashUnion);
+                            foreach (var r in region) { var rq = new List<Pt2>(r); rq.Reverse(); diff.Add(rq); }
+                            ringsOut = OutlineArrange.Union(diff, 1);
+                        }
+                    }
+                }
+            }
+            var result = Orient(FromRings(ringsOut, tol, 1));
             // open pieces: an open contour has no inside or outside, so the renderer dashes it centred at the outline width
             // whatever position was asked for, and AppendDash is exactly that - one centred band per dash slice. Without this a
             // dashed conversion of a shape with open pieces would silently drop them.
@@ -1847,9 +2278,16 @@ namespace Sr2d64CSport
             foreach (var v in pattern) { if (double.IsNaN(v) || double.IsInfinity(v) || v < 0) bad = true; period += Math.Max(0, v); }
             if (bad || !(period > 0)) return spans;
             if ((pattern.Length & 1) != 0) period *= 2;
-            double ph = offset % period; if (ph < 0) ph += period;
-            int di = 0; double rem = Math.Max(0, pattern[0]); bool on = true;
-            while (ph > 0) { if (ph >= rem) { ph -= rem; di = (di + 1) % pattern.Length; rem = Math.Max(0, pattern[di]); on = !on; } else { rem -= ph; ph = 0; } }
+            double fitScale = 1.0;
+            if ((int)seam == 2 && per > 0)
+            {
+                int cycles = Math.Max(1, (int)Math.Round(per / period));
+                fitScale = per / (cycles * period);
+            }
+            period *= fitScale;
+            double ph = (offset * fitScale) % period; if (ph < 0) ph += period;
+            int di = 0; double rem = Math.Max(0, pattern[0] * fitScale); bool on = true;
+            while (ph > 0) { if (ph >= rem) { ph -= rem; di = (di + 1) % pattern.Length; rem = Math.Max(0, pattern[di] * fitScale); on = !on; } else { rem -= ph; ph = 0; } }
             double s = 0, from = 0; bool open = on;
             while (s < per)
             {
@@ -1857,7 +2295,7 @@ namespace Sr2d64CSport
                 s += step; rem -= step;
                 if (s >= per) break;                                   // the lap ends inside this element
                 if (open) spans.Add((from, s)); else from = s;         // a pattern boundary at s
-                open = !open; di = (di + 1) % pattern.Length; rem = Math.Max(0, pattern[di]);
+                open = !open; di = (di + 1) % pattern.Length; rem = Math.Max(0, pattern[di] * fitScale);
             }
             if (open) spans.Add((from, per));
             if (seam == VectorDashSeam.Wrap && spans.Count > 1 && spans[0].A == 0 && spans[^1].B == per)
@@ -2312,12 +2750,33 @@ namespace Sr2d64CSport
         public static (double maxDev, int segments) CheckBand(VectorPath contour, VectorPath band, double d, bool skipContour = true)
         {
             var edges = new List<(V A, V B)>();
+            var corners = new List<(V C, V U0, V U1, V N0, V N1, double Lim)>();
+            double absD = Math.Abs(d);
             foreach (var L in ReadClosed(contour))
             {
                 var pts = new List<V>();
                 foreach (var sg in L)
                     for (int k = 0; k < 48; k++) pts.Add(Bez(sg, k / 48.0));
-                for (int i = 0; i < pts.Count; i++) edges.Add((pts[i], pts[(i + 1) % pts.Count]));
+                int m = pts.Count;
+                for (int i = 0; i < m; i++) edges.Add((pts[i], pts[(i + 1) % m]));
+                for (int i = 0; i < m; i++)
+                {
+                    V prev = pts[(i - 1 + m) % m], cur = pts[i], next = pts[(i + 1) % m];
+                    V d0 = cur - prev, d1 = next - cur;
+                    double l0 = d0.Len, l1 = d1.Len;
+                    if (l0 < 1e-9 || l1 < 1e-9) continue;
+                    V u0 = d0 * (1.0 / l0), u1 = d1 * (1.0 / l1);
+                    double den = 1.0 + V.Dot(u0, u1);
+                    if (den > 1e-9 && V.Dot(u0, u1) < 0.999)
+                    {
+                        double ratio = Math.Sqrt(2.0 / den);
+                        if (ratio <= 4.0)
+                        {
+                            V n0 = new V(u0.Y, -u0.X), n1 = new V(u1.Y, -u1.X);
+                            corners.Add((cur, u0, u1, n0, n1, ratio * absD + 0.1));
+                        }
+                    }
+                }
             }
             foreach (var P in ReadOpen(contour))
                 for (int i = 0; i + 1 < P.Count; i++) edges.Add((P[i], P[i + 1]));
@@ -2332,8 +2791,19 @@ namespace Sr2d64CSport
                         V p = Bez(sg, k / 16.0);
                         double best = double.MaxValue;
                         foreach (var e in edges) best = Math.Min(best, DistSeg(p, e.A, e.B));
-                        if (skipContour && best < 0.5 * Math.Abs(d)) continue;
-                        mx = Math.Max(mx, Math.Abs(best - Math.Abs(d)));
+                        foreach (var c in corners)
+                        {
+                            V rel = p - c.C;
+                            if (rel.Len > c.Lim) continue;
+                            if (V.Dot(rel, c.U0) >= -1e-6 && V.Dot(rel, c.U1) <= 1e-6)
+                            {
+                                double d0 = V.Dot(rel, c.N0), d1 = V.Dot(rel, c.N1);
+                                if (d0 >= 0 && d1 >= 0) best = Math.Min(best, Math.Max(d0, d1));
+                                else if (d0 <= 0 && d1 <= 0) best = Math.Min(best, Math.Max(-d0, -d1));
+                            }
+                        }
+                        if (skipContour && best < 0.5 * absD) continue;
+                        mx = Math.Max(mx, Math.Abs(best - absD));
                     }
                 }
             return (mx, segs);

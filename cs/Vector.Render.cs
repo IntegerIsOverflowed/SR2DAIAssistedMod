@@ -115,22 +115,79 @@ namespace Sr2d64CSport
             // the outline conversion take the same direction. Pure-line and pure-cubic paths keep the old count.
             var alignStart = new bool[K.Count];
             var alignEnd = new bool[K.Count];
-            for (int i = 0; i < K.Count; i++)
             {
-                if (K[i] != VectorPath.K.Cubic) continue;
-                if (i > 0 && K[i - 1] == VectorPath.K.Line) alignStart[i] = true;
-                if (i + 1 < K.Count && K[i + 1] == VectorPath.K.Line) alignEnd[i] = true;
-            }
-            // closed sub-path: the first and last segments meet across the Close
-            int firstSeg = -1;
-            for (int i = 0; i < K.Count; i++)
-            {
-                if (K[i] == VectorPath.K.Move) firstSeg = i + 1;
-                else if (K[i] == VectorPath.K.Close && firstSeg >= 0 && i - 1 > firstSeg)
+                static Vector2 SegStartTan(float x0, float y0, float x1, float y1, float x2, float y2, float x3, float y3)
                 {
-                    if (K[firstSeg] == VectorPath.K.Cubic && K[i - 1] == VectorPath.K.Line) alignStart[firstSeg] = true;
-                    if (K[i - 1] == VectorPath.K.Cubic && K[firstSeg] == VectorPath.K.Line) alignEnd[i - 1] = true;
-                    firstSeg = -1;
+                    Vector2 d = new Vector2(x1 - x0, y1 - y0);
+                    if (d.LengthSquared() < 1e-12f) d = new Vector2(x2 - x0, y2 - y0);
+                    if (d.LengthSquared() < 1e-12f) d = new Vector2(x3 - x0, y3 - y0);
+                    return d.LengthSquared() > 1e-18f ? Vector2.Normalize(d) : Vector2.Zero;
+                }
+                static Vector2 SegEndTan(float x0, float y0, float x1, float y1, float x2, float y2, float x3, float y3)
+                {
+                    Vector2 d = new Vector2(x3 - x2, y3 - y2);
+                    if (d.LengthSquared() < 1e-12f) d = new Vector2(x3 - x1, y3 - y1);
+                    if (d.LengthSquared() < 1e-12f) d = new Vector2(x3 - x0, y3 - y0);
+                    return d.LengthSquared() > 1e-18f ? Vector2.Normalize(d) : Vector2.Zero;
+                }
+                int di0 = 0, subFirst = -1, prevSeg = -1;
+                Vector2 firstStartTan = Vector2.Zero, prevEndTan = Vector2.Zero;
+                float x = 0, y = 0, subSx = 0, subSy = 0;
+                const float cosSharpJoin = 0.9659258f; // cos(15 deg)
+                for (int ki = 0; ki < K.Count; ki++)
+                {
+                    switch (K[ki])
+                    {
+                        case VectorPath.K.Move:
+                            x = subSx = D[di0]; y = subSy = D[di0 + 1]; di0 += 2;
+                            subFirst = -1; prevSeg = -1;
+                            break;
+                        case VectorPath.K.Line:
+                            {
+                                float ex = D[di0], ey = D[di0 + 1]; di0 += 2;
+                                Vector2 dv = new Vector2(ex - x, ey - y);
+                                if (dv.LengthSquared() > 1e-12f)
+                                {
+                                    Vector2 tan = Vector2.Normalize(dv);
+                                    if (prevSeg >= 0 && Vector2.Dot(prevEndTan, tan) < cosSharpJoin)
+                                    { alignEnd[prevSeg] = true; alignStart[ki] = true; }
+                                    if (subFirst < 0) { subFirst = ki; firstStartTan = tan; }
+                                    prevSeg = ki; prevEndTan = tan;
+                                }
+                                x = ex; y = ey;
+                                break;
+                            }
+                        case VectorPath.K.Cubic:
+                            {
+                                float c1x = D[di0], c1y = D[di0 + 1], c2x = D[di0 + 2], c2y = D[di0 + 3], ex = D[di0 + 4], ey = D[di0 + 5]; di0 += 6;
+                                Vector2 sTan = SegStartTan(x, y, c1x, c1y, c2x, c2y, ex, ey);
+                                Vector2 eTan = SegEndTan(x, y, c1x, c1y, c2x, c2y, ex, ey);
+                                if (prevSeg >= 0 && Vector2.Dot(prevEndTan, sTan) < cosSharpJoin)
+                                { alignEnd[prevSeg] = true; alignStart[ki] = true; }
+                                if (subFirst < 0) { subFirst = ki; firstStartTan = sTan; }
+                                prevSeg = ki; prevEndTan = eTan;
+                                x = ex; y = ey;
+                                break;
+                            }
+                        case VectorPath.K.Close:
+                            if (subFirst >= 0 && prevSeg >= 0)
+                            {
+                                Vector2 closeVec = new Vector2(subSx - x, subSy - y);
+                                if (closeVec.LengthSquared() > 1e-12f)
+                                {
+                                    Vector2 cTan = Vector2.Normalize(closeVec);
+                                    if (Vector2.Dot(prevEndTan, cTan) < cosSharpJoin) alignEnd[prevSeg] = true;
+                                    if (Vector2.Dot(cTan, firstStartTan) < cosSharpJoin) alignStart[subFirst] = true;
+                                }
+                                else if (Vector2.Dot(prevEndTan, firstStartTan) < cosSharpJoin)
+                                {
+                                    alignEnd[prevSeg] = true; alignStart[subFirst] = true;
+                                }
+                            }
+                            subFirst = -1; prevSeg = -1;
+                            x = subSx; y = subSy;
+                            break;
+                    }
                 }
             }
             void End(bool closed) { if (have) { int n = outPts.Count - start; if (n > 0) subs.Add((start, n, closed)); } have = false; }
@@ -185,9 +242,34 @@ namespace Sr2d64CSport
             int n = (int)MathF.Ceiling(MathF.Sqrt(0.75f * dd / MathF.Max(tol, 1e-4f)));
             n = Math.Clamp(n, 1, 256);
             if (alignStart || alignEnd) n = AlignEnds(p0, p1, p2, p3, n, alignStart, alignEnd);
-            for (int i = 1; i <= n; i++)
+            var ts = new List<float>(n + 1);
+            for (int i = 0; i <= n; i++) ts.Add((float)i / n);
+            const float cosMaxTurn = 0.99904822f; // cos(2.5 deg)
+            for (int pass = 0; pass < 8; pass++)
             {
-                Vector2 q = BezPoint(p0, p1, p2, p3, (float)i / n);
+                var nextTs = new List<float>(ts.Count * 2) { ts[0] };
+                bool splitAny = false;
+                for (int i = 0; i + 1 < ts.Count; i++)
+                {
+                    float t0 = ts[i], t1 = ts[i + 1], tm = 0.5f * (t0 + t1);
+                    Vector2 A = BezPoint(p0, p1, p2, p3, t0);
+                    Vector2 M = BezPoint(p0, p1, p2, p3, tm);
+                    Vector2 B = BezPoint(p0, p1, p2, p3, t1);
+                    Vector2 d0 = M - A, d1 = B - M;
+                    float l0 = d0.Length(), l1 = d1.Length();
+                    if (l0 > 1e-5f && l1 > 1e-5f && Vector2.Dot(d0, d1) < cosMaxTurn * l0 * l1)
+                    {
+                        nextTs.Add(tm);
+                        splitAny = true;
+                    }
+                    nextTs.Add(t1);
+                }
+                ts = nextTs;
+                if (!splitAny) break;
+            }
+            for (int i = 1; i < ts.Count; i++)
+            {
+                Vector2 q = BezPoint(p0, p1, p2, p3, ts[i]);
                 o.Add(new PointF(q.X, q.Y));
             }
         }
@@ -250,26 +332,50 @@ namespace Sr2d64CSport
                 side = new int[subs.Count];
                 for (int i = 0; i < subs.Count; i++) side[i] = Winding(pts, subs[i]) * face;
             }
+            int[]? sideEnd = null;
             if (dash != null)
             {
-                // the dash pattern is in local units; scale it into the points' units (it was ignored before: device-space dashes filled their gaps)
                 var dd = new float[dash.Length]; for (int i = 0; i < dash.Length; i++) dd[i] = dash[i] * dashScale;
                 dpts = new List<PointF>(); dsubs = new List<(int, int, bool)>();
                 List<(int Src, float DirX, float DirY)>? from = side != null ? new List<(int, float, float)>() : null;
+                var origPts = pts; var origSubs = subs;
                 if (ApplyDash(pts, subs, dd, s.DashOffset * dashScale, s.DashSeam, dpts, dsubs, from))
                 {
                     pts = dpts; subs = dsubs; piece = from;
                     if (from != null && side != null)
-                    {   // a dash piece is open, so its side comes from the ring it was cut out of
-                        var remap = new int[dsubs.Count];
-                        for (int i = 0; i < remap.Length; i++) remap[i] = side[from[i].Src];
-                        side = remap;
+                    {
+                        int face = s.StrokeSide == VectorOutlinePosition.Inside ? 1 : -1;
+                        var remapStart = new int[dsubs.Count];
+                        var remapEnd = new int[dsubs.Count];
+                        int SideAtSeg(PointF pa, PointF pb, int fallback)
+                        {
+                            float dx = pb.X - pa.X, dy = pb.Y - pa.Y, dl = MathF.Sqrt(dx * dx + dy * dy);
+                            if (dl <= 1e-6f) return fallback;
+                            float eps = MathF.Max(1e-2f, hw * 0.05f);
+                            float mx = (pa.X + pb.X) * 0.5f, my = (pa.Y + pb.Y) * 0.5f;
+                            float nx = -dy / dl * eps, ny = dx / dl * eps;
+                            int wl = WindingAtPoint(origPts, origSubs, mx + nx, my + ny);
+                            int wr = WindingAtPoint(origPts, origSubs, mx - nx, my - ny);
+                            if (wl != 0 && wr == 0) return face;
+                            if (wr != 0 && wl == 0) return -face;
+                            return fallback;
+                        }
+                        for (int i = 0; i < dsubs.Count; i++)
+                        {
+                            int sgn = side[from[i].Src];
+                            var (ds, dc, _) = dsubs[i];
+                            if (dc >= 2 && sgn != 0)
+                            {
+                                remapStart[i] = SideAtSeg(dpts[ds], dpts[ds + 1], sgn);
+                                remapEnd[i] = SideAtSeg(dpts[ds + dc - 2], dpts[ds + dc - 1], sgn);
+                            }
+                            else remapStart[i] = remapEnd[i] = sgn;
+                        }
+                        side = remapStart;
+                        sideEnd = remapEnd;
                     }
                 }
             }
-            // the cap of a dashed Inside / Outside outline: half the pen's radius, on the band's centre line. A cap at the pen's
-            // full radius on the path is what a centred stroke of this pen draws; here the clip then cuts it along the path, so
-            // the end reaches twice as far past the dash as the same cap at the Center position and is flat on the path's side.
             void EndDisc(PointF p, float ux, float uy, int keepSide)
             {
                 if (keepSide == 0) { Disc(p.X, p.Y, hw, o, oCnt); return; }
@@ -279,30 +385,31 @@ namespace Sr2d64CSport
             {
                 var (start, count, closed) = subs[si];
                 int keep = side != null ? side[si] : 0;
-                float pdirX = 0, pdirY = 0;   // the direction of travel at this piece's start: all a piece of one point has of the path
+                int keep1 = sideEnd != null ? sideEnd[si] : keep;
+                float pdirX = 0, pdirY = 0;
                 if (piece != null && si < piece.Count) { pdirX = piece[si].DirX; pdirY = piece[si].DirY; }
                 if (count == 1 || (count == 2 && Same(pts[start], pts[start + 1])))
-                {   // a dot: round cap -> disc, square cap -> square, butt -> nothing
+                {
                     var p = pts[start];
                     if (s.Cap == VectorCap.Round) EndDisc(p, pdirX, pdirY, keep);
                     else if (s.Cap == VectorCap.Square && s.SquareDotCap) { float e = keep == 0 ? hw : hw * 0.5f; int b = o.Count; o.Add(new PointF(p.X - e, p.Y - e)); o.Add(new PointF(p.X + e, p.Y - e)); o.Add(new PointF(p.X + e, p.Y + e)); o.Add(new PointF(p.X - e, p.Y + e)); Emit(o, oCnt, b); }
                     continue;
                 }
-                // remove duplicate consecutive points
                 var P = new List<PointF>(count); P.Add(pts[start]);
                 for (int i = 1; i < count; i++) if (!Same(P[^1], pts[start + i])) P.Add(pts[start + i]);
                 bool cl = closed; if (cl && P.Count > 2 && Same(P[0], P[^1])) P.RemoveAt(P.Count - 1);
                 if (P.Count < 2) { if (s.Cap == VectorCap.Round) EndDisc(P[0], pdirX, pdirY, keep); continue; }
                 if (P.Count == 2) cl = false;
                 int n = P.Count, segs = cl ? n : n - 1;
-                float capOut = keep == 0 ? hw : hw * 0.5f;      // how far past the dash end a square cap reaches
+                float capOut0 = keep == 0 ? hw : hw * 0.5f;
+                float capOut1 = keep1 == 0 ? hw : hw * 0.5f;
                 for (int i = 0; i < segs; i++)
                 {
                     PointF a = P[i], b = P[(i + 1) % n];
                     float dx = b.X - a.X, dy = b.Y - a.Y, len = MathF.Sqrt(dx * dx + dy * dy); if (len < 1e-9f) continue;
                     float ux = dx / len, uy = dy / len, nx = -uy * hw, ny = ux * hw;
                     float ea = 0, eb = 0;
-                    if (!cl && s.Cap == VectorCap.Square) { if (i == 0) ea = capOut; if (i == segs - 1) eb = capOut; }
+                    if (!cl && s.Cap == VectorCap.Square) { if (i == 0) ea = capOut0; if (i == segs - 1) eb = capOut1; }
                     float ax = a.X - ux * ea, ay = a.Y - uy * ea, bx = b.X + ux * eb, by = b.Y + uy * eb;
                     int st = o.Count;
                     o.Add(new PointF(ax + nx, ay + ny)); o.Add(new PointF(bx + nx, by + ny)); o.Add(new PointF(bx - nx, by - ny)); o.Add(new PointF(ax - nx, ay - ny));
@@ -311,7 +418,7 @@ namespace Sr2d64CSport
                 if (!cl && s.Cap == VectorCap.Round)
                 {
                     Unit(P[0], P[1], out float u0x, out float u0y); Unit(P[n - 2], P[n - 1], out float u1x, out float u1y);
-                    EndDisc(P[0], u0x, u0y, keep); EndDisc(P[n - 1], u1x, u1y, keep);
+                    EndDisc(P[0], u0x, u0y, keep); EndDisc(P[n - 1], u1x, u1y, keep1);
                 }
                 // joins
                 int first = cl ? 0 : 1, last = cl ? n - 1 : n - 2;
@@ -411,6 +518,23 @@ namespace Sr2d64CSport
             }
             return a >= 0 ? 1 : -1;
         }
+
+        static int WindingAtPoint(List<PointF> pts, List<(int start, int count, bool closed)> subs, float x, float y)
+        {
+            int w = 0;
+            foreach (var (s, c, closed) in subs)
+            {
+                if (!closed || c < 3) continue;
+                for (int i = 0; i < c; i++)
+                {
+                    PointF a = pts[s + i], b = pts[s + (i + 1) % c];
+                    double cr = (double)(b.X - a.X) * (y - a.Y) - (double)(b.Y - a.Y) * (x - a.X);
+                    if (a.Y <= y) { if (b.Y > y && cr > 0) w++; }
+                    else if (b.Y <= y && cr < 0) w--;
+                }
+            }
+            return w;
+        }
         static void Disc(float cx, float cy, float r, List<PointF> o, List<int> oCnt)
         {
             int n = r <= 1.5f ? 8 : Math.Clamp((int)MathF.Ceiling(MathF.PI / MathF.Max(MathF.Acos(MathF.Max(-1f, 1f - 0.1f / r)), 1e-3f)), 8, 256);
@@ -450,12 +574,28 @@ namespace Sr2d64CSport
             {
                 var (start, count, closed) = subs[si];
                 int n = count + (closed ? 1 : 0);
+                float subScale = 1f;
+                if ((int)seam == 2 && closed && count >= 2)
+                {
+                    double subLen = 0;
+                    for (int i = 0; i < n - 1; i++)
+                    {
+                        PointF a = pts[start + i], b = pts[start + (i + 1) % count];
+                        subLen += Math.Sqrt((double)(b.X - a.X) * (b.X - a.X) + (double)(b.Y - a.Y) * (b.Y - a.Y));
+                    }
+                    if (subLen > 0)
+                    {
+                        int cycles = Math.Max(1, (int)Math.Round(subLen / total));
+                        subScale = (float)(subLen / (cycles * total));
+                    }
+                }
+                float subTotal = total * subScale;
                 var pieces = new List<List<PointF>>();
                 var dirs = oSrc != null ? new List<(float X, float Y)>() : null;
                 // dash state at the start of the sub-path
-                int di = 0; float rem = MathF.Max(0, dash[0]); bool on = true;
-                float off = offset % total; if (off < 0) off += total;
-                while (off > 0) { if (off >= rem) { off -= rem; di = (di + 1) % dash.Length; rem = MathF.Max(0, dash[di]); on = !on; } else { rem -= off; off = 0; } }
+                int di = 0; float rem = MathF.Max(0, dash[0] * subScale); bool on = true;
+                float off = (offset * subScale) % subTotal; if (off < 0) off += subTotal;
+                while (off > 0) { if (off >= rem) { off -= rem; di = (di + 1) % dash.Length; rem = MathF.Max(0, dash[di] * subScale); on = !on; } else { rem -= off; off = 0; } }
                 List<PointF>? cur = on ? new List<PointF> { pts[start] } : null;
                 (float X, float Y) curDir = (0, 0); bool dirSet = false;
                 for (int i = 0; i < n - 1; i++)
@@ -470,7 +610,7 @@ namespace Sr2d64CSport
                         pos += rem; var p = new PointF(a.X + dx * pos / len, a.Y + dy * pos / len);
                         if (on) { cur!.Add(p); pieces.Add(cur); dirs?.Add(curDir); cur = null; dirSet = false; }
                         else { cur = new List<PointF> { p }; curDir = ud; dirSet = true; }
-                        on = !on; di = (di + 1) % dash.Length; rem = MathF.Max(0, dash[di]);
+                        on = !on; di = (di + 1) % dash.Length; rem = MathF.Max(0, dash[di] * subScale);
                     }
                     rem -= len - pos;
                     if (on) cur!.Add(b);

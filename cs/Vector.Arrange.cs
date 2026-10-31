@@ -70,9 +70,41 @@ namespace Sr2d64CSport
                         while (K(c ^ 1) && spin++ < H) c = Next(c ^ 1);   // skip edges interior to the union
                         h = c;
                     } while (h != h0 && ++guard < H);
-                    if (ring.Count >= 3) result.Add(ring);
+                    if (ring.Count >= 3) SplitPinchedRing(ring, result);
                 }
                 return result;
+            }
+
+            static void SplitPinchedRing(List<Pt2> ring, List<List<Pt2>> outRings)
+            {
+                int n = ring.Count;
+                if (n < 3) return;
+                const double tol2 = 1e-7 * 1e-7;
+                for (int i = 0; i < n; i++)
+                {
+                    Pt2 pi = ring[i];
+                    for (int j = i + 1; j < n; j++)
+                    {
+                        double dx = pi.X - ring[j].X, dy = pi.Y - ring[j].Y;
+                        if (dx * dx + dy * dy <= tol2)
+                        {
+                            var a = ring.GetRange(i, j - i);
+                            var b = new List<Pt2>(n - (j - i));
+                            b.AddRange(ring.GetRange(j, n - j));
+                            b.AddRange(ring.GetRange(0, i));
+                            SplitPinchedRing(a, outRings);
+                            SplitPinchedRing(b, outRings);
+                            return;
+                        }
+                    }
+                }
+                double area2 = 0;
+                for (int k = 0; k < n; k++)
+                {
+                    Pt2 p = ring[k], q = ring[(k + 1) % n];
+                    area2 += p.X * q.Y - q.X * p.Y;
+                }
+                if (Math.Abs(area2) > 1e-10) outRings.Add(ring);
             }
         }
 
@@ -182,7 +214,7 @@ namespace Sr2d64CSport
             // end of a collinear overlap) splits that segment at the vertex. Without this the crossing search never sees the touch,
             // and the faces on either side are wrong.
             Lap($"crossings (+{pos.Count - N} nodes)");
-            const double onTol = 1e-9;
+            const double onTol = 1e-7;
             for (int v = 0; v < N; v++)
             {
                 Pt2 P = pos[v];
@@ -205,15 +237,34 @@ namespace Sr2d64CSport
                 }
             }
 
-            // 2. edges: each segment is split at its nodes in order
+            // 2. edges: canonicalize coincident vertices (within 1e-7 mm) and deduplicate collinear overlapping edges
             Lap("T-junctions");
             int vCount = pos.Count;
+            var vCanon = new int[vCount];
+            var vMap = new Dictionary<(long, long), int>(vCount);
+            for (int i = 0; i < vCount; i++)
+            {
+                long qx = (long)Math.Round(pos[i].X * 1e7);
+                long qy = (long)Math.Round(pos[i].Y * 1e7);
+                var key = (qx, qy);
+                if (!vMap.TryGetValue(key, out int canon)) { canon = i; vMap[key] = i; }
+                vCanon[i] = canon;
+            }
             var eA = new List<int>();
             var eB = new List<int>();
+            var seenEdges = new HashSet<long>();
+            void AddEdge(int u, int v)
+            {
+                u = vCanon[u]; v = vCanon[v];
+                if (u == v) return;
+                int a = Math.Min(u, v), b = Math.Max(u, v);
+                long key = ((long)a << 32) | (uint)b;
+                if (seenEdges.Add(key)) { eA.Add(u); eB.Add(v); }
+            }
             for (int s = 0; s < N; s++)
             {
                 int k0 = crossT[s] == null ? 0 : crossT[s].Count;
-                if (k0 == 0) { eA.Add(s); eB.Add(segEnd[s]); continue; }
+                if (k0 == 0) { AddEdge(s, segEnd[s]); continue; }
                 var order = new int[k0];
                 for (int k = 0; k < k0; k++) order[k] = k;
                 var ts = crossT[s];
@@ -222,10 +273,10 @@ namespace Sr2d64CSport
                 foreach (int k in order)
                 {
                     int cur = crossId[s][k];
-                    eA.Add(prev); eB.Add(cur);
+                    AddEdge(prev, cur);
                     prev = cur;
                 }
-                eA.Add(prev); eB.Add(segEnd[s]);
+                AddEdge(prev, segEnd[s]);
             }
 
             // 3. half-edges, outgoing lists sorted by angle
@@ -329,7 +380,17 @@ namespace Sr2d64CSport
                     });
             foreach (var neg in unbounded)
             {
+                double negArea2 = 0, bestLen = -1;
                 int c0 = neg[0];
+                for (int k = 0; k < neg.Count; k++)
+                {
+                    int ck = neg[k];
+                    Pt2 pa = pos[g.Origin[ck]], pb = pos[g.Target[ck]];
+                    negArea2 += pa.X * pb.Y - pb.X * pa.Y;
+                    double l = (pb - pa).Length;
+                    if (l > bestLen) { bestLen = l; c0 = ck; }
+                }
+                double negAbsArea = Math.Abs(negArea2) * 0.5;
                 Pt2 a = pos[g.Origin[c0]], b = pos[g.Target[c0]];
                 Pt2 dd = b - a;
                 double dl = dd.Length;
@@ -342,6 +403,7 @@ namespace Sr2d64CSport
                 foreach (int fi in faceRow[gy])               // ascending area: the first face holding q is the smallest that does
                 {
                     var face = g.Faces[fi];
+                    if (face.Area <= negAbsArea) continue;
                     if (q.X < face.MinX || q.X > face.MaxX || q.Y < face.MinY || q.Y > face.MaxY) continue;
                     if (Winding(face.Ring, q) != 0) { best = fi; break; }
                 }
@@ -458,7 +520,12 @@ namespace Sr2d64CSport
                     Pt2 a = p[(k - 1 + n) % n], b = p[k], c = p[(k + 1) % n];
                     Pt2 u = b - a, v = c - b;
                     double lu = u.Length, lv = v.Length;
-                    if (lu > 0 && lv > 0 && (u.X * v.X + u.Y * v.Y) / (lu * lv) < -0.99 && TipWidth(a, b, c) <= tol)
+                    double cosTurn = (lu > 0 && lv > 0) ? (u.X * v.X + u.Y * v.Y) / (lu * lv) : 0;
+                    if (lu > 0 && lv > 0 && cosTurn < -0.99 && TipWidth(a, b, c) <= tol)
+                    {
+                        changed = true; continue;
+                    }
+                    if (lu > 0 && lv > 0 && cosTurn > 0.999999 && TipWidth(a, b, c) <= 1e-5)
                     {
                         changed = true; continue;
                     }
@@ -514,6 +581,10 @@ namespace Sr2d64CSport
         /// counter-clockwise region), d &lt; 0 to the left. A join is the miter point when its length is within
         /// miterLimit*|d|, otherwise a bevel (two points). Self-intersections are left for Union.
         /// </summary>
+        /// <summary>Smooth curve sample threshold (1 / cos(turn / 2) &lt;= 1.010, i.e. turn &lt;= ~16 deg).
+        /// Smooth curve samples use the single bisector offset point instead of two bevel points or separate spike/disc polygons.</summary>
+        internal const double SmoothBisectorLimit = 1.010;
+
         public static List<Pt2> OffsetRing(IList<Pt2> src, double d, double miterLimit)
         {
             var p = new List<Pt2>(src.Count);
@@ -523,6 +594,8 @@ namespace Sr2d64CSport
             int n = p.Count;
             var outp = new List<Pt2>(n + 8);
             if (n < 3 || d == 0) return outp;
+            double effLimit = Math.Max(miterLimit, SmoothBisectorLimit);
+            double absD = Math.Abs(d);
             for (int i = 0; i < n; i++)
             {
                 Pt2 prev = p[(i - 1 + n) % n], cur = p[i], next = p[(i + 1) % n];
@@ -534,10 +607,22 @@ namespace Sr2d64CSport
                 double cos = u0.X * u1.X + u0.Y * u1.Y;
                 double cross = u0.X * u1.Y - u0.Y * u1.X;
                 double den = 1 + cos;
-                // inner side of a turn: the offset edges overlap, so the intersection is always the true join.
-                // Only the outer side (where a gap opens) is limited by the miter limit.
                 bool innerJoin = cross * d < 0;
-                if (den > 1e-9 && (innerJoin || Math.Sqrt(2 / den) <= miterLimit))
+                if (innerJoin)
+                {
+                    // Clamp inner bisector when |d| * tan(turn/2) exceeds the adjacent edge lengths:
+                    // otherwise a sharp inner corner or tight bend at large stroke widths shoots a bow-tie spike
+                    // past the ends of the segments and forms phantom loops outside the shape.
+                    double sBack = den > 1e-9 ? absD * Math.Abs(cross) / den : 1e30;
+                    if (den > 1e-9 && sBack <= 0.95 * Math.Min(l0, l1))
+                        outp.Add(cur + (n0 + n1) * (d / den));
+                    else
+                    {
+                        outp.Add(cur + n0 * d);
+                        outp.Add(cur + n1 * d);
+                    }
+                }
+                else if (den > 1e-9 && Math.Sqrt(2 / den) <= effLimit)
                 {
                     outp.Add(cur + (n0 + n1) * (d / den));
                 }
@@ -573,12 +658,10 @@ namespace Sr2d64CSport
                 double cross = u0.X * u1.Y - u0.Y * u1.X;
                 double den = 1 + cos;
                 if (den <= 1e-9 || cross * d <= 0) continue;          // straight, or the inner side of a turn (the bevel ring covers it)
-                if (Math.Sqrt(2 / den) > miterLimit) continue;        // beyond the limit: bevel (the ring already has it)
-                // scaled in by 1e-3 about the corner: the spike edges then never coincide with a bevel-ring edge (exactly collinear
-                // edges make the arrangement drop the piece; axis-aligned corners hit this at once). The gap is 1e-3 of the band.
-                double ds = d * (1 - 1e-3);
+                double ratio = Math.Sqrt(2 / den);
+                if (ratio <= SmoothBisectorLimit || ratio > miterLimit) continue;
+                double ds = d * (1 - 1e-4);
                 Pt2 a = cur + n0 * ds, b = cur + n1 * ds, m = cur + (n0 + n1) * (ds / den);
-                // quad (corner, a, m, b): overlaps the bevel ring in the triangle corner-a-b, so no edge is shared with it
                 var quad = new List<Pt2> { cur, a, m, b };
                 double area = 0;
                 for (int k = 0; k < 4; k++) { var u = quad[k]; var v = quad[(k + 1) % 4]; area += u.X * v.Y - v.X * u.Y; }
@@ -600,7 +683,13 @@ namespace Sr2d64CSport
             foreach (var r in region)
             {
                 var o = OffsetRing(r, d, miterLimit);
-                if (o.Count >= 3) pieces.Add(o);
+                if (o.Count >= 3)
+                {
+                    if (region.Count > 1)
+                        pieces.AddRange(Union(new List<List<Pt2>> { o }, 1));
+                    else
+                        pieces.Add(o);
+                }
             }
             return Tidy(Union(pieces, 1), Math.Abs(d));
         }
@@ -652,7 +741,7 @@ namespace Sr2d64CSport
             while (p.Count > 1 && (p[0] - p[p.Count - 1]).Length <= 1e-9) p.RemoveAt(p.Count - 1);
             int n = p.Count;
             if (n < 3) return discs;
-            const double minTurn = 0.05;
+            const double minTurn = 0.28;
             for (int i = 0; i < n; i++)
             {
                 Pt2 prev = p[(i - 1 + n) % n], cur = p[i], next = p[(i + 1) % n];
@@ -713,49 +802,46 @@ namespace Sr2d64CSport
             double mark = 0;
             void Lap(string tag) { if (BandProbe == null) return; double t = clock.Elapsed.TotalMilliseconds; BandProbe($"perf {tag,-26} {t - mark,9:0} ms"); mark = t; }
 
-            // grown side: offsets of the separate pieces of the region (the region itself when dOuter = 0), plus the round discs
+            // grown side: offsets of the separate pieces of the region (the region itself when dOuter = 0), plus the round discs.
+            // When region has multiple rings (e.g. self-crossing lobes of tangled), resolve each ring's grown offset via Union(..., 1)
+            // first so a negative-winding concave fold loop of one lobe never cancels a positive face of an adjacent lobe.
             var grown = new List<List<Pt2>>();
             int nDiscs = 0;   // probe only: the join pieces added beside the offset rings
-            var ringOnly = new List<List<Pt2>>();   // the mitred offset rings alone (miter only), the fallback below
             foreach (var r in region)
             {
                 if (dOuter == 0) { grown.Add(new List<Pt2>(r)); continue; }
-                // miter outside: the bevel ring (exact) plus a spike quad at each convex corner within the limit
-                var o = OffsetRing(r, dOuter, join == 0 ? 0 : lim);
-                if (o.Count >= 3) grown.Add(o);
-                if (join == 0 && dOuter > 0)
+                var o = OffsetRing(r, dOuter, lim);
+                if (o.Count >= 3)
                 {
-                    var sp = MiterSpikes(r, dOuter, miterLimit); nDiscs += sp.Count; grown.AddRange(sp);
-                    var mr = OffsetRing(r, dOuter, miterLimit);
-                    if (mr.Count >= 3) ringOnly.Add(mr);
+                    if (region.Count > 1)
+                        grown.AddRange(Union(new List<List<Pt2>> { o }, 1));
+                    else
+                        grown.Add(o);
                 }
             }
             if (join == 2 && dOuter > 0) { var dd = RegionDiscs(region, dOuter); nDiscs = dd.Count; grown.AddRange(dd); }
             Lap($"grown offsets ({grown.Count} pcs)");
-            var positive = grown.Count > 1 ? Union(grown, 1) : grown;
+            var positive = (dOuter > 0 || grown.Count > 1) ? Union(grown, 1) : grown;
             Lap($"grown union -> {positive.Count} rings");
             Probe($"grown: {grown.Count} pieces ({nDiscs} discs) -> union {positive.Count} rings area {SignedArea(positive):0.##}");
-            if (join == 0 && dOuter > 0)
-            {
-                // Safety net (not a fix): the spike union must not come back empty or smaller than the exact bevel band. If it does,
-                // the arrangement has dropped pieces, so the mitred offset rings are used instead. The root cause (T-junctions and
-                // collinear overlaps in Arrange are still open; T-junctions are split in step 1b).
-                var bevelOnly = new List<List<Pt2>>();
-                foreach (var r in region) { var b = OffsetRing(r, dOuter, 0); if (b.Count >= 3) bevelOnly.Add(b); }
-                double bevelArea = SignedArea(bevelOnly.Count > 1 ? Union(bevelOnly, 1) : bevelOnly);
-                Lap("safety-net bevel union");
-                if (positive.Count == 0 || SignedArea(positive) < bevelArea * (1 - 1e-6))
-                    positive = ringOnly.Count > 1 ? Union(ringOnly, 1) : ringOnly;
-            }
 
-            // shrunk side (the region itself when dInner = 0), unioned the same way, then subtracted
+            // shrunk side (the region itself when dInner = 0): resolve each ring's inward offset via Union({q}, 1) first
+            // so self-crossing swallowtail loops at large widths (where a lobe pinches narrower than 2*|dInner|) are stripped
+            // per ring and never survive or cancel adjacent lobes.
             var shrunk = new List<List<Pt2>>();
             foreach (var r in region)
             {
-                var q = dInner == 0 ? new List<Pt2>(r) : OffsetRing(r, dInner, lim);
-                if (q.Count >= 3) shrunk.Add(q);
+                if (dInner == 0) { shrunk.Add(new List<Pt2>(r)); continue; }
+                var q = OffsetRing(r, dInner, lim);
+                if (q.Count >= 3)
+                {
+                    if (region.Count > 1)
+                        shrunk.AddRange(Union(new List<List<Pt2>> { q }, 1));
+                    else
+                        shrunk.Add(q);
+                }
             }
-            var negative = shrunk.Count > 1 ? Union(shrunk, 1) : shrunk;
+            var negative = (dInner < 0 || shrunk.Count > 1) ? Union(shrunk, 1) : shrunk;
             Lap($"shrunk offsets+union -> {negative.Count}");
             Probe($"shrunk: {shrunk.Count} pieces -> union {negative.Count} rings area {SignedArea(negative):0.##}");
 
