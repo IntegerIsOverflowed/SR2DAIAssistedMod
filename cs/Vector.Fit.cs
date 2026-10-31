@@ -17,8 +17,9 @@ namespace Sr2d64CSport
         static double Cross(Pt2 a, Pt2 b) => a.X * b.Y - a.Y * b.X;
         static Pt2 Unit(Pt2 v) { double l = v.Length; return l < 1e-12 ? v : v * (1.0 / l); }
 
-        /// <summary>Cubic fit of one closed loop. pixel = corner window scale (mm), tol = fit tolerance (mm).</summary>
-        public static List<Seg> FitLoop(IList<Pt2> pts, double pixel, double tol)
+        /// <summary>Cubic fit of one closed loop. pixel = corner window scale (mm), tol = fit tolerance (mm).
+        /// When reduceNodes is true, applies CorelDRAW-style node reduction (curve pair merging within reduceTol).</summary>
+        public static List<Seg> FitLoop(IList<Pt2> pts, double pixel, double tol, bool reduceNodes = false, double reduceTol = 0.025)
         {
             var segs = new List<Seg>();
             int n = pts.Count;
@@ -27,30 +28,71 @@ namespace Sr2d64CSport
             for (int i = 0; i < n; i++) perim += (pts[(i + 1) % n] - pts[i]).Length;
             int k = Math.Max(2, (int)Math.Round(10 * pixel / Math.Max(perim / n, 1e-12)));
             k = Math.Min(k, Math.Max(1, n / 3));
-            double thr = 35 * Math.PI / 180;
+            double thr = 60 * Math.PI / 180;
             var turn = new double[n];
+            var stepTurn = new double[n];
+            var signedStep = new double[n];
             for (int i = 0; i < n; i++)
             {
                 Pt2 u1 = pts[i] - pts[((i - k) % n + n) % n], u2 = pts[(i + k) % n] - pts[i];
                 turn[i] = Math.Atan2(Math.Abs(Cross(u1, u2)), Dot(u1, u2));
+                Pt2 a0 = pts[i] - pts[(i - 1 + n) % n], a1 = pts[(i + 1) % n] - pts[i];
+                if (a0.Length > 1e-9 && a1.Length > 1e-9)
+                {
+                    signedStep[i] = Math.Atan2(Cross(a0, a1), Dot(a0, a1));
+                    stepTurn[i] = Math.Abs(signedStep[i]);
+                }
             }
             var corners = new List<int>();
             for (int i = 0; i < n; i++)
             {
-                // a sharp turn between adjacent edges is always a corner (sparse rings have no k-window peak there)
                 Pt2 a0 = pts[i] - pts[(i - 1 + n) % n], a1 = pts[(i + 1) % n] - pts[i];
-                // (only for sparse rings: on a dense sampling, tiny edges at a miter tip are not corners by this rule)
-                bool sharp = a0.Length > 10 * pixel && a1.Length > 10 * pixel
-                    && Math.Atan2(Math.Abs(Cross(a0, a1)), Dot(a0, a1)) > 60 * Math.PI / 180;
-                if (sharp) { corners.Add(i); continue; }
-                if (turn[i] <= thr) continue;
+                double l0 = a0.Length, l1 = a1.Length;
+                if (l0 <= 1e-6 || l1 <= 1e-6) continue;
+                double prevStep = stepTurn[(i - 1 + n) % n], nextStep = stepTurn[(i + 1) % n];
+                double lMax = Math.Max(l0, l1), lMin = Math.Min(l0, l1);
+                // 1. Any single-step bend > 16.5 deg is always a corner (smooth curves and >=24-gon discs turn <= 15 deg per step)
+                bool sharpStep = stepTurn[i] > 16.5 * Math.PI / 180 ||
+                    (stepTurn[i] > 10 * Math.PI / 180 && stepTurn[i] > 1.45 * prevStep && stepTurn[i] > 1.45 * nextStep);
+                // Check if vertex i is a smooth continuation of an arc on either side (even if the other side was clipped by a sharp corner)
+                bool arcPrev = (signedStep[i] * signedStep[(i - 1 + n) % n] > 0)
+                    && (Math.Abs(stepTurn[i] - prevStep) <= 0.30 * Math.Max(stepTurn[i], prevStep) + 0.005);
+                bool arcNext = (signedStep[i] * signedStep[(i + 1) % n] > 0)
+                    && (Math.Abs(stepTurn[i] - nextStep) <= 0.30 * Math.Max(stepTurn[i], nextStep) + 0.005);
+                bool clippedBySharp = (l0 < l1 && prevStep > 16.5 * Math.PI / 180 && arcNext)
+                                   || (l1 < l0 && nextStep > 16.5 * Math.PI / 180 && arcPrev);
+                bool uniformArc = !clippedBySharp
+                    ? ((lMax <= 1.25 * lMin) && (arcPrev || arcNext) && (signedStep[i] * signedStep[(i - 1 + n) % n] >= 0) && (signedStep[i] * signedStep[(i + 1) % n] >= 0))
+                    : true;
+                // 2. Chord-length transition (a straight segment meeting a curve, cap, round join, or bevel)
+                bool straightSide = (prevStep < 0.25 * Math.PI / 180 || nextStep < 0.25 * Math.PI / 180 || lMax > 0.55);
+                bool transition = !clippedBySharp && straightSide && lMax > 1.60 * lMin
+                    && ((lMax > 0.55 && stepTurn[i] > 0.35 * Math.PI / 180) || (lMax > 0.10 && stepTurn[i] > 4.5 * Math.PI / 180 && (prevStep < 0.25 * Math.PI / 180 || nextStep < 0.25 * Math.PI / 180)));
+                // 3. Long straight segment (> 0.52 mm) meeting another segment at any angle > 0.35 deg, unless part of a uniform arc
+                bool longLineCorner = lMax > 0.52 && stepTurn[i] > 0.35 * Math.PI / 180 && !uniformArc;
+                // 4. Polygon / bevel corner whose sagitta exceeds smooth curve flatness and is not a uniform arc
+                bool polyCorner = lMax * Math.Sin(stepTurn[i]) > 0.04 && stepTurn[i] > 2.0 * Math.PI / 180 && !uniformArc;
+                if (sharpStep || transition || longLineCorner || polyCorner) { corners.Add(i); continue; }
+                if (turn[i] <= thr || stepTurn[i] < 16.5 * Math.PI / 180 || stepTurn[i] < 0.45 * turn[i]) continue;
                 bool peak = true;
                 for (int o = -k; o <= k && peak; o++)
                     if (turn[(i + o + n) % n] > turn[i]) peak = false;
                 if (peak && (corners.Count == 0 || i - corners[corners.Count - 1] > k)) corners.Add(i);
             }
             corners.Sort();
-            var starts = corners.Count == 0 ? new List<int> { 0 } : corners;
+            List<int> starts;
+            if (corners.Count == 0)
+            {
+                var full = new List<Pt2>(n + 1);
+                for (int t = 0; t <= n; t++) full.Add(pts[t % n]);
+                if (ArcSegs && WholeCircle(full, tol, out Arc fullArc))
+                {
+                    EmitArc(fullArc, full[0], full[n], segs);
+                    return segs;
+                }
+                starts = n >= 16 ? new List<int> { 0, n / 4, n / 2, (3 * n) / 4 } : new List<int> { 0 };
+            }
+            else starts = corners;
             for (int r = 0; r < starts.Count; r++)
             {
                 int s = starts[r], e = starts[(r + 1) % starts.Count];
@@ -58,25 +100,209 @@ namespace Sr2d64CSport
                 if (cnt == 0) cnt = n;
                 var run = new List<Pt2>(cnt + 1);
                 for (int t = 0; t <= cnt; t++) run.Add(pts[(s + t) % n]);
-                // at a corner the tangent is the adjacent edge (never the window across the corner)
                 Pt2 t1 = StartTangent(pts, s, k, pixel), t2 = EndTangent(pts, e, k, pixel);
                 FitRun(run, t1, t2, tol, segs, 0);
+            }
+            segs = ReduceLoopNodes(segs, Math.Max(tol * 2.5, 0.008));
+            if (reduceNodes)
+                segs = ReduceLoopNodes(segs, Math.Max(0.045, reduceTol));
+            return segs;
+        }
+
+        /// <summary>CorelDRAW-style node reduction and micro-segment cleanup on a closed loop of fitted segments.</summary>
+        public static List<Seg> ReduceLoopNodes(List<Seg> inSegs, double mergeTol)
+        {
+            var segs = new List<Seg>(inSegs);
+            if (segs.Count <= 2) return segs;
+
+            // 1. Collapse collinear micro-segments (< mergeTol) only when tangents match smoothly
+            double cosSmooth = Math.Cos(10.0 * Math.PI / 180.0);
+            bool changed = true;
+            while (changed && segs.Count > 3)
+            {
+                changed = false;
+                for (int i = 0; i < segs.Count; i++)
+                {
+                    double len = (segs[i].P1 - segs[i].P0).Length;
+                    if (len < mergeTol)
+                    {
+                        int prev = (i + segs.Count - 1) % segs.Count;
+                        int next = (i + 1) % segs.Count;
+                        if (Dot(SegEndTan(segs[prev]), SegStartTan(segs[i])) < cosSmooth ||
+                            Dot(SegEndTan(segs[i]), SegStartTan(segs[next])) < cosSmooth) continue;
+                        Pt2 mid = (segs[i].P0 + segs[i].P1) * 0.5;
+                        var sp = segs[prev]; sp.P1 = mid; segs[prev] = sp;
+                        var sn = segs[next]; sn.P0 = mid; segs[next] = sn;
+                        segs.RemoveAt(i);
+                        changed = true;
+                        break;
+                    }
+                }
+            }
+
+            static Pt2 SegStartTan(Seg s)
+            {
+                if (s.Cub)
+                {
+                    Pt2 d = s.C1 - s.P0;
+                    if (d.Length < 1e-9) d = s.C2 - s.P0;
+                    if (d.Length < 1e-9) d = s.P1 - s.P0;
+                    return Unit(d);
+                }
+                return Unit(s.P1 - s.P0);
+            }
+            static Pt2 SegEndTan(Seg s)
+            {
+                if (s.Cub)
+                {
+                    Pt2 d = s.P1 - s.C2;
+                    if (d.Length < 1e-9) d = s.P1 - s.C1;
+                    if (d.Length < 1e-9) d = s.P1 - s.P0;
+                    return Unit(d);
+                }
+                return Unit(s.P1 - s.P0);
+            }
+            static Pt2 EvalSeg(Seg b, double t)
+            {
+                if (!b.Cub) return b.P0 + (b.P1 - b.P0) * t;
+                double s = 1.0 - t;
+                return b.P0 * (s * s * s) + b.C1 * (3 * t * s * s) + b.C2 * (3 * t * t * s) + b.P1 * (t * t * t);
+            }
+
+            // 2. Greedily merge adjacent segment pairs around the loop when a single line or cubic fits within mergeTol
+            double cosJoinLim = Math.Cos(22.0 * Math.PI / 180.0);
+            for (int pass = 0; pass < 64 && segs.Count > 2; pass++)
+            {
+                double bestScore = double.MaxValue;
+                int bestIdx = -1;
+                Seg bestMerged = default;
+
+                for (int i = 0; i < segs.Count; i++)
+                {
+                    int j = (i + 1) % segs.Count;
+                    Seg sA = segs[i], sB = segs[j];
+                    Pt2 tEndA = SegEndTan(sA), tStartB = SegStartTan(sB);
+                    double cosJoin = Dot(tEndA, tStartB);
+                    if (cosJoin < cosJoinLim) continue;
+                    double lA = (sA.P1 - sA.P0).Length, lB = (sB.P1 - sB.P0).Length;
+                    // Never merge a straight line (>= 0.55 mm) with a curve unless they meet collinearly (< 2 deg) and the curve bends gently (< 15 deg)
+                    double lLine = !sA.Cub ? lA : (!sB.Cub ? lB : 0.0);
+                    if (sA.Cub != sB.Cub && lLine >= 0.55)
+                    {
+                        if (cosJoin < Math.Cos(2.0 * Math.PI / 180.0)) continue;
+                        Seg cubSeg = sA.Cub ? sA : sB;
+                        if (Dot(SegStartTan(cubSeg), SegEndTan(cubSeg)) < Math.Cos(15.0 * Math.PI / 180.0)) continue;
+                    }
+
+                    var pts = new List<Pt2>(33);
+                    for (int k = 0; k < 16; k++) pts.Add(EvalSeg(sA, k / 16.0));
+                    for (int k = 0; k <= 16; k++) pts.Add(EvalSeg(sB, k / 16.0));
+
+                    Pt2 ch = pts[pts.Count - 1] - pts[0];
+                    double cl = ch.Length;
+                    if (cl < 1e-6) continue;
+
+                    if (!sA.Cub && !sB.Cub)
+                    {
+                        double worstL = 0;
+                        for (int k = 1; k + 1 < pts.Count; k++)
+                            worstL = Math.Max(worstL, Math.Abs(Cross(ch, pts[k] - pts[0])) / cl);
+                        if (worstL <= mergeTol && worstL < bestScore)
+                        {
+                            bestScore = worstL;
+                            bestIdx = i;
+                            bestMerged = new Seg { P0 = pts[0], P1 = pts[pts.Count - 1], Cub = false };
+                        }
+                        continue;
+                    }
+
+                    Pt2 t1 = SegStartTan(sA), t2 = SegEndTan(sB) * -1.0;
+                    if (Dot(t1, t2 * -1.0) < -0.985) continue;
+
+                    double[] u = ChordParam(pts);
+                    Pt2[] bz = GenBez(pts, u, t1, t2);
+                    double err = MaxErr(pts, bz, u, out _);
+                    Pt2[] bestBz = bz;
+                    double bestE = err;
+                    for (int it = 0; it < 16 && bestE > mergeTol * 0.25; it++)
+                    {
+                        u = Reparam(bz, pts, u);
+                        bz = (it >= 1) ? GenBezSDM(pts, u, t1, t2, bz) : GenBez(pts, u, t1, t2);
+                        err = MaxErr(pts, bz, u, out _);
+                        if (err < bestE) { bestE = err; bestBz = bz; }
+                    }
+                    if (bestE <= mergeTol)
+                    {
+                        double cdev = CurveDev(bestBz, pts);
+                        double totalErr = Math.Max(bestE, cdev);
+                        if (totalErr <= mergeTol && totalErr < bestScore)
+                        {
+                            bestScore = totalErr;
+                            bestIdx = i;
+                            bestMerged = new Seg { P0 = bestBz[0], C1 = bestBz[1], C2 = bestBz[2], P1 = bestBz[3], Cub = true };
+                        }
+                    }
+                }
+
+                if (bestIdx < 0) break;
+                int removeIdx = (bestIdx + 1) % segs.Count;
+                segs[bestIdx] = bestMerged;
+                segs.RemoveAt(removeIdx);
             }
             return segs;
         }
 
-        // run ends: on a sparse ring (long edges) the tangent is the adjacent edge; on a dense one, the k-window
         static Pt2 StartTangent(IList<Pt2> pts, int s, int k, double pixel)
         {
             int n = pts.Count;
-            Pt2 e1 = pts[(s + 1) % n] - pts[s];
-            return e1.Length > 10 * pixel ? Unit(e1) : TangentAt(pts, s, k, true);
+            Pt2 d0 = pts[(s + 1) % n] - pts[s];
+            double l0 = d0.Length;
+            Pt2 d1 = pts[(s + 2) % n] - pts[(s + 1) % n];
+            double l1 = d1.Length;
+            if (l0 > 1e-6 && l1 > 1e-6)
+            {
+                Pt2 u0 = d0 * (1.0 / l0), u1 = d1 * (1.0 / l1);
+                if (Dot(u0, u1) > 0.9659)
+                {
+                    if (Circle3(pts[s], pts[(s + 1) % n], pts[(s + 2) % n], out Pt2 c, out _))
+                    {
+                        Pt2 rad = pts[s] - c;
+                        Pt2 t = new Pt2(-rad.Y, rad.X);
+                        if (Dot(t, u0) < 0) t = t * -1.0;
+                        return Unit(t);
+                    }
+                    double w = l0 / (l0 + l1);
+                    return Unit(u0 + (u0 - u1) * w);
+                }
+                return u0;
+            }
+            return l0 > 1e-9 ? Unit(d0) : TangentAt(pts, s, k, true);
         }
         static Pt2 EndTangent(IList<Pt2> pts, int e, int k, double pixel)
         {
             int n = pts.Count;
-            Pt2 e1 = pts[e] - pts[(e - 1 + n) % n];
-            return e1.Length > 10 * pixel ? Unit(e1) : TangentAt(pts, e, k, false);
+            Pt2 d0 = pts[(e - 1 + n) % n] - pts[e];
+            double l0 = d0.Length;
+            Pt2 d1 = pts[(e - 2 + n) % n] - pts[(e - 1 + n) % n];
+            double l1 = d1.Length;
+            if (l0 > 1e-6 && l1 > 1e-6)
+            {
+                Pt2 u0 = d0 * (1.0 / l0), u1 = d1 * (1.0 / l1);
+                if (Dot(u0, u1) > 0.9659)
+                {
+                    if (Circle3(pts[e], pts[(e - 1 + n) % n], pts[(e - 2 + n) % n], out Pt2 c, out _))
+                    {
+                        Pt2 rad = pts[e] - c;
+                        Pt2 t = new Pt2(-rad.Y, rad.X);
+                        if (Dot(t, u0) < 0) t = t * -1.0;
+                        return Unit(t);
+                    }
+                    double w = l0 / (l0 + l1);
+                    return Unit(u0 + (u0 - u1) * w);
+                }
+                return u0;
+            }
+            return l0 > 1e-9 ? Unit(d0) : TangentAt(pts, e, k, false);
         }
 
         static Pt2 TangentAt(IList<Pt2> pts, int i, int k, bool forward)
@@ -92,32 +318,22 @@ namespace Sr2d64CSport
             if (n < 2) return;
             if (n == 2)
             {
-                // a two-point run is a straight edge: its tangents are the chord, not the neighbours across the corner
                 outSegs.Add(new Seg { P0 = pts[0], P1 = pts[1] });
                 return;
             }
-            // a run whose points all lie within err of its chord is a straight edge: emit it as a line, whatever the end tangents
-            // (a corner-window tangent on a short edge can otherwise bow a long straight edge by about a millimetre)
+            Pt2 ch = pts[n - 1] - pts[0];
+            double cl = ch.Length;
+            if (cl > 0)
             {
-                Pt2 ch = pts[n - 1] - pts[0];
-                double cl = ch.Length;
-                if (cl > 0)
+                double worst = 0;
+                for (int i = 1; i < n - 1; i++) worst = Math.Max(worst, Math.Abs(Cross(ch, pts[i] - pts[0])) / cl);
+                if (worst <= err)
                 {
-                    double worst = 0;
-                    for (int i = 1; i < n - 1; i++) worst = Math.Max(worst, Math.Abs(Cross(ch, pts[i] - pts[0])) / cl);
-                    if (worst <= err)
-                    {
-                        outSegs.Add(new Seg { P0 = pts[0], P1 = pts[n - 1] });
-                        return;
-                    }
+                    outSegs.Add(new Seg { P0 = pts[0], P1 = pts[n - 1] });
+                    return;
                 }
             }
-            // a circular span - a round cap, a round join, a circular contour - is emitted as the arc itself, one cubic per
-            // quarter turn. Least squares cannot reach that: it measures the cubic against the chorded polyline the arc was
-            // sampled with, and those chords' sagitta is larger than the tolerance on any cap wider than about 4 px, so the
-            // fit splits the arc until each piece is a single chord and the straight test above takes it - 33 lines and no
-            // cubics at all for one round-capped line at w15, where the shape is 4 cubics and 2 lines.
-            if (ArcSegs)
+            if (ArcSegs && depth == 0)
             {
                 var arcs = FindArcs(pts, err);
                 if (arcs.Count > 0) { FitArcs(pts, arcs, t1, t2, err, outSegs, depth); return; }
@@ -125,31 +341,61 @@ namespace Sr2d64CSport
             double[] u = ChordParam(pts);
             Pt2[] bz = GenBez(pts, u, t1, t2);
             double maxErr = MaxErr(pts, bz, u, out int split);
-            if (maxErr > err && maxErr <= err * 4)
+            double reparamGate = Math.Max(err * 64.0, 0.35 * cl);
+            if (maxErr > err && maxErr <= reparamGate)
             {
-                for (int it = 0; it < 20 && maxErr > err; it++)
+                Pt2[] bestBz = bz;
+                double[] bestU = u;
+                double bestErr = maxErr;
+                int bestSplit = split;
+                for (int it = 0; it < 10 && bestErr > err; it++)
                 {
                     u = Reparam(bz, pts, u);
-                    bz = GenBez(pts, u, t1, t2);
+                    bz = (it >= 1) ? GenBezSDM(pts, u, t1, t2, bz) : GenBez(pts, u, t1, t2);
                     maxErr = MaxErr(pts, bz, u, out split);
+                    if (maxErr < bestErr)
+                    {
+                        bestErr = maxErr;
+                        bestBz = bz;
+                        bestU = u;
+                        bestSplit = split;
+                    }
                 }
+                bz = bestBz;
+                u = bestU;
+                maxErr = bestErr;
+                split = bestSplit;
             }
-            // the samples can all lie on the curve while the curve bows away between them (a corner between two sparse edges is
-            // fitted as one arc: the samples at its ends pass, the middle of the arc is far off). Check the curve itself, and split
-            // at the middle when it deviates, as the samples cannot say where the error is.
             if (maxErr <= err && n <= 200)
             {
                 double cdev = CurveDev(bz, pts);
                 if (cdev > err) { maxErr = cdev; split = n / 2; }
             }
-            if (maxErr <= err || depth > 40 || split < 1 || split > n - 2)
+            if (maxErr <= err)
             {
                 outSegs.Add(new Seg { P0 = bz[0], C1 = bz[1], C2 = bz[2], P1 = bz[3], Cub = true });
                 return;
             }
-            Pt2 tc = Unit(pts[split - 1] - pts[split + 1]);
-            FitRun(pts.GetRange(0, split + 1), t1, tc, err, outSegs, depth + 1);
-            FitRun(pts.GetRange(split, n - split), tc * -1.0, t2, err, outSegs, depth + 1);
+            if (n <= 3 || depth > 40)
+            {
+                for (int i = 0; i + 1 < n; i++)
+                    outSegs.Add(new Seg { P0 = pts[i], P1 = pts[i + 1] });
+                return;
+            }
+            if (n >= 6)
+            {
+                int minIdx = Math.Max(2, n / 8);
+                int maxIdx = Math.Min(n - 3, n - 1 - n / 8);
+                if (split < minIdx || split > maxIdx) split = Math.Clamp(split, minIdx, maxIdx);
+            }
+            else split = Math.Clamp(split, 1, n - 2);
+            Pt2 dPrev = pts[split] - pts[split - 1], dNext = pts[split + 1] - pts[split];
+            double lPrev = dPrev.Length, lNext = dNext.Length;
+            Pt2 tcFwd = (lPrev > 1e-9 && lNext > 1e-9)
+                ? Unit(dPrev * (lNext / (lPrev + lNext)) + dNext * (lPrev / (lPrev + lNext)))
+                : Unit(pts[split + 1] - pts[split - 1]);
+            FitRun(pts.GetRange(0, split + 1), t1, tcFwd * -1.0, err, outSegs, depth + 1);
+            FitRun(pts.GetRange(split, n - split), tcFwd, t2, err, outSegs, depth + 1);
         }
 
         /// <summary>False: the pre-arc fit, which subdivides every circular span down to its chords. Kept reachable so the
@@ -184,7 +430,14 @@ namespace Sr2d64CSport
         /// of a real circle is rare enough that widening the window for it costs more than it buys: the widen also fires
         /// where a straight edge runs into a round join, and there it fits a circle to a mixture of the two and the star's
         /// joins came out eight and ten nodes heavier. So the seed stays three points.</summary>
-        static bool SeedCircle(List<Pt2> pts, int i, out Pt2 c, out double r) => Circle3(pts[i], pts[i + 1], pts[i + 2], out c, out r);
+        static bool SeedCircle(List<Pt2> pts, int i, out Pt2 c, out double r)
+        {
+            c = pts[i]; r = 0;
+            Pt2 d0 = pts[i + 1] - pts[i], d1 = pts[i + 2] - pts[i + 1];
+            double l0 = d0.Length, l1 = d1.Length;
+            if (l0 < 1e-6 || l1 < 1e-6 || l0 > 1.6 * l1 || l1 > 1.6 * l0) return false;
+            return Circle3(pts[i], pts[i + 1], pts[i + 2], out c, out r);
+        }
 
         /// <summary>The least-squares circle through pts[a..b], by the algebraic fit taken about the window's centroid.
         /// Centring makes the quadratic term orthogonal to the linear ones, so what is left is a 2 x 2 solve rather than
@@ -293,6 +546,7 @@ namespace Sr2d64CSport
                 double slo = (1 - ArcChordShare) * r, shi = (1 + ArcChordShare) * r;
                 double rlo = Math.Max(0, r - err), rhi = r + err;
                 slo *= slo; shi *= shi; rlo *= rlo; rhi *= rhi;
+                double seedLen = (pts[i + 1] - pts[i]).Length;
                 int j = i, why = 0;
                 Pt2 p = pts[i], vp = p - c;                       // the previous ring point, and its radius vector
                 double sweep = 0;
@@ -300,6 +554,8 @@ namespace Sr2d64CSport
                 while (j + 1 < n)
                 {
                     Pt2 q = pts[j + 1], vq = q - c;
+                    double stepLen = (q - p).Length;
+                    if (stepLen < 0.55 * seedLen || stepLen > 1.8 * seedLen) { why = 1; break; }
                     Pt2 m = (p + q) * 0.5 - c;
                     double m2 = Dot(m, m);
                     if (m2 < slo || m2 > shi)
@@ -320,10 +576,11 @@ namespace Sr2d64CSport
                     if (Math.Abs(sweep + da) > 2 * Math.PI + 1e-9) { why = 4; break; } // a closed run repeats its first point at exactly one turn
                     sweep += da; vp = vq; p = q; j++;
                 }
-                if (j > i + 2 && Math.Abs(sweep) >= MinArcSweep)
+                bool anchored = (i == 0 || j == n - 1);
+                double reqSweep = anchored ? MinArcSweep : 85 * Math.PI / 180;
+                int minPts = anchored ? 3 : 4;
+                if (j >= i + minPts && Math.Abs(sweep) >= reqSweep)
                 {
-                    // a span is taken as soon as it is long enough, so one that stopped short of the end of the run is
-                    // still an arc - and how many of them a ring came out as is only answerable if that is reported too
                     if (ArcLog != null) ArcLog($"  span i={i} j={j} r={r:0.###} sweep={sweep * 180 / Math.PI:0.#}deg taken" +
                         (why == 0 ? ", ran out of run" : $", stopped short: {Why(why, err)}"));
                     arcs.Add(new Arc { I = i, J = j, C = c, R = r, Sweep = sweep }); i = j;
@@ -375,7 +632,7 @@ namespace Sr2d64CSport
         /// joins what comes before and after it exactly, the splits between them lie on the circle.</summary>
         static void EmitArc(Arc a, Pt2 p0, Pt2 p1, List<Seg> outSegs)
         {
-            int k = Math.Max(1, (int)Math.Ceiling(Math.Abs(a.Sweep) / (Math.PI / 2)));
+            int k = Math.Max(1, (int)Math.Ceiling((Math.Abs(a.Sweep) - 1e-6) / (Math.PI / 2)));
             double d = a.Sweep / k, al = 4.0 / 3.0 * Math.Tan(Math.Abs(d) / 4) * a.R;
             double sgn = a.Sweep > 0 ? 1 : -1;
             double a0 = Math.Atan2(p0.Y - a.C.Y, p0.X - a.C.X);
@@ -421,7 +678,8 @@ namespace Sr2d64CSport
                     double L2 = Dot(ab, ab);
                     double t = L2 > 1e-18 ? Math.Max(0, Math.Min(1, Dot(c - a, ab) / L2)) : 0;
                     Pt2 q = a + ab * t;
-                    double d = (c - q).Length;
+                    double sag = 4.0 * t * (1.0 - t) * 0.04 * Math.Sqrt(L2);
+                    double d = Math.Max(0.0, (c - q).Length - sag);
                     if (d < best) best = d;
                 }
                 if (best > worst) worst = best;
@@ -460,6 +718,47 @@ namespace Sr2d64CSport
             double eps = 1e-6 * segLen;
             // a near-parallel tangent pair can solve to huge handles (a spike far off the ring): reject those too
             if (!(al > eps) || !(ar > eps) || al > 2 * segLen || ar > 2 * segLen) { al = segLen / 3; ar = segLen / 3; }
+            return new[] { p0, p0 + t1 * al, p3 + t2 * ar, p3 };
+        }
+
+        static Pt2[] GenBezSDM(List<Pt2> pts, double[] u, Pt2 t1, Pt2 t2, Pt2[] prevBez)
+        {
+            int n = pts.Count;
+            Pt2 p0 = pts[0], p3 = pts[n - 1];
+            double c00 = 0, c01 = 0, c11 = 0, x0 = 0, x1 = 0;
+            const double wTan = 0.05;
+            for (int i = 0; i < n; i++)
+            {
+                double t = u[i], s = 1 - t;
+                double b0 = s * s * s, b1 = 3 * t * s * s, b2 = 3 * t * t * s, b3 = t * t * t;
+                Pt2 a1 = t1 * b1, a2 = t2 * b2;
+                Pt2 tmp = pts[i] - (p0 * (b0 + b1) + p3 * (b2 + b3));
+                Pt2 d = ((prevBez[1] - prevBez[0]) * (s * s) + (prevBez[2] - prevBez[1]) * (2 * s * t) + (prevBez[3] - prevBez[2]) * (t * t)) * 3;
+                double dl = d.Length;
+                if (dl > 1e-9)
+                {
+                    Pt2 ut = d * (1.0 / dl);
+                    Pt2 un = new Pt2(-ut.Y, ut.X);
+                    double a1n = Dot(a1, un), a2n = Dot(a2, un), tmpn = Dot(tmp, un);
+                    double a1t = Dot(a1, ut), a2t = Dot(a2, ut), tmpt = Dot(tmp, ut);
+                    c00 += a1n * a1n + wTan * a1t * a1t;
+                    c01 += a1n * a2n + wTan * a1t * a2t;
+                    c11 += a2n * a2n + wTan * a2t * a2t;
+                    x0 += a1n * tmpn + wTan * a1t * tmpt;
+                    x1 += a2n * tmpn + wTan * a2t * tmpt;
+                }
+                else
+                {
+                    c00 += Dot(a1, a1); c01 += Dot(a1, a2); c11 += Dot(a2, a2);
+                    x0 += Dot(a1, tmp); x1 += Dot(a2, tmp);
+                }
+            }
+            double det = c00 * c11 - c01 * c01;
+            double segLen = (p3 - p0).Length;
+            double al = 0, ar = 0;
+            if (Math.Abs(det) > 1e-12) { al = (x0 * c11 - x1 * c01) / det; ar = (c00 * x1 - c01 * x0) / det; }
+            double eps = 1e-6 * segLen;
+            if (!(al > eps) || !(ar > eps) || al > 2.5 * segLen || ar > 2.5 * segLen) return GenBez(pts, u, t1, t2);
             return new[] { p0, p0 + t1 * al, p3 + t2 * ar, p3 };
         }
 
