@@ -6,8 +6,12 @@
 // A seam is a dip in direct that truth does not have. The report says which of direct / ref8 is closer to truth.
 using System;
 using System.Collections.Generic;
+using System.Drawing;
 using System.IO;
+using System.IO.Compression;
+using System.Linq;
 using System.Numerics;
+using System.Text;
 using Sr2d64CSport;
 
 static class OutlineSeamChecks
@@ -303,6 +307,329 @@ static class OutlineSeamChecks
         File.WriteAllText(Path.Combine(outDir, "vectortext_outlines_baked.svg"), sheet.ToSvg(true), new System.Text.UTF8Encoding(false));
         Console.WriteLine($"  bake worst over all: pixel {worstF:0.000} (gate 0.25), ink integral {worstInt * 100:0.00}% (gate 1%) ({(fail ? "FAIL" : "ok")})");
         if (fail) { Console.WriteLine("FAIL baked outlines"); Environment.Exit(1); }
+    }
+
+    // Strokes whose sub-path mixes kinds: a jagged polyline run joined to a smooth Bezier run. The render
+    // flattening used to give the cubic's first/last chord a direction several degrees off the analytic
+    // Bezier tangent, so the live stroke built its join at that node on the wrong direction and disagreed
+    // with the baked outline conversion; near the 4x miter limit the coarse chord even flipped the join
+    // kind (a miter the conversion keeps came out as a bevel). VectorRender now aligns the boundary chord.
+    public static void MixedKindRun()
+    {
+        string outDir = Environment.GetEnvironmentVariable("CTLRUN_OUT") ?? Path.Combine(Path.GetTempPath(), "ctlrun");
+        Directory.CreateDirectory(outDir);
+        bool fail = false;
+
+        // geometric lock: the boundary chords follow the analytic tangent at the production device tolerance
+        var jagged = JaggedToSmoothPath();
+        var pts = new List<PointF>();
+        VectorRender.Flatten(jagged, Matrix3x2.Identity, Sprite.CurveTolerance, pts);
+        int lc = FindNode(pts, 120f, 120f);          // Line -> Cubic node
+        int cl = FindNode(pts, 150f, 30f);           // Cubic -> Line node
+        float eLc = AngleDeg(Sub(pts[lc + 1], pts[lc]), new Vector2(50f, -2f));     // P1 - P0 of the first cubic
+        float eCl = AngleDeg(Sub(pts[cl], pts[cl - 1]), new Vector2(-30f, 2f));     // P3 - P2 of the second cubic
+        Console.WriteLine($"  mixed-kind chord tangent: L->C {eLc:0.000} deg, C->L {eCl:0.000} deg (gate 0.3)");
+        if (eLc > 0.3f || eCl > 0.3f) { Console.WriteLine("FAIL mixed-kind chord tangent (JaggedToSmooth)"); fail = true; }
+
+        // flip lock: the node's analytic miter ratio is 3.95 (under the 4x limit); a coarse chord pushed it over
+        var edge = MixMiterEdgePath();
+        pts = new List<PointF>();
+        VectorRender.Flatten(edge, Matrix3x2.Identity, Sprite.CurveTolerance, pts);
+        int k = FindNode(pts, 120f, 90f);
+        var d0 = Unit(Sub(pts[k], pts[k - 1]));
+        var d1 = Unit(Sub(pts[k + 1], pts[k]));
+        float cross = d0.X * d1.Y - d0.Y * d1.X, dot = d0.X * d1.X + d0.Y * d1.Y;
+        float th = MathF.Atan2(MathF.Abs(cross), dot), phi = MathF.PI - th;
+        float ratio = 1f / MathF.Max(1e-6f, MathF.Sin(phi / 2f));
+        float eEdge = AngleDeg(Sub(pts[k + 1], pts[k]), new Vector2(4.4999f, 2.5980f));
+        Console.WriteLine($"  mixed-kind miter edge: chord error {eEdge:0.000} deg, render miter ratio {ratio:0.000} (limit 4.0)");
+        if (eEdge > 0.3f || ratio > 4f) { Console.WriteLine("FAIL mixed-kind miter edge: the render bevels an analytic miter"); fail = true; }
+
+        // pixel lock: the live stroke and its baked outline must agree at the settings the user actually sees
+        const float w = 7f;
+        foreach (var (name, path) in new[] { ("jagged", jagged), ("miteredge", edge) })
+        foreach (var jn in new[] { VectorJoin.Miter, VectorJoin.Round, VectorJoin.Bevel })
+        foreach (var zoom in new[] { 1f, 2.49f })
+        {
+            var live = new VectorImage { ViewBox = path.ControlBounds() };
+            live.Shapes.Add(new VectorShape(path, null, VectorColor.Black, w) { Join = jn, Cap = VectorCap.Butt });
+            var band = VectorOffset.Band(path, w, VectorOutlinePosition.Center, VectorCap.Butt, jn, 4f);
+            var baked = new VectorImage { ViewBox = band.ControlBounds() };
+            baked.Shapes.Add(new VectorShape(band, VectorColor.Black));
+            // margin wide enough for a full miter spike (ratio up to the 4x limit)
+            RectangleF ub = Union(path.ControlBounds(), band.ControlBounds());
+            int pad = (int)MathF.Ceiling(w) + 4;
+            int W = (int)MathF.Ceiling(ub.Width * zoom) + 2 * pad, H = (int)MathF.Ceiling(ub.Height * zoom) + 2 * pad;
+            var map = Matrix3x2.CreateScale(zoom) * Matrix3x2.CreateTranslation(pad - ub.Left * zoom, pad - ub.Top * zoom);
+
+            var ha = new Sprite(W, H); ha.ClearBuffer(White); live.Draw(ha, map, new VectorRenderOptions { AA = false });
+            var hb = new Sprite(W, H); hb.ClearBuffer(White); baked.Draw(hb, map, new VectorRenderOptions { AA = false });
+            int hard = 0, ink = 0;
+            for (int i = 0; i < ha.Pixels.Length; i++)
+            {
+                if ((ha.Pixels[i] & 0xff) < 0x80) ink++;
+                if (ha.Pixels[i] != hb.Pixels[i]) hard++;
+            }
+            int gate = Math.Max(8, ink / 20);
+            if (hard > gate) { Console.WriteLine($"FAIL mixed-kind pixels {name} {jn} zoom {zoom:0.00}: {hard} differing px of {ink} ink (gate {gate})"); fail = true; }
+
+            var aa = new Sprite(W, H); aa.ClearBuffer(White); live.Draw(aa, map);
+            var ab = new Sprite(W, H); ab.ClearBuffer(White); baked.Draw(ab, map);
+            float worst = 0;
+            for (int i = 0; i < aa.Pixels.Length; i++)
+                worst = MathF.Max(worst, MathF.Abs((aa.Pixels[i] & 0xff) - (ab.Pixels[i] & 0xff)) / 255f);
+            if (worst > 0.25f) { Console.WriteLine($"FAIL mixed-kind AA {name} {jn} zoom {zoom:0.00}: worst {worst:0.000}"); fail = true; }
+            Console.WriteLine($"  mixed-kind {name} {jn} zoom {zoom:0.00}: hard {hard}/{ink} (gate {gate}), AA worst {worst:0.000}");
+
+            var dif = new int[W * H];
+            for (int i = 0; i < dif.Length; i++) { byte v = (byte)Math.Min(255, Math.Abs((ha.Pixels[i] & 0xff) - (hb.Pixels[i] & 0xff)) * 4); dif[i] = unchecked((int)0xFF000000) | (v << 16) | (v << 8) | v; }
+            File.WriteAllBytes(Path.Combine(outDir, $"mixed_{name}_{jn}_{zoom:0.00}.png"), Png.Encode(dif, W, H));
+        }
+        Console.WriteLine($"  mixed-kind stroke/outline checks: {(fail ? "FAIL" : "ok")}");
+        if (fail) Environment.Exit(1);
+    }
+
+    // Adaptive stroke-to-outline: a tangent-continuous cubic contour is flattened against the flatness/chord gates
+    // instead of the dense legacy one-point-per-0.01-mm sampling, so the baked band reaches the offset/arrange/fit
+    // stages with a few hundred points rather than tens of thousands and comes back with fewer fitted nodes while
+    // CheckBand stays far inside the 0.25 px pixel gate. A sharp line/cubic turn (over 60 degrees), and any path
+    // without a cubic, keep the exact legacy sampling and fit tolerance. The rig's Python mirror (verify_adaptive.py)
+    // holds the byte-identity half of the bargain; here the Windows gate checks node budgets, band accuracy,
+    // determinism, and that a true circle still resolves to four cubic arcs per ring.
+    public static void AdaptiveBakeRun()
+    {
+        bool fail = false;
+        const float w = 6f;
+        const float k = 0.552284749831f;
+
+        // canonical 4-cubic ellipse: every cubic boundary is tangent-continuous, so it takes the adaptive route
+        var ellipse = new VectorPath();
+        const float rx = 60f, ry = 40f;
+        ellipse.MoveTo(rx, 0f);
+        for (int q = 0; q < 4; q++)
+        {
+            float a0 = MathF.PI * q / 2f, a1 = MathF.PI * (q + 1) / 2f;
+            float x0 = rx * MathF.Cos(a0), y0 = ry * MathF.Sin(a0);
+            float x3 = rx * MathF.Cos(a1), y3 = ry * MathF.Sin(a1);
+            float tx0 = -MathF.Sin(a0), ty0 = MathF.Cos(a0), tx1 = -MathF.Sin(a1), ty1 = MathF.Cos(a1);
+            ellipse.CurveTo(x0 + k * rx * tx0, y0 + k * ry * ty0,
+                            x3 - k * rx * tx1, y3 - k * ry * ty1, x3, y3);
+        }
+        ellipse.Close();
+
+        // a cubic ending horizontally, a line turning 90 degrees, then a cubic leaving vertically: the boundary jump
+        // exceeds the 60-degree sharp-turn limit, so the whole path keeps the exact legacy sampling and BakeTol
+        var sharp = new VectorPath();
+        sharp.MoveTo(0f, 0f);
+        sharp.CurveTo(30f, -10f, 60f, -10f, 90f, 0f);
+        sharp.LineTo(90f, 40f);
+        sharp.CurveTo(80f, 70f, 40f, 80f, 0f, 40f);
+        sharp.Close();
+
+        // pure line work: no cubic at all, so the adaptive pre-scan declines and the legacy polyline path runs
+        var rect = new VectorPath();
+        rect.MoveTo(0f, 0f).LineTo(100f, 0f).LineTo(100f, 60f).LineTo(0f, 60f).Close();
+
+        // a true circle: the sparser adaptive points still resolve to one WholeCircle, so each ring stays four cubics
+        const float cr = 25f;
+        var circle = new VectorPath();
+        circle.MoveTo(cr, 0f);
+        for (int q = 0; q < 4; q++)
+        {
+            float a0 = MathF.PI * q / 2f, a1 = MathF.PI * (q + 1) / 2f;
+            float x0 = cr * MathF.Cos(a0), y0 = cr * MathF.Sin(a0);
+            float x3 = cr * MathF.Cos(a1), y3 = cr * MathF.Sin(a1);
+            float tx0 = -MathF.Sin(a0), ty0 = MathF.Cos(a0), tx1 = -MathF.Sin(a1), ty1 = MathF.Cos(a1);
+            circle.CurveTo(x0 + k * cr * tx0, y0 + k * cr * ty0,
+                           x3 - k * cr * tx1, y3 - k * cr * ty1, x3, y3);
+        }
+        circle.Close();
+
+        var cases = new (string name, VectorPath contour, int nodeGate, double devGate)[]
+        {
+            ("ellipse", ellipse, 90, 0.05),   // mirror: 75 fitted nodes over both rings at width 6
+            ("sharp",   sharp,    70, 0.02),  // mirror: 57 nodes, legacy-identical sampling
+            ("rect",    rect,     12, 0.02),  // four lines per ring
+            ("circle",  circle,   12, 0.02),  // WholeCircle: four cubics per ring
+        };
+        foreach (var (name, contour, nodeGate, devGate) in cases)
+        {
+            var band = VectorOffset.Band(contour, w, VectorOutlinePosition.Center, VectorCap.Butt, VectorJoin.Miter, 4f);
+            if (band == null) { Console.WriteLine("FAIL adaptive " + name + ": Band returned null"); fail = true; continue; }
+            var again = VectorOffset.Band(contour, w, VectorOutlinePosition.Center, VectorCap.Butt, VectorJoin.Miter, 4f);
+            bool deterministic = SamePath(band, again);
+            var (maxDev, segments) = VectorOffset.CheckBand(contour, band, w / 2.0);
+            bool ok = deterministic && band.NodeCount <= nodeGate && maxDev <= devGate;
+            Console.WriteLine($"  adaptive {name}: nodes {band.NodeCount} (gate {nodeGate}), {segments} ring segments, dev {maxDev:0.0000} mm (gate {devGate:0.00}), deterministic {deterministic}");
+            if (!ok) { Console.WriteLine($"FAIL adaptive {name}: node/accuracy/determinism gate"); fail = true; }
+        }
+        Console.WriteLine($"  adaptive stroke-to-outline checks: {(fail ? "FAIL" : "ok")}");
+        if (fail) Environment.Exit(1);
+    }
+
+    // SVG text decoding: a CorelDRAW export can be UTF-16 (BOM FF FE). The loader used to decode every SVG as
+    // UTF-8, so the BOM became replacement characters and the XML parse died at "line 1, position 1". Every
+    // encoding VectorImage.DecodeXml supports must yield the same picture; a .svgz gunzips before the same decode.
+    public static void SvgEncodingRun()
+    {
+        bool fail = false;
+        void Chk(bool ok, string what) { Console.WriteLine($"  {(ok ? "ok  " : "FAIL")} {what}"); if (!ok) fail = true; }
+
+        const string doc =
+            "<?xml version=\"1.0\" encoding=\"UTF-16\"?>" +
+            "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 200 100\" width=\"200\" height=\"100\">" +
+            "<circle cx=\"40\" cy=\"50\" r=\"30\"/><path d=\"M100 20 L180 80 L120 80 Z\"/></svg>";
+        // a Corel-style header (DOCTYPE + comment) in front: StripDoctype runs on the text after the decode
+        const string corel =
+            "<?xml version=\"1.0\" encoding=\"UTF-16\"?>" +
+            "<!DOCTYPE svg PUBLIC \"-//W3C//DTD SVG 1.1//EN\" \"http://www.w3.org/Graphics/SVG/1.1/DTD/svg11.dtd\">" +
+            "<!-- Creator: CorelDRAW --><svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 200 100\">" +
+            "<polygon class=\"fil0 str0\" points=\"813.32,1594.82 1000.62,2175.05 1610.33,2173.88\"/></svg>";
+
+        var reference = VectorImage.Load(Encoding.UTF8.GetBytes(doc), "svg");
+        var corelRef = VectorImage.Load(Encoding.UTF8.GetBytes(corel), "svg");
+        var variants = new List<(string Name, byte[] Data, string? Hint, VectorImage Ref)>
+        {
+            ("utf-8 plain", Encoding.UTF8.GetBytes(doc), "svg", reference),
+            ("utf-8 BOM", Encoding.UTF8.GetPreamble().Concat(Encoding.UTF8.GetBytes(doc)).ToArray(), "svg", reference),
+            ("utf-16 LE BOM", Encoding.Unicode.GetPreamble().Concat(Encoding.Unicode.GetBytes(doc)).ToArray(), "svg", reference),
+            ("utf-16 BE BOM", Encoding.BigEndianUnicode.GetPreamble().Concat(Encoding.BigEndianUnicode.GetBytes(doc)).ToArray(), "svg", reference),
+            ("utf-16 LE no BOM", Encoding.Unicode.GetBytes(doc), "svg", reference),
+            ("utf-16 BE no BOM", Encoding.BigEndianUnicode.GetBytes(doc), "svg", reference),
+            ("utf-16 LE BOM, no extension hint", Encoding.Unicode.GetPreamble().Concat(Encoding.Unicode.GetBytes(doc)).ToArray(), null, reference),
+            ("utf-8 BOM, no extension hint", Encoding.UTF8.GetPreamble().Concat(Encoding.UTF8.GetBytes(doc)).ToArray(), null, reference),
+            ("Corel header, utf-16 LE BOM", Encoding.Unicode.GetPreamble().Concat(Encoding.Unicode.GetBytes(corel)).ToArray(), "svg", corelRef),
+        };
+        foreach (var (name, data, hint, refImg) in variants)
+        {
+            VectorImage img;
+            try { img = VectorImage.Load(data, hint); }
+            catch (Exception ex) { Chk(false, $"{name}: load threw {ex.GetType().Name}: {ex.Message}"); continue; }
+            Chk(img.Shapes.Count == refImg.Shapes.Count, $"{name}: {img.Shapes.Count} shapes (reference {refImg.Shapes.Count})");
+            bool same = img.Shapes.Count == refImg.Shapes.Count;
+            for (int i = 0; same && i < img.Shapes.Count; i++) same = SamePath(img.Shapes[i].Path, refImg.Shapes[i].Path);
+            Chk(same, $"{name}: geometry matches the utf-8 reference");
+        }
+
+        // gzipped SVG (.svgz): the gzip layer unwraps first, then the same BOM-aware decode must run
+        using (var ms = new MemoryStream())
+        {
+            using (var gz = new GZipStream(ms, CompressionLevel.Fastest, true))
+                gz.Write(Encoding.Unicode.GetPreamble().Concat(Encoding.Unicode.GetBytes(doc)).ToArray());
+            var img = VectorImage.Load(ms.ToArray(), "svgz");
+            Chk(img.Shapes.Count == reference.Shapes.Count && SamePath(img.Shapes[0].Path, reference.Shapes[0].Path),
+                "gzipped utf-16 (.svgz) decodes to the same picture");
+        }
+        Console.WriteLine($"  svg encoding checks: {(fail ? "FAIL" : "ok")}");
+        if (fail) Environment.Exit(1);
+    }
+
+    // Phantom crossing at a shared pinch vertex. A smooth self-crossing figure-8 splits in Region() into two
+    // lobes that share one vertex; the two edges ending there are near-collinear, so the parametric division in
+    // OutlineArrange.Cross is numerically unstable and used to flip with the shape's absolute page position:
+    // the table column sitting ~180 mm from the origin evaluated the shared-endpoint intersection just inside the
+    // strict eps window, inserted a phantom crossing node, lost every bounded face (Region -> 0 or 1 lobes) and
+    // the outside band then filled both lobes solid. The same shape near the origin rendered correctly, which is
+    // why one-shape mode never showed the bug. The rings below are the exact doubles (17-significant-digit round
+    // trip) of that pinch geometry extracted from Region() at the failing table coordinates, trimmed to four
+    // points per lobe. On the pre-fix Cross, 5 of the 10 translations return the wrong lobe count; with the
+    // endpoint-coincidence guard every translation must keep both lobes.
+    public static void TranslationRun()
+    {
+        bool fail = false;
+        void Chk(bool ok, string what) { Console.WriteLine($"  {(ok ? "ok  " : "FAIL")} {what}"); if (!ok) fail = true; }
+
+        var lobeA = new List<Pt2>
+        {
+            new Pt2(182.29622459305511, 53.046600341796875),
+            new Pt2(191.43330383300781, 56.701400756835938),
+            new Pt2(191.46087646484375, 56.712467193603516),
+            new Pt2(191.4884033203125, 56.723594665527344),
+        };
+        var lobeB = new List<Pt2>
+        {
+            new Pt2(182.29622459305511, 53.046600341796875),
+            new Pt2(173.15939331054688, 49.391899108886719),
+            new Pt2(173.13182067871094, 49.380832672119141),
+            new Pt2(173.10429382324219, 49.369705200195312),
+        };
+        // the three demo table columns, plus fractional and large offsets that perturb the float64 rounding
+        var shifts = new (double DX, double DY)[]
+        {
+            (0.0, 0.0), (-50.0, 25.0), (104.883, 0.0), (209.766, 0.0), (500.0, 250.0),
+            (1000.0, -500.0), (-127.5, 33.25), (12345.678, -9.01), (0.13, -0.05), (-0.003, 77.7),
+        };
+        foreach (var (dx, dy) in shifts)
+        {
+            var rings = new List<List<Pt2>>
+            {
+                lobeA.ConvertAll(p => new Pt2(p.X + dx, p.Y + dy)),
+                lobeB.ConvertAll(p => new Pt2(p.X + dx, p.Y + dy)),
+            };
+            var region = OutlineArrange.Region(rings);
+            Chk(region.Count == 2, $"pinch region at shift ({dx}, {dy}): {region.Count} lobes (want 2)");
+        }
+        Console.WriteLine($"  pinch translation checks: {(fail ? "FAIL" : "ok")}");
+        if (fail) Environment.Exit(1);
+    }
+
+    static bool SamePath(VectorPath a, VectorPath b)
+    {
+        if (a.Kinds.Count != b.Kinds.Count || a.Data.Count != b.Data.Count) return false;
+        for (int i = 0; i < a.Kinds.Count; i++) if (a.Kinds[i] != b.Kinds[i]) return false;
+        for (int i = 0; i < a.Data.Count; i++) if (MathF.Abs(a.Data[i] - b.Data[i]) > 1e-4f) return false;
+        return true;
+    }
+
+    static VectorPath JaggedToSmoothPath()
+    {   // one closed sub-path that switches kind: a jagged line run, a smooth cubic run, then a line again
+        var p = new VectorPath();
+        p.MoveTo(20f, 120f);
+        p.LineTo(45f, 114f); p.LineTo(70f, 120f); p.LineTo(95f, 114f); p.LineTo(120f, 120f);
+        p.CurveTo(170f, 118f, 215f, 95f, 215f, 60f);
+        p.CurveTo(215f, 35f, 180f, 28f, 150f, 30f);
+        p.LineTo(20f, 30f);
+        p.Close();
+        return p;
+    }
+
+    static VectorPath MixMiterEdgePath()
+    {   // the Line -> Cubic node (120,90) turns ~150 deg and leaves along the 30 deg cubic tangent:
+        // analytic miter ratio 1/sin(phi/2) = 3.95, just inside the default 4x miter limit
+        var p = new VectorPath();
+        p.MoveTo(126.1212f, 100.3214f);
+        p.LineTo(120f, 90f);
+        p.CurveTo(124.4999f, 92.5980f, 129.6f, 95.6f, 131.2f, 100.4f);
+        p.LineTo(136f, 108f);
+        p.LineTo(114f, 109.2f);
+        p.Close();
+        return p;
+    }
+
+    static RectangleF Union(RectangleF a, RectangleF b) =>
+        RectangleF.FromLTRB(MathF.Min(a.Left, b.Left), MathF.Min(a.Top, b.Top),
+                            MathF.Max(a.Right, b.Right), MathF.Max(a.Bottom, b.Bottom));
+
+    static int FindNode(List<PointF> pts, float x, float y)
+    {
+        for (int i = 0; i < pts.Count; i++)
+            if (pts[i].X == x && pts[i].Y == y) return i;
+        throw new InvalidOperationException($"mixed-kind fixture node ({x}, {y}) not found in flattened points");
+    }
+
+    static Vector2 Sub(PointF a, PointF b) => new Vector2(a.X - b.X, a.Y - b.Y);
+
+    static Vector2 Unit(Vector2 v)
+    {
+        float l = MathF.Sqrt(v.X * v.X + v.Y * v.Y);
+        return l > 0 ? new Vector2(v.X / l, v.Y / l) : Vector2.Zero;
+    }
+
+    static float AngleDeg(Vector2 a, Vector2 b)
+    {
+        float la = MathF.Sqrt(a.X * a.X + a.Y * a.Y), lb = MathF.Sqrt(b.X * b.X + b.Y * b.Y);
+        if (la < 1e-9f || lb < 1e-9f) return 0f;
+        return MathF.Acos(Math.Clamp((a.X * b.X + a.Y * b.Y) / (la * lb), -1f, 1f)) * 180f / MathF.PI;
     }
 
     static VectorImage BakedCopy(VectorImage pic)

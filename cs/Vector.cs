@@ -506,10 +506,30 @@ namespace Sr2d64CSport
             {
                 case VectorFormat.Pdf: return FromPdf(data, page);
                 case VectorFormat.PostScript: return FromPostScript(data);
-                case VectorFormat.Svg: return FromSvg(Encoding.UTF8.GetString(data));
+                case VectorFormat.Svg: return FromSvg(DecodeXml(data));
                 default: throw new NotSupportedException("Not an SVG, PostScript / EPS or PDF file.");
             }
         }
+        /// <summary>Decodes an SVG/XML payload to text honouring its byte order mark and the UTF-16 byte pattern.
+        /// CorelDRAW's SVG export can be UTF-16 (BOM <c>FF FE</c>); decoding that as UTF-8 turned the BOM into
+        /// replacement characters, so <see cref="SvgReader"/>'s XML parse failed at "line 1, position 1".
+        /// Files without a BOM default to UTF-8, the SVG/XML default; a BOM-less UTF-16 file (the XML spec
+        /// requires a BOM for UTF-16, so this only rescues hand-saved files) is recognised by its NUL pattern.</summary>
+        internal static string DecodeXml(byte[] data)
+        {
+            if (data.Length >= 3 && data[0] == 0xEF && data[1] == 0xBB && data[2] == 0xBF)
+                return Encoding.UTF8.GetString(data, 3, data.Length - 3);
+            if (data.Length >= 2 && data[0] == 0xFF && data[1] == 0xFE)
+                return Encoding.Unicode.GetString(data, 2, data.Length - 2);            // UTF-16 LE, Corel's UTF-16 export
+            if (data.Length >= 2 && data[0] == 0xFE && data[1] == 0xFF)
+                return Encoding.BigEndianUnicode.GetString(data, 2, data.Length - 2);   // UTF-16 BE
+            int probe = Math.Min(data.Length, 512), nulEven = 0, nulOdd = 0;
+            for (int i = 0; i < probe; i++) { if (data[i] == 0) { if ((i & 1) == 0) nulEven++; else nulOdd++; } }
+            if (nulEven + nulOdd > 4)
+                return (nulOdd > nulEven ? Encoding.Unicode : Encoding.BigEndianUnicode).GetString(data);
+            return Encoding.UTF8.GetString(data);
+        }
+
         public static VectorFormat Sniff(byte[] data, string? hint = null)
         {
             if (MbTiles.IsSqlite(data)) return VectorFormat.MbTiles;
@@ -519,6 +539,9 @@ namespace Sr2d64CSport
                 if (data[0] == 0xC5 && data[1] == 0xD0 && data[2] == 0xD3 && data[3] == 0xC6) return VectorFormat.PostScript;   // DOS EPS binary header
                 if (data[0] == '%' && data[1] == '!') return VectorFormat.PostScript;
             }
+            // a BOM means XML text: UTF-8 (EF BB BF), UTF-16 LE (FF FE) or BE (FE FF) - the ASCII head scan cannot see these
+            if (data.Length >= 3 && data[0] == 0xEF && data[1] == 0xBB && data[2] == 0xBF) return VectorFormat.Svg;
+            if (data.Length >= 2 && ((data[0] == 0xFF && data[1] == 0xFE) || (data[0] == 0xFE && data[1] == 0xFF))) return VectorFormat.Svg;
             int n = Math.Min(data.Length, 4096); string head = Encoding.ASCII.GetString(data, 0, n);
             if (head.Contains("<svg", StringComparison.OrdinalIgnoreCase) || head.TrimStart().StartsWith("<?xml", StringComparison.Ordinal) || head.TrimStart().StartsWith('<')) return VectorFormat.Svg;
             int pdf = head.IndexOf("%PDF", StringComparison.Ordinal); if (pdf >= 0 && pdf < 1024) return VectorFormat.Pdf;

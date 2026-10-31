@@ -4,7 +4,8 @@
 // definition: caps alone (a straight line), joins at one angle (chevrons), a nearly straight vertex (the case a
 // join-culling shortcut can drop), a 180 degree reversal, an acute corner against the miter limit, a curve
 // (many shallow vertices - where a dropped join shows as a scallop), a smooth closed shape, an axis-aligned
-// square (exact miter arithmetic), a self-crossing path, and dashes (even, odd and dotted patterns).
+// square (exact miter arithmetic), a self-crossing path, mixed line/cubic sub-paths (the join at a jagged to
+// smooth kind boundary, including a near-limit miter), and dashes (even, odd and dotted patterns).
 using System;
 using System.Collections.Generic;
 using System.Numerics;
@@ -68,6 +69,32 @@ namespace Sr2d64CSport
             p.CurveTo(170, 20, 110, 160, 30, 100);
             return p;
         }
+        static VectorPath JaggedToSmooth()
+        {   // one closed sub-path that switches kind: a jagged line run, a smooth cubic run, then a line again.
+            // the joins at the two Line<->Cubic nodes used to take the coarse flattening chord's tangent instead
+            // of the analytic Bezier tangent, so the stroke disagreed with the baked outline conversion there
+            var p = new VectorPath();
+            p.MoveTo(20, 120);
+            p.LineTo(45, 114); p.LineTo(70, 120); p.LineTo(95, 114); p.LineTo(120, 120);
+            p.CurveTo(170, 118, 215, 95, 215, 60);
+            p.CurveTo(215, 35, 180, 28, 150, 30);
+            p.LineTo(20, 30);
+            p.Close();
+            return p;
+        }
+        static VectorPath MixMiterEdge()
+        {   // a sharp Line -> Cubic node whose analytic miter ratio (1/sin(phi/2) = 3.95) stays under the 4x
+            // limit: the exact tangent mitres, while the coarse first chord pushed the ratio over it and the
+            // live stroke silently beveled where its outline conversion mitred
+            var p = new VectorPath();
+            p.MoveTo(126.1212f, 100.3214f);
+            p.LineTo(120, 90);
+            p.CurveTo(124.4999f, 92.5980f, 129.6f, 95.6f, 131.2f, 100.4f);
+            p.LineTo(136, 108);
+            p.LineTo(114, 109.2f);
+            p.Close();
+            return p;
+        }
         static VectorPath Star(double cx, double cy, double ro, double ri)
         {
             var p = new VectorPath();
@@ -117,7 +144,10 @@ namespace Sr2d64CSport
                     Add($"scurve w{ws} {join}", SCurve(), w, Cap.Butt, join);
                     Add($"circle w{ws} {join}", CircleCubic(120, 90, 55), w, Cap.Butt, join);
                     Add($"fig8 w{ws} {join}", Fig8(), w, Cap.Butt, join);
+                    Add($"mixjoin w{ws} {join}", JaggedToSmooth(), w, Cap.Butt, join);
                 }
+                // a Line -> Cubic node just inside the miter limit: a coarse chord used to flip miter into bevel
+                Add($"mixmiter w{ws} miter/3.9", MixMiterEdge(), w, Cap.Butt, Join.Miter);
                 // the miter limit decides where a sharp corner stops being sharp
                 foreach (double ml in new[] { 1.0, 2.0, 10.0 })
                     Add($"chevAcute w{ws} miter/{ml:0.#}", Open(ChevronAcute), w, Cap.Butt, Join.Miter, ml);

@@ -16,6 +16,95 @@ Conventions
   DOCS     README / comments only
 
 
+2026-10-28  Outline arrangement: phantom crossing at a translated pinch vertex
+------------------------------------------------------------------------------------------------
+FIXED    A smooth self-crossing figure-8 baked to an outside outline could fill one or both of
+         its lobes solid in the demo's table view while the same shape converted on its own was
+         correct. OutlineArrange splits the contour into two lobe rings sharing one vertex at the
+         pinch; the two edges ending there are near-collinear, so the parametric intersection in
+         OutlineArrange.Cross (cs/Vector.Arrange.cs) is numerically unstable. When the shape sat
+         ~180 mm from the page origin, float64 rounding placed the shared-endpoint contact just
+         inside the strict (1e-9, 1-1e-9) parameter window, so Cross inserted a phantom crossing
+         node 2e-5 mm from the real pinch. The half-edge face walk then found no bounded faces,
+         the inner offset union lost its hole rings and the lobes painted solid. The result
+         depended only on the absolute page position: other columns and one-shape mode rounded
+         the same contact to a rejected t >= 1-1e-9, and the GDI+ Widen route never enters this
+         code. Cross now rejects a pair whose segments share a coincident endpoint (within the
+         same 1e-9 mm geometric tolerance the T-junction pass uses); endpoint contacts are owned
+         by that pass, which already splits segments on them. Band topology is now independent
+         of translation: a faithful C++ port of Arrange shows the old code mis-building 5 of 10
+         offsets of the exact pinch rings (and 11 of 102 offsets of the full figure-8 rings),
+         while the guarded code builds the correct outer + two hole rings at every offset and
+         both lobes rasterise empty through the SSE2 fill kernel.
+TESTS    ctlrun OutlineSeamChecks.TranslationRun, wired into Program: the exact pinch rings as
+         IEEE doubles, evaluated by OutlineArrange.Region at ten page translations (the three
+         demo columns plus fractional and large offsets); every translation must keep both
+         lobes. The pre-fix Cross fails five of the ten, the guarded Cross passes all of them.
+
+2026-10-27  Stroke->outline: adaptive flattening for smooth custom shapes
+------------------------------------------------------------------------------------------------
+CHANGED  Baking a smooth (tangent-continuous) vector stroke to an outline used to flatten every
+         cubic at one chord per 0.01 mm of control polygon, feeding the offset/arrange/fit stages
+         tens of thousands of points; the fitted band then carried redundant nodes (the figure-8
+         outline-test shape: 13,644 flat points, 83 fitted segments). cs/Vector.Offset.cs: TryFlatten
+         pre-scans the path (ClassifySharp); a path whose line/cubic boundaries all turn by at most
+         AdaptiveSharpTurn (60 deg) and which contains a cubic is sampled with the Wang flatness
+         formula the render flatteners already use (AdaptiveFlat 0.001 mm, longest chord
+         AdaptiveMaxChord 0.5 mm, never more points than the legacy rule) and fitted at BakeTol +
+         AdaptiveFlat. A sharp boundary, or any path without a cubic, keeps the exact legacy sampling
+         and BakeTol, so all-line paths and jagged paths bake byte-identically to before; a true
+         circle still resolves to one WholeCircle, four cubics per ring. On the outline-test
+         fixtures the smooth shapes lose 13x-27x of their flat points and up to 18% of fitted nodes
+         (figure-8 83->74) with band deviation under 0.01 px; the 0.25 px pixel gate and the 1%
+         ink gate stay green.
+TESTS    ctlrun OutlineSeamChecks.AdaptiveBakeRun, wired into Program: an ellipse (adaptive node
+         budget and band accuracy), a 90-degree line/cubic turn and a rectangle (legacy routes,
+         compact and deterministic) and a circle (four cubics per ring). The 1:1 Python mirror
+         verify_adaptive.py gates byte identity of the legacy-routed shapes and the render-vs-bake
+         XOR of the figure-8 (33 checks).
+
+
+2026-10-27  SVG load: honour UTF-16 (and BOM-prefixed) CorelDRAW exports
+------------------------------------------------------------------------------------------------
+FIXED    A CorelDRAW SVG export saved as UTF-16 (BOM FF FE, declaration encoding="UTF-16") failed
+         to load with "not well-formed SVG: Data at the root level is invalid. Line 1, position 1".
+         VectorImage.Load decoded every SVG payload as UTF-8, so the BOM became replacement
+         characters and the XML reader saw no markup at the document start. cs/Vector.cs: new
+         DecodeXml honours the UTF-8 / UTF-16 LE / UTF-16 BE byte order marks, recognises a
+         BOM-less UTF-16 file by its NUL-byte pattern, and otherwise keeps UTF-8, the XML default.
+         Sniff now classifies BOM-prefixed XML as SVG even without an .svg extension hint, and
+         the .svgz path runs the same decode after gunzipping. No public API changed; UTF-8 files
+         load byte-identically to before.
+TESTS    ctlrun OutlineSeamChecks.SvgEncodingRun: UTF-8 (plain and BOM), UTF-16 LE/BE with and
+         without BOM, no-extension-hint BOM files, a Corel-style DOCTYPE document and a gzipped
+         UTF-16 .svgz all load to the same geometry as the UTF-8 reference.
+
+
+2026-10-27  Stroke joins at a jagged/smooth (Line<->Cubic) boundary: tangent-aligned chords
+------------------------------------------------------------------------------------------------
+FIXED    A vector stroke where a jagged polyline run meets a smooth Bezier run: the render flattening
+         built its join on the cubic's coarse first/last chord (measured up to ~10 deg off the analytic
+         Bezier tangent at the production 0.2 px tolerance), while the stroke->outline conversion
+         flattens at 0.01 mm and stayed tangent-accurate. The two passes therefore placed miter tips
+         differently and, near the 4x miter limit, could disagree on the join kind itself - a miter the
+         conversion keeps came out of the renderer as a bevel. cs/Vector.Render.cs: VectorRender.Flatten
+         marks cubics that share a node with a line segment (including across a Close) and CubicTo
+         subdivides until the end chord follows the analytic end tangent within TangentAlignAngle
+         (0.25 deg, count clamped at 256). A cusp (zero end derivative) keeps the ordinary chord rule.
+FIXED    The same defect in the Sprite stroke API's own flattener, cs/Sprite.Curves.cs PathBuilder
+         (CubicSegments / AlignCubicEnds, count clamped at 512), so StrokePath / StrokeOutline take the
+         same join direction as the vector renderer and the outline conversion.
+         Compat: tessellation of pure-line and pure-cubic paths is unchanged; only Line<->Cubic
+         boundary cubics gain extra, denser samples, so fills on mixed-kind paths get slightly more
+         accurate edges within the same flattening tolerance. No public API changed.
+TESTS    ctlrun OutlineSeamChecks.MixedKindRun (headless Linux gate): a geometric chord/tangent lock,
+         the near-limit miter (analytic ratio 3.95) whose coarse chord flipped it to a bevel, and
+         live-vs-baked pixel gates for both mixed-kind fixtures at 1x and 2.49x, all three joins.
+TESTS    stroketruth Fixtures: JaggedToSmooth (Line->Cubic and Cubic->Line nodes in one closed
+         sub-path, every join) and MixMiterEdge (miter just inside the 4x limit), across the width
+         matrix, so both engine columns and the baked-outline column are compared on mixed kinds.
+
+
 2026-10-19  Map open test: bitmap-cache drag, hide by zoom, reset; SVG slowdown; vector text centred and zoomed
 ------------------------------------------------------------------------------------------------
 ADDED    cs/Vector.Index.cs VectorViewCache (internal): the bitmap cache of a picture (Bake / Covers / Blit).

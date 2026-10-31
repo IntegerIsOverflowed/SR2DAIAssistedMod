@@ -110,6 +110,29 @@ namespace Sr2d64CSport
             var subs = new List<(int, int, bool)>();
             int d = 0, start = outPts.Count; bool have = false; float cx = 0, cy = 0;
             var K = p.Kinds; var D = p.Data;
+            // Kind-boundary alignment: a cubic that shares a node with a line segment (the jagged/smooth
+            // boundary) keeps its end chord on the analytic Bezier tangent there, so the stroke's join and
+            // the outline conversion take the same direction. Pure-line and pure-cubic paths keep the old count.
+            var alignStart = new bool[K.Count];
+            var alignEnd = new bool[K.Count];
+            for (int i = 0; i < K.Count; i++)
+            {
+                if (K[i] != VectorPath.K.Cubic) continue;
+                if (i > 0 && K[i - 1] == VectorPath.K.Line) alignStart[i] = true;
+                if (i + 1 < K.Count && K[i + 1] == VectorPath.K.Line) alignEnd[i] = true;
+            }
+            // closed sub-path: the first and last segments meet across the Close
+            int firstSeg = -1;
+            for (int i = 0; i < K.Count; i++)
+            {
+                if (K[i] == VectorPath.K.Move) firstSeg = i + 1;
+                else if (K[i] == VectorPath.K.Close && firstSeg >= 0 && i - 1 > firstSeg)
+                {
+                    if (K[firstSeg] == VectorPath.K.Cubic && K[i - 1] == VectorPath.K.Line) alignStart[firstSeg] = true;
+                    if (K[i - 1] == VectorPath.K.Cubic && K[firstSeg] == VectorPath.K.Line) alignEnd[i - 1] = true;
+                    firstSeg = -1;
+                }
+            }
             void End(bool closed) { if (have) { int n = outPts.Count - start; if (n > 0) subs.Add((start, n, closed)); } have = false; }
             Vector2 T(float x, float y) => Vector2.Transform(new Vector2(x, y), m);
             for (int i = 0; i < K.Count; i++)
@@ -125,7 +148,7 @@ namespace Sr2d64CSport
                             float x1 = D[d], y1 = D[d + 1], x2 = D[d + 2], y2 = D[d + 3], x3 = D[d + 4], y3 = D[d + 5]; d += 6;
                             if (!have) { start = outPts.Count; var v0 = T(cx, cy); outPts.Add(new PointF(v0.X, v0.Y)); have = true; }
                             var p0 = T(cx, cy); var p1 = T(x1, y1); var p2 = T(x2, y2); var p3 = T(x3, y3);
-                            CubicTo(p0, p1, p2, p3, tol, outPts); cx = x3; cy = y3; break;
+                            CubicTo(p0, p1, p2, p3, tol, outPts, alignStart[i], alignEnd[i]); cx = x3; cy = y3; break;
                         }
                     case VectorPath.K.Close:
                         if (have)
@@ -143,19 +166,68 @@ namespace Sr2d64CSport
             return subs;
             static PointF FirstOf(List<(int, int, bool)> subs, int start, List<PointF> pts) => pts[start];
         }
-        /// <summary>Uniform subdivision with the segment count from the control polygon's second differences (error &lt;= tol).</summary>
-        static void CubicTo(Vector2 p0, Vector2 p1, Vector2 p2, Vector2 p3, float tol, List<PointF> o)
+        /// <summary>End-chord accuracy at a line/cubic boundary: 0.25 degree leaves the join's tip displacement an order of
+        /// magnitude below a device pixel at the widest pen and matches the outline conversion's dense chord to a fraction
+        /// of a degree, so a near-limit miter cannot flip to a bevel between the two passes.</summary>
+        internal const float TangentAlignAngle = 0.25f * MathF.PI / 180f;
+
+        /// <summary>Uniform subdivision with the segment count from the control polygon's second differences (error &lt;= tol).
+        /// When <paramref name="alignStart"/> / <paramref name="alignEnd"/> are set (a cubic whose node is shared with a line
+        /// segment), the count is raised until the first / last chord also follows the analytic Bezier end tangent within
+        /// <see cref="TangentAlignAngle"/>: the stroke's join at that jagged/smooth boundary then uses the curve tangent on
+        /// every zoom, instead of a coarse tolerance chord that only matched it within a few degrees.</summary>
+        static void CubicTo(Vector2 p0, Vector2 p1, Vector2 p2, Vector2 p3, float tol, List<PointF> o,
+                            bool alignStart = false, bool alignEnd = false)
         {
             float ddx = MathF.Max(MathF.Abs(p0.X - 2 * p1.X + p2.X), MathF.Abs(p1.X - 2 * p2.X + p3.X));
             float ddy = MathF.Max(MathF.Abs(p0.Y - 2 * p1.Y + p2.Y), MathF.Abs(p1.Y - 2 * p2.Y + p3.Y));
             float dd = MathF.Sqrt(ddx * ddx + ddy * ddy);
             int n = (int)MathF.Ceiling(MathF.Sqrt(0.75f * dd / MathF.Max(tol, 1e-4f)));
             n = Math.Clamp(n, 1, 256);
+            if (alignStart || alignEnd) n = AlignEnds(p0, p1, p2, p3, n, alignStart, alignEnd);
             for (int i = 1; i <= n; i++)
             {
-                float t = (float)i / n, u = 1 - t, b0 = u * u * u, b1 = 3 * u * u * t, b2 = 3 * u * t * t, b3 = t * t * t;
-                o.Add(new PointF(b0 * p0.X + b1 * p1.X + b2 * p2.X + b3 * p3.X, b0 * p0.Y + b1 * p1.Y + b2 * p2.Y + b3 * p3.Y));
+                Vector2 q = BezPoint(p0, p1, p2, p3, (float)i / n);
+                o.Add(new PointF(q.X, q.Y));
             }
+        }
+
+        /// <summary>The smallest subdivision count &gt;= n whose end chords follow the analytic Bezier tangents within
+        /// <see cref="TangentAlignAngle"/> at the ends the caller asks for. A cusp (zero end derivative) has no tangent and
+        /// keeps the ordinary chord rule.</summary>
+        static int AlignEnds(Vector2 p0, Vector2 p1, Vector2 p2, Vector2 p3, int n, bool alignStart, bool alignEnd)
+        {
+            Vector2 t0 = p1 - p0, t1 = p3 - p2;
+            bool can0 = alignStart && t0.LengthSquared() > 1e-12f;
+            bool can1 = alignEnd && t1.LengthSquared() > 1e-12f;
+            if (!can0 && !can1) return n;
+            if (can0) t0 = Vector2.Normalize(t0);
+            if (can1) t1 = Vector2.Normalize(t1);
+            float cosLimit = MathF.Cos(TangentAlignAngle);
+            while (n < 256)
+            {
+                bool ok0 = true, ok1 = true;
+                if (can0)
+                {
+                    Vector2 c = BezPoint(p0, p1, p2, p3, 1f / n) - p0;
+                    if (c.LengthSquared() > 1e-12f) ok0 = Vector2.Dot(Vector2.Normalize(c), t0) >= cosLimit;
+                }
+                if (can1)
+                {
+                    Vector2 c = p3 - BezPoint(p0, p1, p2, p3, 1f - 1f / n);
+                    if (c.LengthSquared() > 1e-12f) ok1 = Vector2.Dot(Vector2.Normalize(c), t1) >= cosLimit;
+                }
+                if (ok0 && ok1) break;
+                n++;
+            }
+            return n;
+        }
+
+        static Vector2 BezPoint(Vector2 p0, Vector2 p1, Vector2 p2, Vector2 p3, float t)
+        {
+            float u = 1 - t, b0 = u * u * u, b1 = 3 * u * u * t, b2 = 3 * u * t * t, b3 = t * t * t;
+            return new Vector2(b0 * p0.X + b1 * p1.X + b2 * p2.X + b3 * p3.X,
+                               b0 * p0.Y + b1 * p1.Y + b2 * p2.Y + b3 * p3.Y);
         }
 
         // ------------------------------------------------------------------ stroking (local space, then transformed)
