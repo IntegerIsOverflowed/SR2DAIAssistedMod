@@ -2831,7 +2831,7 @@ T(GControls, "SpriteLabel / GroupBox / Tabs / TextBox / Numeric / Combo / ListBo
                 var d = DashFor(s, w);
                 var ci = System.Globalization.CultureInfo.InvariantCulture;
                 if (d == null) return DashScope == 2 ? "dash off (every shape solid)" : $"dash off for this shape (the pattern [{DashText}] applies to {(DashScope == 0 ? "the wavy blob only" : "every shape")}, or does not parse)";
-                return $"dash [{string.Join(" ", d.Select(v => v.ToString("0.###", ci)))}] mm, {(DashInWidths ? "pattern x outline width (Corel)" : "pattern in mm (SVG user units)")}, offset {DashOffset.ToString("0.###", ci)}, seam {DashSeamChoice}";
+                return $"dash [{string.Join(" ", d.Select(v => v.ToString("0.###", ci)))}] mm, {(DashInWidths ? "pattern x outline width (Corel)" : "pattern in mm (SVG user units)")}, offset {DashOffset.ToString("0.###", ci)}, seam {((int)DashSeamChoice == 2 ? "Fit" : DashSeamChoice.ToString())}";
             }
             /// <summary>The dash setting as one line, without a shape: what a whole check run was measured with.</summary>
             internal static string DashRunNote()
@@ -2839,7 +2839,7 @@ T(GControls, "SpriteLabel / GroupBox / Tabs / TextBox / Numeric / Combo / ListBo
                 var ci = System.Globalization.CultureInfo.InvariantCulture;
                 if (DashScope == 2) return "off - every shape solid, every row gated";
                 return $"{(DashScope == 0 ? "the wavy blob only (every other row solid and gated)" : "EVERY shape (no row is gated: see the summary)")}, " +
-                       $"pattern [{DashText}] {(DashInWidths ? "x outline width (Corel)" : "in mm (SVG user units)")}, offset {DashOffset.ToString("0.###", ci)}, seam {DashSeamChoice}";
+                       $"pattern [{DashText}] {(DashInWidths ? "x outline width (Corel)" : "in mm (SVG user units)")}, offset {DashOffset.ToString("0.###", ci)}, seam {((int)DashSeamChoice == 2 ? "Fit" : DashSeamChoice.ToString())}";
             }
 
             internal static readonly string[] Names = { "Jagged Eight Figure", "Smooth Eight Figure", "Tangled Cord", "Scribbles", "Jagged Continuous \"A\"", "Wavy Blob", "Circle", "Straight Horizontal Line", "Rounded \"OBD\" Letters", "Corners (chamfer and scallop)" };
@@ -3133,15 +3133,16 @@ T(GControls, "SpriteLabel / GroupBox / Tabs / TextBox / Numeric / Combo / ListBo
                 internal void ApplyDash(VectorShape v) => v.SetDash(Dash, DashOffset, DashSeam);
             }
 
-            internal static Render RenderOf(Shape s, int pos, double w)
+            internal static Render RenderOf(Shape s, int pos, double w, double dashRefW = 0)
             {
+                double dw = dashRefW > 0 ? dashRefW : w;
                 var (closedP, openP) = SplitClosed(s.Path);
                 bool ring = pos != 0 && !closedP.IsEmpty;
                 var r = new Render
                 {
                     Path = closedP, Width = (float)(ring ? 2 * w : w),
                     Open = openP, OpenWidth = (float)w,
-                    Dash = DashFor(s, w), DashOffset = DashOffsetMm(w), DashSeam = DashSeamChoice,
+                    Dash = DashFor(s, dw), DashOffset = DashOffsetMm(dw), DashSeam = DashSeamChoice,
                     Side = !ring ? VectorOutlinePosition.Center : pos == 1 ? VectorOutlinePosition.Outside : VectorOutlinePosition.Inside,
                 };
                 if (ring) r.Clip = pos == 1 ? ExteriorClip(closedP, (float)(4 * w + 1)) : new VectorClip(closedP);   // outside: the exterior; inside: the interior (the source's nonzero fill)
@@ -3195,22 +3196,19 @@ T(GControls, "SpriteLabel / GroupBox / Tabs / TextBox / Numeric / Combo / ListBo
             }
 
             /// <summary>The outline of a shape: pos 0 = centre (width w, half each side); pos 1 / 2 = outside / inside ring of width w. Open shapes are always centred.</summary>
-            static VectorPath Make(Shape s, int pos, double w)
-             => Make(s, pos, w, StrokeCap(), StrokeJoin());
+            static VectorPath Make(Shape s, int pos, double w, double dashRefW = 0)
+             => Make(s, pos, w, StrokeCap(), StrokeJoin(), dashRefW);
 
             /// <summary>The same conversion with the cap and corner given, so the check can drive it without the page's selectors.
             /// The NativeOutline flag still routes it to GDI+ (the point of that flag is to be visible on the page).</summary>
-            static VectorPath Make(Shape s, int pos, double w, VectorCap cap, VectorJoin join)
+            static VectorPath Make(Shape s, int pos, double w, VectorCap cap, VectorJoin join, double dashRefW = 0)
             {
-                var dp = DashForBand(s, w);
+                double dw = dashRefW > 0 ? dashRefW : w;
+                var dp = DashForBand(s, dw);
                 if (dp != null)
                 {
-                    // The dashes are cut along the contour where the renderer cuts them, then banded to the stroke each dash
-                    // paints (centred w, or 2 w kept inside the ring of depth w), so the converted pattern sits on the drawn one
-                    // at every position. DashedBand takes the same pattern, phase and seam rule the live stroke takes: a
-                    // converted dashed outline that used a different rule than the stroke would differ at the seam by design.
                     var dside = pos == 0 ? VectorOutlinePosition.Center : pos == 1 ? VectorOutlinePosition.Outside : VectorOutlinePosition.Inside;
-                    return VectorOffset.DashedBand(s.Path, dp, DashOffsetMm(w), DashSeamChoice, w, Pixel, Tol, dside, cap, join, 4f);
+                    return VectorOffset.DashedBand(s.Path, dp, DashOffsetMm(dw), DashSeamChoice, w, Pixel, Tol, dside, cap, join, 4f);
                 }
                 bool ring = pos != 0 && s.Closed;
                 if (NativeOutline.On)
@@ -3755,11 +3753,11 @@ T(GControls, "SpriteLabel / GroupBox / Tabs / TextBox / Numeric / Combo / ListBo
                         var s = all.FirstOrDefault(x => x.Column == col && x.Key == key);
                         if (s == null) continue;
                         sw.Restart();
-                        var conv = Make(s, pos, w);
+                        var conv = Make(s, pos, w, 2.0);
                         double ms = sw.Elapsed.TotalMilliseconds;
                         tMake += ms;
                         sw.Restart();
-                        renders.Add(RenderOf(s, pos, w));
+                        renders.Add(RenderOf(s, pos, w, 2.0));
                         tRender += sw.Elapsed.TotalMilliseconds;
                         bases.Add(s.Path); convs.Add(conv);
                         if (Perf != null) Perf($"  {key,-22} {col,-8} conv {ms,7:0} ms   {conv.SegmentCount,5} segs");
@@ -3829,14 +3827,14 @@ T(GControls, "SpriteLabel / GroupBox / Tabs / TextBox / Numeric / Combo / ListBo
 
             static View SingleView()
             {
-                string key = $"{ShapeChoice}|{CircleChoice}|{PosChoice}|{WidthMm.ToString("R", System.Globalization.CultureInfo.InvariantCulture)}|{NativeOutline.On}|{NativeOutline.CapIndex}|{NativeOutline.JoinIndex}|{LegacyFineGrid}|{AnalyticRoute}|{DashKey()}";
+                string key = $"{ShapeChoice}|{CircleChoice}|{PosChoice}|{WidthMm.ToString("R", System.Globalization.CultureInfo.InvariantCulture)}|{NativeOutline.On}|{NativeOutline.CapIndex}|{NativeOutline.JoinIndex}|{LegacyFineGrid}|{AnalyticRoute}|{VectorOffset.ReduceNodes}|{DashKey()}";
                 if (singleView != null && key == singleKey) return singleView;
                 Shape s = ChosenShape();
                 singleKey = key;
                 // the frame is the initial shape grown by the outline width on every side, NOT the conversion's own bounds:
                 // fitting each conversion made the shape resize when the position switched (a torus read as switching between
                 // its inner and outer circle), while a fixed frame keeps the original in place and shows the outline jump
-                return singleView = Build(new List<VectorPath> { s.Path }, new List<VectorPath> { Make(s, PosChoice, WidthMm) }, new List<Render> { RenderOf(s, PosChoice, WidthMm) }, WidthMm);
+                return singleView = Build(new List<VectorPath> { s.Path }, new List<VectorPath> { Make(s, PosChoice, WidthMm) }, new List<Render> { RenderOf(s, PosChoice, WidthMm) }, 10.0);
             }
 
             static View Build(List<VectorPath> bases, List<VectorPath> convs, List<Render> renders, double frame = 0)
@@ -3910,7 +3908,7 @@ T(GControls, "SpriteLabel / GroupBox / Tabs / TextBox / Numeric / Combo / ListBo
                 double s = fit * c.Scale;                                         // zoom: the Scale slider / wheel
                 float ox = c.X, oy = c.Y;                                         // pan: the drawing's centre on the canvas (drag anywhere)
                 var m = System.Numerics.Matrix3x2.CreateTranslation((float)-v.CX, (float)-v.CY) * System.Numerics.Matrix3x2.CreateScale((float)s) * System.Numerics.Matrix3x2.CreateTranslation(ox, oy);
-                var o = new VectorRenderOptions { AA = c.Smooth, FastLines = c.FastLines };
+                var o = new VectorRenderOptions { AA = c.Smooth, FastLines = c.FastLines, Tolerance = 0.02f };
                 v.ConvFill?.Draw(c.Canvas, m, o);                                 // baked outline (black)
                 if (ShowRender && v.RenderLayer != null)                          // the renderer's stroke, at the slider's opacity
                 {
@@ -3942,7 +3940,7 @@ T(GControls, "SpriteLabel / GroupBox / Tabs / TextBox / Numeric / Combo / ListBo
                 var units = new SpriteCombo { Location = new Point(184, 54), Size = new Size(104, 24) };
                 units.SetItems(new[] { "x width", "mm" }, DashInWidths ? 0 : 1);
                 var seam = new SpriteCombo { Location = new Point(8, 84), Size = new Size(170, 24) };
-                seam.SetItems(new[] { "Seam: cut (SVG)", "Seam: wrap" }, (int)DashSeamChoice);
+                seam.SetItems(new[] { "Seam: cut (SVG)", "Seam: wrap", "Seam: fit (even)" }, (int)DashSeamChoice);
                 var off = new SpriteNumeric { Minimum = 0, Maximum = 1000, Decimals = 2, Step = 0.5m, Unit = "phase", Value = (decimal)DashOffset, Location = new Point(184, 84), Size = new Size(104, 24) };
                 var note = new SpriteLabel
                 {
@@ -3973,7 +3971,7 @@ T(GControls, "SpriteLabel / GroupBox / Tabs / TextBox / Numeric / Combo / ListBo
             /// <summary>Test tab settings: the Table / One shape rocker, then one panel per mode (the flags are in both).</summary>
             public static Control BuildSettings()
             {
-                var root = new SpritePanel { Style = PanelStyle.Flat, Padding = Padding.Empty, Dock = DockStyle.Top, Height = 950 };
+                var root = new SpritePanel { Style = PanelStyle.Flat, Padding = Padding.Empty, Dock = DockStyle.Top, Height = 978 };
                 var flags = new List<(SpriteToggle T, Func<bool> Get)>();
                 SpriteToggle Box(Control host, int y, string text, Func<bool> get, Action<bool> set)
                 {
@@ -3998,6 +3996,8 @@ T(GControls, "SpriteLabel / GroupBox / Tabs / TextBox / Numeric / Combo / ListBo
                         b => { AnalyticRoute = b; tableView = null; singleView = null; });
                     Row("Production bake entry (off: fine grid)", () => !LegacyFineGrid,
                         b => { LegacyFineGrid = !b; tableView = null; singleView = null; });
+                    Row("Reduce nodes (Corel-style)", () => VectorOffset.ReduceNodes,
+                        b => { VectorOffset.ReduceNodes = b; tableView = null; singleView = null; });
                     // reference flag: outline conversion through System.Drawing GraphicsPath.Widen (NativeOutline.cs); rebuilds the views
                     Row("Native outline (GDI+ Widen)", () => NativeOutline.On, b => { NativeOutline.On = b; tableView = null; singleView = null; });
                     var cap = new SpriteCombo { Location = new Point(8, yy + 2), Size = new Size(280, 24) };
@@ -4015,12 +4015,12 @@ T(GControls, "SpriteLabel / GroupBox / Tabs / TextBox / Numeric / Combo / ListBo
 
                 var rocker = new SpriteToggle { Style = ToggleStyle.Rocker, OnText = "ONE SHAPE", OffText = "TABLE", Checked = OneShape, Size = new Size(280, 40), Location = new Point(8, 6) };
 
-                var table = new SpriteGroupBox { Text = "Table", Location = new Point(4, 52), Size = new Size(296, 434) };
+                var table = new SpriteGroupBox { Text = "Table", Location = new Point(4, 52), Size = new Size(296, 462) };
                 Flags(table, 26);
-                var note = new SpriteLabel { Style = LabelStyle.Muted, AutoSize = false, WordWrap = true, Location = new Point(8, 376), Size = new Size(280, 52), Text = "Every shape in its column: centre 2 mm, outside 1 mm, inside 1 mm. Open shapes are centred in every column. The switches above decide which program drew the black layer; the info line names it." };
+                var note = new SpriteLabel { Style = LabelStyle.Muted, AutoSize = false, WordWrap = true, Location = new Point(8, 404), Size = new Size(280, 52), Text = "Every shape in its column: centre 2 mm, outside 1 mm, inside 1 mm. Open shapes are centred in every column. The switches above decide which program drew the black layer; the info line names it." };
                 table.Controls.Add(note);
 
-                var one = new SpriteGroupBox { Text = "One shape", Location = new Point(4, 52), Size = new Size(296, 552) };
+                var one = new SpriteGroupBox { Text = "One shape", Location = new Point(4, 52), Size = new Size(296, 580) };
                 var shape = new SpriteCombo { Location = new Point(8, 26), Size = new Size(280, 24) };
                 shape.SetItems(NameList(), ShapeChoice);
                 var circle = new SpriteCombo { Location = new Point(8, 56), Size = new Size(280, 24), Visible = ShapeChoice == 6 };
@@ -4045,11 +4045,11 @@ T(GControls, "SpriteLabel / GroupBox / Tabs / TextBox / Numeric / Combo / ListBo
                 ShowMode();
 
                 // the dash is shared by both modes and by the Stroke check page, so it sits under them rather than inside either
-                var dash = DashGroup(4, 612, () => { tableView = null; singleView = null; });
+                var dash = DashGroup(4, 640, () => { tableView = null; singleView = null; });
 
                 // the file group is shared too, and it sits last: loading a file replaces the shape list, so it must select the
                 // first loaded entry in the combo above (and switch to ONE SHAPE, the table's columns come from the embedded SVG)
-                var files = FileGroup(4, 792, ExportConversionSvg, () =>
+                var files = FileGroup(4, 820, ExportConversionSvg, () =>
                 {
                     ShapeChoice = FirstLoadedIndex;
                     shape.SetItems(NameList(), ShapeChoice);
@@ -4225,7 +4225,7 @@ T(GControls, "SpriteLabel / GroupBox / Tabs / TextBox / Numeric / Combo / ListBo
 
                 var b = s.Path.ControlBounds();
                 sc.CX = (b.Left + b.Right) / 2; sc.CY = (b.Top + b.Bottom) / 2;
-                sc.BW = Math.Abs(b.Right - b.Left) + 2 * w; sc.BH = Math.Abs(b.Bottom - b.Top) + 2 * w;   // room for the outside half
+                sc.BW = Math.Abs(b.Right - b.Left) + 2 * 10.0; sc.BH = Math.Abs(b.Bottom - b.Top) + 2 * 10.0;   // fixed room for up to 10 mm width so base curve never rescales
                 return sc;
             }
 
@@ -4282,7 +4282,7 @@ T(GControls, "SpriteLabel / GroupBox / Tabs / TextBox / Numeric / Combo / ListBo
                 double s = fit * c.Scale;                                             // zoom: the Scale slider / wheel
                 float ox = c.X, oy = c.Y;                                             // pan: drag anywhere
                 var m = System.Numerics.Matrix3x2.CreateTranslation((float)-sc.CX, (float)-sc.CY) * System.Numerics.Matrix3x2.CreateScale((float)s) * System.Numerics.Matrix3x2.CreateTranslation(ox, oy);
-                var o = new VectorRenderOptions { AA = c.Smooth, FastLines = c.FastLines };
+                var o = new VectorRenderOptions { AA = c.Smooth, FastLines = c.FastLines, Tolerance = 0.02f };
                 sc.Strokes.Draw(c.Canvas, m, o);                                      // the renderer's strokes (blue)
 
                 // what is shown: right button held = native alone; middle button held or the Difference flag = |ours - native|;
