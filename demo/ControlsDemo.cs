@@ -160,7 +160,7 @@ namespace Sr2d64CSport
             strip.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 300));
             strip.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 250));
             strip.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 290));
-            strip.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 270));
+            strip.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 300));
             strip.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
             Label Head(string t) => new Label { Text = t, ForeColor = Color.Gainsboro, Font = new Font(SystemFonts.DefaultFont, FontStyle.Bold), AutoSize = true, Margin = new Padding(0, 2, 0, 4) };
 
@@ -235,16 +235,17 @@ namespace Sr2d64CSport
             var col3 = new FlowLayoutPanel { FlowDirection = FlowDirection.TopDown, Dock = DockStyle.Fill, WrapContents = false, Margin = new Padding(0), BackColor = Color.Transparent };
             col3.Controls.AddRange(new Control[] { Head("SpriteToggle: Switch / Ellipse / Rocker / CheckBox"), tSpin, tBil, tBack, tGrid, tDis, tBig, tAnim });
 
-            // --- column 4: two radio groups on one panel (GroupName keeps them apart)
-            var radios = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 2, RowCount = 6, Margin = new Padding(0), BackColor = Color.Transparent };
-            radios.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 150)); radios.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 150));
+            // --- column 4: two radio groups on one panel (GroupName keeps them apart) + SpriteRadioGrid
+            var radios = new TableLayoutPanel { AutoSize = true, ColumnCount = 2, RowCount = 5, Margin = new Padding(0, 0, 0, 4), BackColor = Color.Transparent };
+            radios.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 145)); radios.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 145));
             radios.Controls.Add(Head("Op (group 'op')"), 0, 0); radios.Controls.Add(Head("Size (group 'size')"), 1, 0);
             string[] ops = { "Paint", "AlphaBlend", "Add", "Blend" }, sizes = { "Small (0.5x)", "Normal", "Big (1.4x)" };
+            var opRadios = new SpriteRadio[ops.Length];
             for (int i = 0; i < ops.Length; i++)
             {
-                int ii = i;
                 var r = new SpriteRadio { Text = ops[i], GroupName = "op", Checked = i == OpChoice, Size = new Size(140, 24), Margin = new Padding(0, 0, 0, 2) };
-                r.CheckedChanged += (_, _) => { if (r.Checked) { OpChoice = ii; Bump("Op radio " + ops[ii]); } }; animated.Add(r);
+                opRadios[i] = r;
+                animated.Add(r);
                 radios.Controls.Add(r, 0, i + 1);
             }
             for (int i = 0; i < sizes.Length; i++)
@@ -254,9 +255,55 @@ namespace Sr2d64CSport
                 r.CheckedChanged += (_, _) => { if (r.Checked) { SizeChoice = ii; Bump("Size radio " + sizes[ii]); } }; animated.Add(r);
                 radios.Controls.Add(r, 1, i + 1);
             }
+            var radioGrid = new SpriteRadioGrid
+            {
+                Rows = 2,
+                Columns = 2,
+                Size = new Size(276, 74),
+                Margin = new Padding(0, 2, 0, 4),
+                AccentColors = new[]
+                {
+                    Color.FromArgb(0x33, 0x99, 0xFF),
+                    Color.FromArgb(0x60, 0xE0, 0x80),
+                    Color.FromArgb(0xFF, 0x90, 0x30),
+                    Color.FromArgb(0xE0, 0x60, 0xC0),
+                },
+                DepressedButtonColored = true,
+            };
+            radioGrid.SetItems(new[] { "Paint", "Alpha Blend", "Add Glow", "Blend Mix" }, OpChoice);
+            animated.Add(radioGrid);
+            bool syncingOp = false;
+            for (int i = 0; i < ops.Length; i++)
+            {
+                int ii = i;
+                opRadios[i].CheckedChanged += (_, _) =>
+                {
+                    if (!opRadios[ii].Checked || syncingOp) return;
+                    syncingOp = true;
+                    try { OpChoice = ii; radioGrid.SelectedIndex = ii; Bump("Op radio " + ops[ii]); }
+                    finally { syncingOp = false; }
+                };
+            }
+            radioGrid.SelectedIndexChanged += (_, _) =>
+            {
+                if (syncingOp) return;
+                syncingOp = true;
+                try
+                {
+                    OpChoice = radioGrid.SelectedIndex;
+                    if (OpChoice >= 0 && OpChoice < opRadios.Length) opRadios[OpChoice].Checked = true;
+                    Bump("SpriteRadioGrid " + ops[Math.Clamp(OpChoice, 0, ops.Length - 1)]);
+                }
+                finally { syncingOp = false; }
+            };
+            var tDepCol = new SpriteToggle { Text = "DepressedButtonColored", Style = ToggleStyle.CheckBox, Checked = true, Size = new Size(260, 24), Margin = new Padding(0, 2, 0, 0), AccentColor = Color.FromArgb(0xFF, 0x90, 0x30) };
+            tDepCol.CheckedChanged += (_, _) => { radioGrid.DepressedButtonColored = tDepCol.Checked; Bump("DepressedButtonColored = " + tDepCol.Checked); };
+            animated.Add(tDepCol);
+            var col4 = new FlowLayoutPanel { FlowDirection = FlowDirection.TopDown, Dock = DockStyle.Fill, WrapContents = false, Margin = new Padding(0), BackColor = Color.Transparent };
+            col4.Controls.AddRange(new Control[] { radios, Head("SpriteRadioGrid (2x2, per-button colours)"), radioGrid, tDepCol });
             // (the colour controls moved to their own test - see ColorDemo below; the strip is about
             // knobs / sliders / wheels / buttons, the canvas shows the sprite they drive)
-            strip.Controls.Add(col1, 0, 0); strip.Controls.Add(col2, 1, 0); strip.Controls.Add(col3, 2, 0); strip.Controls.Add(radios, 3, 0);
+            strip.Controls.Add(col1, 0, 0); strip.Controls.Add(col2, 1, 0); strip.Controls.Add(col3, 2, 0); strip.Controls.Add(col4, 3, 0);
             strip.Disposed += (_, _) => timer.Dispose();
             Show();
             return strip;

@@ -1,13 +1,16 @@
 using System;
+using System.Collections.Generic;
 using System.ComponentModel;
+using System.Diagnostics.CodeAnalysis;
 using System.Drawing;
+using System.Globalization;
 using System.Windows.Forms;
 
 namespace Sr2d64CSport
 {
-    // SR2D-drawn buttons, toggles, radio buttons and progress bars - the same look as SpriteKnob / SpriteSlider
-    // (dark body with an off-centre highlight and a light rim, accent colour for the active state, pixel-font text),
-    // on the shared SpriteControlBase (palette, TextScale, hover, synchronous repaint).
+    // SR2D-drawn buttons, toggles, radio buttons, multi-button radio switch grids and progress bars - the same look as
+    // SpriteKnob / SpriteSlider (dark body with an off-centre highlight and a light rim, accent colour for the active state,
+    // pixel-font text), on the shared SpriteControlBase (palette, TextScale, hover, synchronous repaint).
 
     /// <summary>Base of the clickable controls: pressed state, click on release inside, Space / Enter from the keyboard.</summary>
     public abstract class SpriteClickable : SpriteControlBase
@@ -64,13 +67,43 @@ namespace Sr2d64CSport
         /// <summary>The click: raise Click (button) / flip the state (toggle, radio).</summary>
         protected virtual void Activate() => OnClick(EventArgs.Empty);
 
-
         // caption helper: text centred in a rectangle, scale dropped until it fits
         protected void CaptionIn(Sprite s, Rectangle r, string text, int color, int want)
         {
             if (string.IsNullOrEmpty(text) || r.Width < 6) return;
             int sc = FitScale(text, r.Width - 4, want);
             T.Draw(s, r.X + r.Width / 2, r.Y + r.Height / 2, FitText(text, r.Width - 4, sc), color, 0, sc, 0, 0, SR2D.LineOp.Set, 128, TextAnchor.Center);
+        }
+
+        /// <summary>Draws <paramref name="text"/> centred horizontally and vertically around (<paramref name="cx"/>, <paramref name="cy"/>),
+        /// automatically wrapping onto multiple lines when wider than <paramref name="maxW"/> px so the text stays inside the cap surface.</summary>
+        protected void DrawWrappedCentered(Sprite s, float cx, float cy, int maxW, int maxH, string text, int color, int wantScale)
+        {
+            if (string.IsNullOrEmpty(text) || maxW < 4 || maxH < 4) return;
+            int sc = Math.Max(1, wantScale);
+            string wrapped = text;
+            while (sc > 1)
+            {
+                wrapped = T.Measure(text, sc).Width <= maxW ? text : WrapText(text, maxW, sc);
+                var sz = T.Measure(wrapped, sc);
+                if (sz.Width <= maxW && sz.Height <= maxH) break;
+                sc--;
+            }
+            if (T.Measure(text, sc).Width > maxW)
+                wrapped = WrapText(text, maxW, sc);
+            var lines = wrapped.Split('\n');
+            int lh = TextLineHeight(sc), gh = T.GlyphHeight(sc);
+            int totalH = (lines.Length - 1) * lh + gh;
+            int y0 = (int)MathF.Round(cy - totalH / 2f);
+            for (int i = 0; i < lines.Length; i++)
+            {
+                string line = lines[i].TrimEnd('\r');
+                if (line.Length == 0) continue;
+                if (T.Measure(line, sc).Width > maxW) line = FitText(line, maxW, sc);
+                int lw = T.Measure(line, sc).Width;
+                int x0 = (int)MathF.Round(cx - lw / 2f);
+                T.Draw(s, x0, y0 + i * lh, line, color, 0, sc, 0, 0, SR2D.LineOp.Set, 128, TextAnchor.TopLeft);
+            }
         }
     }
 
@@ -97,10 +130,34 @@ namespace Sr2d64CSport
     public sealed class SpriteButton : SpriteClickable, IButtonControl
     {
         protected override AccessibleRole DefaultAccessibleRole => AccessibleRole.PushButton;
-        ButtonShape _shape = ButtonShape.Rounded; bool _accented; ControlLook _look = ControlLook.Classic;
+        ButtonShape _shape = ButtonShape.Rounded; bool _accented, _autoSize, _fitting; ControlLook _look = ControlLook.Classic;
         DialogResult _dialogResult = DialogResult.None; bool _isDefault;
 
         public SpriteButton() { Size = new Size(120, 36); }
+
+        [Category("Layout"), DefaultValue(false), Browsable(true), EditorBrowsable(EditorBrowsableState.Always), DesignerSerializationVisibility(DesignerSerializationVisibility.Visible), Description("Size the button to its caption (when false, Size is manual).")]
+        public override bool AutoSize { get => _autoSize; set { if (_autoSize == value) return; _autoSize = value; base.AutoSize = value; Fit(); Redraw(); } }
+
+        public override Size GetPreferredSize(Size proposed) => MeasurePreferred(Height > 0 ? Height : 36);
+        Size MeasurePreferred(int h)
+        {
+            h = Math.Max(18, h);
+            int sc = AutoTextScale(h * 2);
+            if (_shape == ButtonShape.Round) return new Size(h, h);
+            int tw = string.IsNullOrEmpty(Text) ? 0 : T.Measure(Text, sc).Width + 16;
+            return new Size(Math.Max(h, tw + Padding.Horizontal), h);
+        }
+        void Fit()
+        {
+            if (!_autoSize || _fitting) return;
+            var want = MeasurePreferred(Height > 0 ? Height : 36);
+            if (Size != want) { _fitting = true; try { Size = want; } finally { _fitting = false; } }
+        }
+        protected override void OnTextChanged(EventArgs e) { base.OnTextChanged(e); Fit(); Redraw(); }
+        protected override void OnTextScaleChanged() { Fit(); base.OnTextScaleChanged(); }
+        protected override void OnTextFontChanged() { Fit(); Redraw(); }
+        protected override void OnPaddingChanged(EventArgs e) { base.OnPaddingChanged(e); Fit(); Redraw(); }
+        protected override void OnResize(EventArgs e) { base.OnResize(e); Fit(); Redraw(); }
 
         [Category("Behavior"), DefaultValue(DialogResult.None), Description("The dialog result produced in a modal form by clicking the button.")]
         public DialogResult DialogResult { get => _dialogResult; set => _dialogResult = value; }
@@ -114,7 +171,7 @@ namespace Sr2d64CSport
         }
 
         [Category("Appearance"), DefaultValue(ButtonShape.Rounded), Description("Rounded rectangle, pill, round or square.")]
-        public ButtonShape Shape { get => _shape; set { _shape = value; Redraw(); } }
+        public ButtonShape Shape { get => _shape; set { _shape = value; Fit(); Redraw(); } }
 
         [Category("Appearance"), DefaultValue(false), Description("Primary look: the face is filled with AccentColor.")]
         public bool Accented { get => _accented; set { _accented = value; Redraw(); } }
@@ -256,7 +313,7 @@ namespace Sr2d64CSport
         Switch,
         /// <summary>Ellipse with a circle inside: the circle sits left (OFF) or right (ON) inside an outlined ellipse and fills with the accent.</summary>
         Ellipse,
-        /// <summary>Rocker: a two-part button that tips - the pressed half sinks and lights up ("I / O").</summary>
+        /// <summary>Rocker: a one-piece solid pivoting power switch - one side is raised while the opposite side is lowered ("I / O").</summary>
         Rocker,
         /// <summary>Regular check box: a rounded square with an accent tick.</summary>
         CheckBox,
@@ -264,42 +321,74 @@ namespace Sr2d64CSport
 
     /// <summary>
     /// Two-state control (a check box in four looks, see <see cref="ToggleStyle"/>) with an optional caption to the right.
-    /// Click / Space flips <see cref="Checked"/> and raises <see cref="CheckedChanged"/>. The switch part keeps the height
-    /// of the control; the caption uses the rest of the width.
+    /// Click / Space flips <see cref="Checked"/> and raises <see cref="CheckedChanged"/>. With <see cref="AutoSize"/> on (the default,
+    /// like a native CheckBox), the control's width fits its switch graphic plus <see cref="Control.Text"/> (shrinking to the switch
+    /// graphic alone when <see cref="Control.Text"/> is empty).
     /// </summary>
     [ToolboxBitmap(typeof(SpriteToggle), "SpriteToggle.bmp")]
     [DefaultEvent("CheckedChanged"), DefaultProperty("Checked"), DefaultBindingProperty("Checked")]
     public sealed class SpriteToggle : SpriteClickable
     {
         protected override AccessibleRole DefaultAccessibleRole => AccessibleRole.CheckButton;
-        ToggleStyle _style = ToggleStyle.Switch; bool _checked; string _onText = "I", _offText = "O";
+        ToggleStyle _style = ToggleStyle.Switch; bool _checked, _autoSize = true, _fitting; string _onText = "I", _offText = "O";
 
-        public SpriteToggle() { Size = new Size(140, 28); }
+        public SpriteToggle()
+        {
+            base.AutoSize = true;
+            Size = new Size(SwitchWidth(28), 28);
+            Fit();
+        }
+
+        [Category("Layout"), DefaultValue(true), Browsable(true), EditorBrowsable(EditorBrowsableState.Always), DesignerSerializationVisibility(DesignerSerializationVisibility.Visible), Description("Size the control's width to its switch graphic and caption (when Text is empty, bounds shrink to the switch graphic only).")]
+        public override bool AutoSize { get => _autoSize; set { if (_autoSize == value) return; _autoSize = value; base.AutoSize = value; Fit(); Redraw(); } }
 
         [Category("Action"), Description("Raised after Checked changed (user or code).")]
         public event EventHandler? CheckedChanged;
 
-        [Category("Appearance"), DefaultValue(ToggleStyle.Switch), Description("Switch (sliding pill), Ellipse (circle inside an ellipse), Rocker (two-part tipping button) or CheckBox.")]
-        public ToggleStyle Style { get => _style; set { _style = value; Redraw(); } }
+        [Category("Appearance"), DefaultValue(ToggleStyle.Switch), Description("Switch (sliding pill), Ellipse (circle inside an ellipse), Rocker (one-piece pivoting power switch) or CheckBox.")]
+        public ToggleStyle Style { get => _style; set { _style = value; Fit(); Redraw(); } }
 
         [Category("Behavior"), DefaultValue(false), Description("The state.")]
         public bool Checked { get => _checked; set { if (_checked == value) return; _checked = value; CheckedChanged?.Invoke(this, EventArgs.Empty); AnimateTo(value ? 1f : 0f, _style == ToggleStyle.Rocker ? 140 : 180); } }
 
-        [Category("Appearance"), DefaultValue("I"), Description("Rocker: label of the ON half.")]
+        [Category("Appearance"), DefaultValue("I"), Description("Rocker: label of the ON half (wraps and centres inside the cap).")]
         public string OnText { get => _onText; set { _onText = value ?? ""; Redraw(); } }
-        [Category("Appearance"), DefaultValue("O"), Description("Rocker: label of the OFF half.")]
+        [Category("Appearance"), DefaultValue("O"), Description("Rocker: label of the OFF half (wraps and centres inside the cap).")]
         public string OffText { get => _offText; set { _offText = value ?? ""; Redraw(); } }
 
         protected override void Activate() { Checked = !Checked; base.Activate(); }
         protected override void OnHandleCreated(EventArgs e) { base.OnHandleCreated(e); SnapAnim(_checked ? 1f : 0f); }
 
         /// <summary>Width the switch part takes (the caption starts after it).</summary>
-        int SwitchWidth(int h) => _style switch { ToggleStyle.CheckBox => h, ToggleStyle.Rocker => (int)(h * 2.2f), _ => (int)(h * 1.9f) };
+        int SwitchWidth(int h) => _style switch { ToggleStyle.CheckBox => h, ToggleStyle.Rocker => (int)MathF.Round(h * 2.4f), _ => (int)MathF.Round(h * 1.9f) };
+
+        public override Size GetPreferredSize(Size proposed) => MeasurePreferred(Height > 0 ? Height : 28);
+        Size MeasurePreferred(int h)
+        {
+            h = Math.Max(16, h);
+            int sc = AutoTextScale(h * 3);
+            int minH = TextLineHeight(sc) + Padding.Vertical + 4;
+            if (h < minH) h = minH;
+            int sw = SwitchWidth(h);
+            int w = string.IsNullOrEmpty(Text) ? sw + Padding.Horizontal : sw + 6 + T.Measure(Text, sc).Width + 3 + Padding.Horizontal;
+            return new Size(Math.Max(16, w), h);
+        }
+        void Fit()
+        {
+            if (!_autoSize || _fitting) return;
+            var want = MeasurePreferred(Height > 0 ? Height : 28);
+            if (Size != want) { _fitting = true; try { Size = want; } finally { _fitting = false; } }
+        }
+        protected override void OnTextChanged(EventArgs e) { base.OnTextChanged(e); Fit(); Redraw(); }
+        protected override void OnTextScaleChanged() { Fit(); base.OnTextScaleChanged(); }
+        protected override void OnTextFontChanged() { Fit(); Redraw(); }
+        protected override void OnPaddingChanged(EventArgs e) { base.OnPaddingChanged(e); Fit(); Redraw(); }
+        protected override void OnResize(EventArgs e) { base.OnResize(e); Fit(); Redraw(); }
 
         protected override void PaintControl(Sprite s)
         {
             int w = ClientSize.Width, h = ClientSize.Height;
-            int sw = Math.Min(w, SwitchWidth(h));
+            int sw = string.IsNullOrEmpty(Text) && _style != ToggleStyle.CheckBox ? w : Math.Min(w, SwitchWidth(h));
             bool on = _checked, down = IsPressed, hot = IsHot && Enabled;
             float t = IsAnimating || Animated ? AnimT : (on ? 1f : 0f);            // 0 = off look, 1 = on look
             int off = Mix(BackColor, ThumbColor, hot ? 0.34f : 0.28f), rim = Mix(BackColor, ThumbColor, hot ? 0.65f : 0.5f);
@@ -334,44 +423,139 @@ namespace Sr2d64CSport
                 }
                 case ToggleStyle.Rocker:
                 {
-                    // A rocker seen slightly from above: two caps on a pivot in the middle of a dark well. The pressed cap is
-                    // DOWN (sunk into the well: dark face, a shadow band along its top edge, no side wall) and the other cap is
-                    // UP (face lifted, a light highlight on top, a dark side wall visible below it). t tips it: 0 = O down /
-                    // I up, 1 = I down / O up. The ON cap takes the accent colour as it sinks; the sunk label lights up.
-                    float lift = Math.Max(2f, (h - 3) * 0.16f);
-                    float x = 1.5f, y = 1.5f + lift, ww = sw - 3, wellH = h - 3 - lift, rad = wellH * 0.18f, half = ww / 2;
-                    int wellCol = Mix(BackColor, ThumbColor, 0.05f), wallCol = Mix(BackColor, ThumbColor, 0.02f);
-                    int upFace = Mix(BackColor, ThumbColor, 0.36f), upHi = Mix(BackColor, ThumbColor, 0.55f);
-                    int downOff = Mix(BackColor, ThumbColor, 0.1f), shadow = Mix(BackColor, Black, 0.5f);
-                    FillRound(s, x, y, ww, wellH, rad, wellCol);                              // the well
-                    DrawRound(s, x, y, ww, wellH, rad, Lerp(rim, Mix(AccentRaw, BackColor, 0.3f), t), rimW);   // its rim - under the caps (a raised cap stands proud of the well)
-                    s.DrawWideLine(x + half, y + 1, x + half, y + wellH - 1, wallCol, Math.Max(1f, rimW), true);   // the pivot seam
-                    int ts = AutoTextScale(h * 2);
-                    float inset = Math.Max(1f, rimW);                                        // caps sit inside the well rim
-                    for (int k = 0; k < 2; k++)
+                    // One-piece solid pivoting power rocker switch:
+                    // A dark rectangular bezel housing holds ONE continuous solid rocker body that pivots around its
+                    // central vertical crease. Pressing one side tilts that half down flat/flush into the housing while
+                    // the opposite half angles sharply up proud above the bezel, exposing its sloped 3D front wedge wall
+                    // and side cheek wall.
+                    // t = 0: OFF (left 'O' side lowered into housing, right 'I' side raised/tilted up).
+                    // t = 1: ON  (right 'I' side lowered into housing, left 'O' side raised/tilted up, body lit in Accent).
+                    float lift = Math.Max(3.5f, (h - 4) * 0.22f);
+                    float sink = Math.Max(1f, lift * 0.18f);
+                    float bx = 1.5f, by = 1.5f + lift * 0.90f, bw = sw - 3f, bh = h - 3f - lift * 0.90f;
+                    float rad = Math.Min(bw, bh) * 0.14f;
+                    int bezelCol = Mix(BackColor, Black, 0.45f);
+                    int cavityCol = Mix(BackColor, Black, 0.72f);
+                    int bezelRim = Lerp(rim, Mix(AccentRaw, ThumbColor, 0.35f), t);
+                    FillRound(s, bx, by, bw, bh, rad, bezelCol);
+                    DrawRound(s, bx, by, bw, bh, rad, bezelRim, rimW);
+                    float pad = Math.Max(1.5f, rimW + 1f);
+                    float wx = bx + pad, wy = by + pad, ww = bw - 2f * pad, wh = bh - 2f * pad;
+                    FillRound(s, wx, wy, ww, wh, Math.Max(0f, rad - pad), cavityCol);
+
+                    float leftUp = t, rightUp = 1f - t;
+                    float rx0 = wx + 1f, rx1 = wx + ww - 1f, rcx = (rx0 + rx1) * 0.5f;
+                    float baseTop = wy + 0.5f, baseBot = wy + wh - 0.5f;
+                    float pivLift = lift * 0.12f;
+                    float bevelL = lift * 0.28f * leftUp, bevelR = lift * 0.28f * rightUp;
+                    float topLx = rx0 + bevelL, botLx = rx0 + bevelL * 0.4f;
+                    float topRx = rx1 - bevelR, botRx = rx1 - bevelR * 0.4f;
+
+                    float topL = baseTop - lift * leftUp + sink * (1f - leftUp);
+                    float botL = baseBot - lift * leftUp;
+                    float topM = baseTop - pivLift;
+                    float botM = baseBot - pivLift;
+                    float topR = baseTop - lift * rightUp + sink * (1f - rightUp);
+                    float botR = baseBot - lift * rightUp;
+
+                    int offBody = Mix(BackColor, ThumbColor, hot ? 0.40f : 0.33f);
+                    int bodyCol = Lerp(offBody, onCol, t);
+                    int skirtCol = Mix(bodyCol, Black, 0.46f);
+                    int cheekCol = Mix(bodyCol, Black, 0.34f);
+                    int skirtEdge = Mix(bodyCol, Black, 0.25f);
+
+                    // 1) Outer side cheek wall on the raised end (sloping down into the bezel corner)
+                    if (leftUp > 0.03f)
                     {
-                        bool isOn = k == 1;
-                        float up = isOn ? 1f - t : t;                                        // 1 = this cap fully raised
-                        float hx = x + k * half;
-                        float capX = x + inset, capW = ww - 2 * inset, capH = wellH - 2 * inset, capRad = Math.Max(0, rad - inset);
-                        float dy = -lift * up;                                               // raised: shifted up by the lift
-                        int face = isOn ? Lerp(onCol, upFace, up) : Lerp(downOff, upFace, up);
-                        using (var v = s.CreateView(new Rectangle((int)MathF.Round(hx), 0, (int)MathF.Round(half), h)))
-                        {
-                            if (up > 0.02f) FillRound(v, capX, y + inset + dy + lift, capW, capH, capRad, wallCol);   // side wall below the raised cap
-                            FillRound(v, capX, y + inset + dy, capW, capH, capRad, face);
-                            if (up > 0.02f)                                                  // highlight on the upper part of a raised cap
-                                using (var hl = v.CreateView(new Rectangle((int)MathF.Round(hx), 0, (int)MathF.Round(half), (int)(y + inset + dy + capH * 0.45f))))
-                                    FillRound(hl, capX + inset, y + inset + dy + inset, capW - 2 * inset, capH - 2 * inset, Math.Max(0, capRad - inset), Lerp(face, upHi, up));
-                            if (up < 0.98f)                                                  // shadow band under the well rim on a sunk cap
-                                using (var sh = v.CreateView(new Rectangle((int)MathF.Round(hx), 0, (int)MathF.Round(half), (int)(y + inset + Math.Max(1f, capH * 0.2f)))))
-                                    FillRound(sh, capX, y + inset + dy, capW, capH, capRad, Lerp(Mix(face, shadow, 0.55f), face, up));
-                        }
-                        string lbl = isOn ? _onText : _offText;
-                        int litLbl = isOn ? unchecked((int)0xFFFFFFFF) : Mix(BackColor, ForeColor, 0.55f);
-                        int lc = Lerp(litLbl, Mix(BackColor, ForeColor, 0.85f), up);
-                        if (lbl.Length > 0) { int sc = FitScale(lbl, (int)half - 4, ts); T.Draw(s, (int)MathF.Round(hx + half / 2), (int)MathF.Round(y + wellH / 2 + dy + (1f - up) * 1f), lbl, lc, 0, sc, 0, 0, SR2D.LineOp.Set, 128, TextAnchor.Center); }
+                        Span<PointF> lCheek = stackalloc PointF[4];
+                        lCheek[0] = new PointF(rx0, baseTop);
+                        lCheek[1] = new PointF(topLx, topL);
+                        lCheek[2] = new PointF(botLx, botL);
+                        lCheek[3] = new PointF(rx0, baseBot);
+                        s.FillPolygon(lCheek, cheekCol, SR2D.LineOp.Set, true);
+                        s.DrawPolygon(lCheek, skirtEdge, 1f, true);
                     }
+                    if (rightUp > 0.03f)
+                    {
+                        Span<PointF> rCheek = stackalloc PointF[4];
+                        rCheek[0] = new PointF(topRx, topR);
+                        rCheek[1] = new PointF(rx1, baseTop);
+                        rCheek[2] = new PointF(rx1, baseBot);
+                        rCheek[3] = new PointF(botRx, botR);
+                        s.FillPolygon(rCheek, cheekCol, SR2D.LineOp.Set, true);
+                        s.DrawPolygon(rCheek, skirtEdge, 1f, true);
+                    }
+
+                    // 2) 3D front skirt wedge visible underneath the raised wing(s)
+                    Span<PointF> skirt = stackalloc PointF[6];
+                    skirt[0] = new PointF(botLx, botL);
+                    skirt[1] = new PointF(rcx, botM);
+                    skirt[2] = new PointF(botRx, botR);
+                    skirt[3] = new PointF(rx1, baseBot);
+                    skirt[4] = new PointF(rcx, baseBot);
+                    skirt[5] = new PointF(rx0, baseBot);
+                    s.FillPolygon(skirt, skirtCol, SR2D.LineOp.Set, true);
+                    s.DrawPolygon(skirt, skirtEdge, 1f, true);
+
+                    // 3) Left and right sloped planes meeting at the central crease (rcx)
+                    int leftFace = Mix(bodyCol, leftUp >= rightUp ? White : Black, leftUp >= rightUp ? 0.16f * leftUp : 0.20f * (1f - leftUp));
+                    int rightFace = Mix(bodyCol, rightUp >= leftUp ? White : Black, rightUp >= leftUp ? 0.16f * rightUp : 0.20f * (1f - rightUp));
+
+                    Span<PointF> leftQuad = stackalloc PointF[4];
+                    leftQuad[0] = new PointF(topLx, topL);
+                    leftQuad[1] = new PointF(rcx, topM);
+                    leftQuad[2] = new PointF(rcx, botM);
+                    leftQuad[3] = new PointF(botLx, botL);
+                    s.FillPolygon(leftQuad, leftFace, SR2D.LineOp.Set, true);
+
+                    Span<PointF> rightQuad = stackalloc PointF[4];
+                    rightQuad[0] = new PointF(rcx, topM);
+                    rightQuad[1] = new PointF(topRx, topR);
+                    rightQuad[2] = new PointF(botRx, botR);
+                    rightQuad[3] = new PointF(rcx, botM);
+                    s.FillPolygon(rightQuad, rightFace, SR2D.LineOp.Set, true);
+
+                    // Upper specular sheen across both sloped planes
+                    float midLx = topLx + (botLx - topLx) * 0.42f, midRx = topRx + (botRx - topRx) * 0.42f;
+                    float midL = topL + (botL - topL) * 0.42f, midM = topM + (botM - topM) * 0.42f, midR = topR + (botR - topR) * 0.42f;
+                    Span<PointF> sheenL = stackalloc PointF[4];
+                    sheenL[0] = new PointF(topLx + 1f, topL + 1f);
+                    sheenL[1] = new PointF(rcx, topM + 1f);
+                    sheenL[2] = new PointF(rcx, midM);
+                    sheenL[3] = new PointF(midLx + 1f, midL);
+                    s.FillPolygon(sheenL, Mix(leftFace, White, 0.12f + 0.10f * leftUp), SR2D.LineOp.Set, true);
+
+                    Span<PointF> sheenR = stackalloc PointF[4];
+                    sheenR[0] = new PointF(rcx, topM + 1f);
+                    sheenR[1] = new PointF(topRx - 1f, topR + 1f);
+                    sheenR[2] = new PointF(midRx - 1f, midR);
+                    sheenR[3] = new PointF(rcx, midM);
+                    s.FillPolygon(sheenR, Mix(rightFace, White, 0.12f + 0.10f * rightUp), SR2D.LineOp.Set, true);
+
+                    // Continuous outer rim of the one-piece rocker cap + central pivot crease highlight
+                    int capEdgeCol = Mix(bodyCol, White, 0.30f);
+                    Span<PointF> capOutline = stackalloc PointF[6];
+                    capOutline[0] = new PointF(topLx, topL);
+                    capOutline[1] = new PointF(rcx, topM);
+                    capOutline[2] = new PointF(topRx, topR);
+                    capOutline[3] = new PointF(botRx, botR);
+                    capOutline[4] = new PointF(rcx, botM);
+                    capOutline[5] = new PointF(botLx, botL);
+                    s.DrawPolygon(capOutline, capEdgeCol, 1.2f, true);
+                    s.DrawWideLine(rcx, topM + 1f, rcx, botM - 1f, Mix(bodyCol, White, 0.38f), Math.Max(1f, rimW * 0.9f), true);
+
+                    // Wrapped and centred labels on each half of the top cap
+                    int ts = AutoTextScale(h * 2);
+                    int halfCapW = Math.Max(4, (int)MathF.Round((rx1 - rx0) * 0.5f) - 6);
+                    int halfCapH = Math.Max(4, (int)MathF.Round(wh - 2f));
+                    int offLblCol = Lerp(unchecked((int)0xFFFFFFFF), Mix(BackColor, ForeColor, 0.85f), leftUp);
+                    int onLblCol  = Lerp(unchecked((int)0xFFFFFFFF), Mix(BackColor, ForeColor, 0.85f), rightUp);
+                    float leftCx  = (topLx + botLx + 2f * rcx) * 0.25f;
+                    float rightCx = (topRx + botRx + 2f * rcx) * 0.25f;
+                    float leftCy  = ((topL + botL) + (topM + botM)) * 0.25f;
+                    float rightCy = ((topM + botM) + (topR + botR)) * 0.25f;
+                    DrawWrappedCentered(s, leftCx, leftCy, halfCapW, halfCapH, _offText, offLblCol, ts);
+                    DrawWrappedCentered(s, rightCx, rightCy, halfCapW, halfCapH, _onText, onLblCol, ts);
                     break;
                 }
                 default:
@@ -392,11 +576,11 @@ namespace Sr2d64CSport
                 }
             }
             // caption to the right, vertically centred
-            if (!string.IsNullOrEmpty(Text) && w - sw > 12)
+            if (!string.IsNullOrEmpty(Text) && w - sw > 6)
             {
-                int ts = AutoTextScale(h * 3);
-                int sc = FitScale(Text, w - sw - 8, ts);
-                T.Draw(s, sw + 6, h / 2, FitText(Text, w - sw - 8, sc), Fore, 0, sc, 0, 0, SR2D.LineOp.Set, 128, TextAnchor.MiddleLeft);
+                int ts = AutoTextScale(h * 3), avail = Math.Max(4, w - sw - 6);
+                int sc = FitScale(Text, avail, ts);
+                T.Draw(s, sw + 6, h / 2, FitText(Text, avail, sc), Fore, 0, sc, 0, 0, SR2D.LineOp.Set, 128, TextAnchor.MiddleLeft);
             }
         }
     }
@@ -404,16 +588,48 @@ namespace Sr2d64CSport
     /// <summary>
     /// Radio button in the knob's style: a small round body with a light rim, the accent dot when selected, caption to the
     /// right. Radios with the same parent and the same <see cref="GroupName"/> are exclusive (like WinForms, the parent is
-    /// the group; the name lets several groups share a panel).
+    /// the group; the name lets several groups share a panel). With <see cref="AutoSize"/> on (the default), the control's
+    /// width fits its circular button graphic plus <see cref="Control.Text"/> (shrinking to the graphic alone when empty).
     /// </summary>
     [ToolboxBitmap(typeof(SpriteRadio), "SpriteRadio.bmp")]
     [DefaultEvent("CheckedChanged"), DefaultProperty("Checked"), DefaultBindingProperty("Checked")]
     public sealed class SpriteRadio : SpriteClickable
     {
         protected override AccessibleRole DefaultAccessibleRole => AccessibleRole.RadioButton;
-        bool _checked; string _group = "";
+        bool _checked, _autoSize = true, _fitting; string _group = "";
 
-        public SpriteRadio() { Size = new Size(140, 24); TabStop = false; }
+        public SpriteRadio()
+        {
+            TabStop = false;
+            base.AutoSize = true;
+            Size = new Size(24, 24);
+            Fit();
+        }
+
+        [Category("Layout"), DefaultValue(true), Browsable(true), EditorBrowsable(EditorBrowsableState.Always), DesignerSerializationVisibility(DesignerSerializationVisibility.Visible), Description("Size the control's width to its radio graphic and caption (when Text is empty, bounds shrink to the radio graphic only).")]
+        public override bool AutoSize { get => _autoSize; set { if (_autoSize == value) return; _autoSize = value; base.AutoSize = value; Fit(); Redraw(); } }
+
+        public override Size GetPreferredSize(Size proposed) => MeasurePreferred(Height > 0 ? Height : 24);
+        Size MeasurePreferred(int h)
+        {
+            h = Math.Max(16, h);
+            int sc = AutoTextScale(h * 3);
+            int minH = TextLineHeight(sc) + Padding.Vertical + 4;
+            if (h < minH) h = minH;
+            int w = string.IsNullOrEmpty(Text) ? h + Padding.Horizontal : h + 6 + T.Measure(Text, sc).Width + 3 + Padding.Horizontal;
+            return new Size(Math.Max(16, w), h);
+        }
+        void Fit()
+        {
+            if (!_autoSize || _fitting) return;
+            var want = MeasurePreferred(Height > 0 ? Height : 24);
+            if (Size != want) { _fitting = true; try { Size = want; } finally { _fitting = false; } }
+        }
+        protected override void OnTextChanged(EventArgs e) { base.OnTextChanged(e); Fit(); Redraw(); }
+        protected override void OnTextScaleChanged() { Fit(); base.OnTextScaleChanged(); }
+        protected override void OnTextFontChanged() { Fit(); Redraw(); }
+        protected override void OnPaddingChanged(EventArgs e) { base.OnPaddingChanged(e); Fit(); Redraw(); }
+        protected override void OnResize(EventArgs e) { base.OnResize(e); Fit(); Redraw(); }
 
         [Category("Action"), Description("Raised after Checked changed (user or code).")]
         public event EventHandler? CheckedChanged;
@@ -454,11 +670,337 @@ namespace Sr2d64CSport
                 s.FillCircle(cx, cy, dr, Accent, SR2D.LineOp.Set, true);
                 s.FillCircle(cx - dr * 0.27f, cy - dr * 0.27f, dr * 0.44f, Mix(AccentRaw, White, 0.4f), SR2D.LineOp.Set, true);
             }
-            if (!string.IsNullOrEmpty(Text) && w - h > 12)
+            if (!string.IsNullOrEmpty(Text) && w - h > 6)
             {
-                int ts = AutoTextScale(h * 3);
-                int sc = FitScale(Text, w - h - 8, ts);
-                T.Draw(s, h + 6, h / 2, FitText(Text, w - h - 8, sc), Fore, 0, sc, 0, 0, SR2D.LineOp.Set, 128, TextAnchor.MiddleLeft);
+                int ts = AutoTextScale(h * 3), avail = Math.Max(4, w - h - 6);
+                int sc = FitScale(Text, avail, ts);
+                T.Draw(s, h + 6, h / 2, FitText(Text, avail, sc), Fore, 0, sc, 0, 0, SR2D.LineOp.Set, 128, TextAnchor.MiddleLeft);
+            }
+        }
+    }
+
+    /// <summary>
+    /// Multi-button interlocking radio switch grid (<see cref="Rows"/> x <see cref="Columns"/> push-button caps in a shared dark well):
+    /// only one button can be depressed (<see cref="SelectedIndex"/>) at a time, and pressing any button automatically unpresses the rest.
+    /// Each button cap can have its own accent colour via <see cref="AccentColors"/> (or <see cref="AccentColorList"/>): raised buttons
+    /// show their accent colour with a top highlight and 3D side wall; the depressed button shows a darker shade of its accent colour
+    /// when <see cref="DepressedButtonColored"/> is true, or the neutral dark thumb/well shade when false. Labels wrap and centre inside each cap.
+    /// </summary>
+    [ToolboxBitmap(typeof(SpriteRadioGrid), "SpriteRadio.bmp")]
+    [DefaultEvent("SelectedIndexChanged"), DefaultProperty("SelectedIndex"), DefaultBindingProperty("SelectedIndex")]
+    public sealed class SpriteRadioGrid : SpriteClickable
+    {
+        protected override AccessibleRole DefaultAccessibleRole => AccessibleRole.Grouping;
+        int _rows = 1, _cols = 2, _selected, _prevSelected, _hoverCell = -1, _pressCell = -1;
+        bool _depressedColored = true;
+        readonly List<string> _items = new();
+        int[] _palette = Array.Empty<int>();
+
+        public SpriteRadioGrid()
+        {
+            Size = new Size(160, 40);
+            SnapAnim(1f);
+        }
+
+        [Category("Action"), Description("Raised when SelectedIndex changes (user click, keyboard or code).")]
+        public event EventHandler? SelectedIndexChanged;
+
+        [Category("Appearance"), DefaultValue(1), Description("Number of button rows in the grid (1..32).")]
+        public int Rows
+        {
+            get => _rows;
+            set { int v = Math.Clamp(value, 1, 32); if (_rows == v) return; _rows = v; ClampSelection(); Redraw(); }
+        }
+
+        [Category("Appearance"), DefaultValue(2), Description("Number of button columns in the grid (1..32).")]
+        public int Columns
+        {
+            get => _cols;
+            set { int v = Math.Clamp(value, 1, 32); if (_cols == v) return; _cols = v; ClampSelection(); Redraw(); }
+        }
+
+        /// <summary>Total number of buttons in the grid (<see cref="Rows"/> * <see cref="Columns"/>).</summary>
+        [Browsable(false)] public int ButtonCount => _rows * _cols;
+
+        [Category("Behavior"), DefaultValue(0), Description("Index of the currently depressed button (0 .. Rows * Columns - 1). Pressing one button automatically unpresses all others.")]
+        public int SelectedIndex
+        {
+            get => _selected;
+            set
+            {
+                int count = ButtonCount;
+                int v = count > 0 ? Math.Clamp(value, 0, count - 1) : 0;
+                if (_selected == v) return;
+                _prevSelected = _selected;
+                _selected = v;
+                SelectedIndexChanged?.Invoke(this, EventArgs.Empty);
+                SnapAnim(0f);
+                AnimateTo(1f, 150);
+            }
+        }
+
+        /// <summary>Row index (0 .. Rows - 1) of the currently depressed button.</summary>
+        [Browsable(false), DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
+        public int SelectedRow => _cols > 0 ? _selected / _cols : 0;
+
+        /// <summary>Column index (0 .. Columns - 1) of the currently depressed button.</summary>
+        [Browsable(false), DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
+        public int SelectedColumn => _cols > 0 ? _selected % _cols : 0;
+
+        [Category("Appearance"), DefaultValue(true), Description("When true, the depressed (selected) button uses a darker shade of its accent colour. When false, the depressed button uses the neutral dark thumb/well shade.")]
+        public bool DepressedButtonColored
+        {
+            get => _depressedColored;
+            set { if (_depressedColored == value) return; _depressedColored = value; Redraw(); }
+        }
+
+        /// <summary>Per-button accent colours (cycled when shorter than <see cref="ButtonCount"/>; empty = use <see cref="SpriteControlBase.AccentColor"/> for every button).</summary>
+        [Browsable(true), Category("Appearance"), Description("Per-button accent colours (cycled when shorter than the button count; empty = use AccentColor for every button).")]
+        [SuppressMessage("Performance", "CA1819:PropertiesShouldNotReturnArrays", Justification = "WinForms Designer array editor property.")]
+        public Color[] AccentColors
+        {
+            get => Array.ConvertAll(_palette, Color.FromArgb);
+            set => SetPalette(value == null ? Array.Empty<int>() : Array.ConvertAll(value, c => c.ToArgb()));
+        }
+        public bool ShouldSerializeAccentColors() => _palette.Length > 0;
+        public void ResetAccentColors() => SetPalette(Array.Empty<int>());
+
+        /// <summary>Per-button accent colours as comma-separated AARRGGBB / #RRGGBB hex values or colour names (edits with the StripePaletteEditor dialog in the designer).</summary>
+        [Browsable(true), Category("Appearance"), DefaultValue(""),
+         Description("Per-button accent colours as AARRGGBB / #RRGGBB values or colour names separated by commas (empty = use AccentColor)."),
+         Editor("Sr2d64CSport.StripePaletteEditor", "System.Drawing.Design.UITypeEditor, System.Drawing, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a")]
+        public string AccentColorList
+        {
+            get => string.Join(",", Array.ConvertAll(_palette, c => c.ToString("X8", CultureInfo.InvariantCulture)));
+            set => SetPalette(ParseColorList(value));
+        }
+
+        /// <summary>Button labels (editable in the WinForms Designer under Data -> Items, or in code). When empty, buttons display 1..N.</summary>
+        [Browsable(true), Category("Data"), Description("Labels drawn on the button caps (row by row, left to right). When empty, buttons display 1..N.")]
+        [DesignerSerializationVisibility(DesignerSerializationVisibility.Content)]
+        [Editor("System.Windows.Forms.Design.StringCollectionEditor, System.Design, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+                "System.Drawing.Design.UITypeEditor, System.Drawing, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a")]
+        [MergableProperty(false), Localizable(true)]
+        [SuppressMessage("Design", "CA1002:DoNotExposeGenericLists", Justification = "Standard BCL List<string> required by out-of-process WinForms Designer.")]
+        [SuppressMessage("Usage", "CA2227:CollectionPropertiesShouldBeReadOnly", Justification = "Setter required by out-of-process WinForms Designer.")]
+        public List<string> Items
+        {
+            get => _items;
+            set
+            {
+                if (!ReferenceEquals(_items, value))
+                {
+                    _items.Clear();
+                    if (value != null) _items.AddRange(value);
+                }
+                Redraw();
+            }
+        }
+        bool ShouldSerializeItems() => _items.Count > 0;
+        void ResetItems() { _items.Clear(); Redraw(); }
+
+        /// <summary>Button labels as a string array (editable one-per-line in the Visual Studio designer under Data).</summary>
+        [Browsable(true), Category("Data"), Description("Labels drawn on the button caps as a string array (one per line in the designer).")]
+        [DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
+        [SuppressMessage("Performance", "CA1819:PropertiesShouldNotReturnArrays", Justification = "WinForms Designer StringArrayEditor property.")]
+        public string[] ItemArray
+        {
+            get => _items.ToArray();
+            set => SetItems(value ?? Array.Empty<string>(), _selected);
+        }
+
+        public void SetItems(IEnumerable<string> items, int selectedIndex = 0)
+        {
+            _items.Clear();
+            if (items != null) _items.AddRange(items);
+            int count = ButtonCount;
+            _selected = _prevSelected = count > 0 ? Math.Clamp(selectedIndex, 0, count - 1) : 0;
+            SnapAnim(1f);
+            Redraw();
+        }
+
+        void SetPalette(int[] cols)
+        {
+            if (cols.Length == _palette.Length)
+            {
+                bool same = true;
+                for (int i = 0; i < cols.Length; i++) if (cols[i] != _palette[i]) { same = false; break; }
+                if (same) return;
+            }
+            _palette = cols;
+            Redraw();
+        }
+
+        static int[] ParseColorList(string? list)
+        {
+            if (string.IsNullOrWhiteSpace(list)) return Array.Empty<int>();
+            var parts = list.Split(new[] { ',', ';', ' ', '\t', '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries);
+            var cols = new int[parts.Length]; int n = 0;
+            foreach (var raw in parts)
+            {
+                var s = raw.Trim();
+                if (s.StartsWith('#')) s = s[1..];
+                if (s.StartsWith("0x", StringComparison.OrdinalIgnoreCase)) s = s[2..];
+                if (int.TryParse(s, NumberStyles.HexNumber, CultureInfo.InvariantCulture, out int hex))
+                    cols[n++] = s.Length <= 6 ? hex | unchecked((int)0xFF000000) : hex;
+                else
+                {
+                    var named = Color.FromName(s);
+                    if (named.IsKnownColor) cols[n++] = named.ToArgb();
+                }
+            }
+            Array.Resize(ref cols, n);
+            return cols;
+        }
+
+        void ClampSelection()
+        {
+            int count = ButtonCount;
+            if (_selected >= count) _selected = Math.Max(0, count - 1);
+            if (_prevSelected >= count) _prevSelected = _selected;
+        }
+
+        int HitCell(int x, int y)
+        {
+            int w = ClientSize.Width, h = ClientSize.Height;
+            if (x < 0 || y < 0 || x >= w || y >= h || _rows <= 0 || _cols <= 0) return -1;
+            int c = Math.Clamp((int)((long)x * _cols / Math.Max(1, w)), 0, _cols - 1);
+            int r = Math.Clamp((int)((long)y * _rows / Math.Max(1, h)), 0, _rows - 1);
+            return r * _cols + c;
+        }
+
+        protected override void OnHandleCreated(EventArgs e) { base.OnHandleCreated(e); SnapAnim(1f); }
+        protected override void OnMouseMove(MouseEventArgs e)
+        {
+            base.OnMouseMove(e);
+            int cell = ClientRectangle.Contains(e.Location) ? HitCell(e.X, e.Y) : -1;
+            if (cell != _hoverCell) { _hoverCell = cell; RedrawNow(); }
+        }
+        protected override void OnMouseLeave(EventArgs e)
+        {
+            _hoverCell = -1;
+            base.OnMouseLeave(e);
+        }
+        protected override void OnMouseDown(MouseEventArgs e)
+        {
+            if (e.Button == MouseButtons.Left) _pressCell = HitCell(e.X, e.Y);
+            base.OnMouseDown(e);
+        }
+        protected override void OnMouseUp(MouseEventArgs e)
+        {
+            int target = e.Button == MouseButtons.Left && ClientRectangle.Contains(e.Location) ? HitCell(e.X, e.Y) : -1;
+            int pressed = _pressCell; _pressCell = -1;
+            if (target >= 0 && target == pressed) SelectedIndex = target;
+            base.OnMouseUp(e);
+        }
+        protected override bool IsInputKey(Keys keyData)
+        {
+            var k = keyData & Keys.KeyCode;
+            return k is Keys.Left or Keys.Right or Keys.Up or Keys.Down or Keys.Enter || base.IsInputKey(keyData);
+        }
+        protected override void OnKeyDown(KeyEventArgs e)
+        {
+            int r = SelectedRow, c = SelectedColumn;
+            switch (e.KeyCode)
+            {
+                case Keys.Left:  if (c > 0) SelectedIndex = r * _cols + (c - 1); else if (r > 0) SelectedIndex = (r - 1) * _cols + (_cols - 1); e.Handled = true; return;
+                case Keys.Right: if (c + 1 < _cols) SelectedIndex = r * _cols + (c + 1); else if (r + 1 < _rows) SelectedIndex = (r + 1) * _cols; e.Handled = true; return;
+                case Keys.Up:    if (r > 0) SelectedIndex = (r - 1) * _cols + c; e.Handled = true; return;
+                case Keys.Down:  if (r + 1 < _rows) SelectedIndex = (r + 1) * _cols + c; e.Handled = true; return;
+            }
+            base.OnKeyDown(e);
+        }
+
+        int GetButtonAccent(int idx)
+        {
+            int raw = _palette.Length > 0 ? (_palette[idx % _palette.Length] | unchecked((int)0xFF000000)) : AccentRaw.ToArgb();
+            return Enabled ? raw : Mix(raw, BackColor, 0.5f);
+        }
+
+        protected override void PaintControl(Sprite s)
+        {
+            int w = ClientSize.Width, h = ClientSize.Height;
+            if (w < 6 || h < 6) return;
+            bool hot = IsHot && Enabled;
+            float anim = IsAnimating || Animated ? AnimT : 1f;
+            float rimW = Math.Max(1f, Math.Min(w / Math.Max(1f, _cols), h / Math.Max(1f, _rows)) * 0.05f);
+            float cellW = (w - 3f) / _cols, cellH = (h - 3f) / _rows;
+            float lift = Math.Max(2f, Math.Min(cellH - 3f, 44f) * 0.16f);
+            float x0 = 1.5f, y0 = 1.5f + lift, ww = w - 3f, wellH = h - 3f - lift;
+            if (wellH < 4f) { y0 = 1.5f; wellH = h - 3f; lift = 0f; }
+            float rad = Math.Min(cellW, wellH / _rows) * 0.18f;
+
+            int wellCol = Mix(BackColor, TrackColor, 0.12f), wallCol = Mix(BackColor, Black, 0.45f);
+            int rimCol = Mix(BackColor, TrackColor, hot ? 0.68f : 0.52f);
+            int shadow = Mix(BackColor, Black, 0.58f);
+            FillRound(s, x0, y0, ww, wellH, rad, wellCol);
+            DrawRound(s, x0, y0, ww, wellH, rad, rimCol, rimW);
+
+            float rowWellH = wellH / _rows;
+            for (int c = 1; c < _cols; c++)
+                s.DrawWideLine(x0 + c * cellW, y0 + 1f, x0 + c * cellW, y0 + wellH - 1f, wallCol, Math.Max(1f, rimW), true);
+            for (int r = 1; r < _rows; r++)
+                s.DrawWideLine(x0 + 1f, y0 + r * rowWellH, x0 + ww - 1f, y0 + r * rowWellH, wallCol, Math.Max(1f, rimW), true);
+
+            int ts = AutoTextScale((int)MathF.Round(rowWellH * 2f));
+            float inset = Math.Max(1f, rimW);
+
+            for (int r = 0; r < _rows; r++)
+            {
+                for (int c = 0; c < _cols; c++)
+                {
+                    int idx = r * _cols + c;
+                    bool isSel = idx == _selected;
+                    // up: 1 = fully raised (unpressed), 0 = fully depressed (selected)
+                    float up = isSel ? (1f - anim) : (idx == _prevSelected && _prevSelected != _selected ? anim : 1f);
+                    if (_prevSelected == _selected) up = isSel ? 0f : 1f;
+                    if (IsPressed && _pressCell == idx) up *= 0.5f;
+
+                    float cx0 = x0 + c * cellW, cy0 = y0 + r * rowWellH;
+                    float capX = cx0 + inset, capW = cellW - 2f * inset, capH = rowWellH - 2f * inset;
+                    float capRad = Math.Max(0f, rad - inset);
+                    float dy = -lift * up;
+
+                    int btnAccent = GetButtonAccent(idx);
+                    bool cellHot = hot && _hoverCell == idx;
+                    int upFace = cellHot ? Mix(btnAccent, White, 0.14f) : btnAccent;
+                    int upHi = Mix(upFace, White, 0.22f);
+                    int downFace = _depressedColored ? Mix(btnAccent, Black, 0.42f) : Mix(BackColor, ThumbColor, 0.14f);
+                    int face = Lerp(downFace, upFace, up);
+                    int sideWall = Mix(btnAccent, Black, 0.58f);
+
+                    int vx = (int)MathF.Round(cx0), vy = (int)MathF.Max(0f, MathF.Round(cy0 - lift));
+                    int vw = Math.Max(1, (int)MathF.Round(cellW)), vh = Math.Max(1, (int)MathF.Round(rowWellH + lift));
+                    using (var v = s.CreateView(new Rectangle(vx, vy, vw, vh)))
+                    {
+                        if (up > 0.02f)
+                            FillRound(v, capX, cy0 + inset + dy + lift, capW, capH, capRad, sideWall);
+                        FillRound(v, capX, cy0 + inset + dy, capW, capH, capRad, face);
+                        if (up > 0.02f)
+                        {
+                            int hlH = Math.Max(1, (int)(cy0 + inset + dy + capH * 0.45f) - vy);
+                            using var hl = v.CreateView(new Rectangle(vx, vy, vw, hlH));
+                            FillRound(hl, capX + inset, cy0 + inset + dy + inset, capW - 2f * inset, capH - 2f * inset, Math.Max(0f, capRad - inset), Lerp(face, upHi, up));
+                        }
+                        if (up < 0.98f)
+                        {
+                            int shY = (int)MathF.Round(cy0 + inset), shH = Math.Max(1, (int)MathF.Round(Math.Max(1f, capH * 0.22f)));
+                            using var sh = v.CreateView(new Rectangle(vx, shY, vw, shH));
+                            FillRound(sh, capX, cy0 + inset + dy, capW, capH, capRad, Lerp(Mix(face, shadow, 0.55f), face, up));
+                        }
+                    }
+
+                    string lbl = idx < _items.Count ? _items[idx] : (idx + 1).ToString(CultureInfo.InvariantCulture);
+                    if (lbl.Length > 0)
+                    {
+                        int upTextCol = Enabled ? unchecked((int)0xFFFFFFFF) : Fore;
+                        int downTextCol = _depressedColored ? (Enabled ? unchecked((int)0xFFFFFFFF) : Fore) : Mix(BackColor, ForeColor, 0.65f);
+                        int lc = Lerp(downTextCol, upTextCol, up);
+                        float textCx = cx0 + cellW * 0.5f;
+                        float textCy = cy0 + rowWellH * 0.5f + dy + (1f - up) * 1f;
+                        DrawWrappedCentered(s, textCx, textCy, Math.Max(4, (int)capW - 4), Math.Max(4, (int)capH - 2), lbl, lc, ts);
+                    }
+                }
             }
         }
     }

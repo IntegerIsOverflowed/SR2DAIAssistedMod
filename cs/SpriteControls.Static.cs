@@ -175,13 +175,18 @@ namespace Sr2d64CSport
     [DefaultEvent("OnChanged"), DefaultProperty("On"), DefaultBindingProperty("On")]
     public sealed class SpriteLed : SpriteControlBase
     {
-        bool _on, _clickable, _phase = true; int _blink; Color _led = DefaultLed; LedShape _shape; Timer? _timer;
+        bool _on, _clickable, _phase = true, _autoSize = true, _fitting; int _blink; Color _led = DefaultLed; LedShape _shape; Timer? _timer;
         public SpriteLed()
         {
             TabStop = false; Cursor = Cursors.Default;
             SetStyle(ControlStyles.Selectable, false);
-            Size = new Size(90, 20);
+            base.AutoSize = true;
+            Size = new Size(22, 20);
+            Fit();
         }
+
+        [Category("Layout"), DefaultValue(true), Browsable(true), EditorBrowsable(EditorBrowsableState.Always), DesignerSerializationVisibility(DesignerSerializationVisibility.Visible), Description("Size the control's width to its LED graphic and caption (when Text is empty, bounds shrink to the LED graphic only).")]
+        public override bool AutoSize { get => _autoSize; set { if (_autoSize == value) return; _autoSize = value; base.AutoSize = value; Fit(); Redraw(); } }
         [Category("Action"), Description("Raised after On changed (user click or code).")]
         public event EventHandler? OnChanged;
 
@@ -195,7 +200,7 @@ namespace Sr2d64CSport
         void ResetLedColor() => LedColor = DefaultLed;
 
         [Category("Appearance"), DefaultValue(LedShape.Round)]
-        public LedShape Shape { get => _shape; set { _shape = value; Redraw(); } }
+        public LedShape Shape { get => _shape; set { _shape = value; Fit(); Redraw(); } }
 
         [Category("Behavior"), DefaultValue(0), Description("Blink period in ms while On (0 = steady).")]
         public int Blink { get => _blink; set { _blink = Math.Max(0, value); SyncTimer(); Redraw(); } }
@@ -215,7 +220,30 @@ namespace Sr2d64CSport
         protected override void Dispose(bool disposing) { if (disposing) _timer?.Dispose(); base.Dispose(disposing); }
         protected override void OnMouseDown(MouseEventArgs e) { base.OnMouseDown(e); if (_clickable && e.Button == MouseButtons.Left && Enabled) { Focus(); On = !On; } }
         protected override void OnKeyDown(KeyEventArgs e) { base.OnKeyDown(e); if (_clickable && e.KeyCode == Keys.Space) { On = !On; e.Handled = true; } }
-        protected override void OnResize(EventArgs e) { base.OnResize(e); Redraw(); }
+        int LedGraphicWidth(int h) => _shape == LedShape.Bar ? 22 : (int)MathF.Ceiling(3 + Math.Min(h - 4, 16) + 3);
+        public override Size GetPreferredSize(Size proposed) => MeasurePreferred(Height > 0 ? Height : 20);
+        Size MeasurePreferred(int h)
+        {
+            h = Math.Max(14, h);
+            int sc = AutoTextScale(h * 4);
+            int minH = TextLineHeight(sc) + Padding.Vertical + 2;
+            if (h < minH) h = minH;
+            int gw = LedGraphicWidth(h);
+            if (string.IsNullOrEmpty(Text)) return new Size(gw + Padding.Horizontal, h);
+            int x0 = (int)(_shape == LedShape.Bar ? 18 : 3 + Math.Min(h - 4, 16)) + 6;
+            return new Size(x0 + T.Measure(Text, sc).Width + 3 + Padding.Horizontal, h);
+        }
+        void Fit()
+        {
+            if (!_autoSize || _fitting) return;
+            var want = MeasurePreferred(Height > 0 ? Height : 20);
+            if (Size != want) { _fitting = true; try { Size = want; } finally { _fitting = false; } }
+        }
+        protected override void OnTextChanged(EventArgs e) { base.OnTextChanged(e); Fit(); Redraw(); }
+        protected override void OnTextScaleChanged() { Fit(); base.OnTextScaleChanged(); }
+        protected override void OnTextFontChanged() { Fit(); Redraw(); }
+        protected override void OnPaddingChanged(EventArgs e) { base.OnPaddingChanged(e); Fit(); Redraw(); }
+        protected override void OnResize(EventArgs e) { base.OnResize(e); Fit(); Redraw(); }
 
         protected override void PaintControl(Sprite s)
         {

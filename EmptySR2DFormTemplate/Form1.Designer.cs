@@ -23,6 +23,7 @@ namespace Sr2d64CSport
             // 
             AutoScaleMode = AutoScaleMode.None;
             BackColor = Color.FromArgb(46, 52, 60);
+            ForeColor = Color.White;
             ClientSize = new Size(721, 511);
             Font = new Font("Segoe UI Historic", 9F, FontStyle.Regular, GraphicsUnit.Point, 0);
             MinimumSize = new Size(235, 87);
@@ -34,7 +35,7 @@ namespace Sr2d64CSport
             StripeBarCount = 0;
             StripeBarExtra = 1;
             StripeBarWidth = 12;
-            Text = " Test form...";
+            Text = "  Test form...";
             TitleDarkenMode = TitleDarkenMode.BehindTitle;
             TitleDarkenExtraWidth = 5;
             TitleDarkenExtraHeight = 2;
