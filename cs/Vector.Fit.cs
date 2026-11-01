@@ -67,7 +67,7 @@ namespace Sr2d64CSport
                 // 2. Chord-length transition (a straight segment meeting a curve, cap, round join, or bevel)
                 bool straightSide = (prevStep < 0.25 * Math.PI / 180 || nextStep < 0.25 * Math.PI / 180 || lMax > 0.55);
                 bool transition = !clippedBySharp && straightSide && lMax > 1.60 * lMin
-                    && ((lMax > 0.55 && stepTurn[i] > 0.35 * Math.PI / 180) || (lMax > 0.10 && stepTurn[i] > 4.5 * Math.PI / 180 && (prevStep < 0.25 * Math.PI / 180 || nextStep < 0.25 * Math.PI / 180)));
+                    && ((lMax > 0.55 && stepTurn[i] > 0.35 * Math.PI / 180) || (lMax > 0.10 && stepTurn[i] > 12.0 * Math.PI / 180 && (prevStep < 0.25 * Math.PI / 180 || nextStep < 0.25 * Math.PI / 180)));
                 // 3. Long straight segment (> 0.52 mm) meeting another segment at any angle > 0.35 deg, unless part of a uniform arc
                 bool longLineCorner = lMax > 0.52 && stepTurn[i] > 0.35 * Math.PI / 180 && !uniformArc;
                 // 4. Polygon / bevel corner whose sagitta exceeds smooth curve flatness and is not a uniform arc
@@ -325,12 +325,19 @@ namespace Sr2d64CSport
             double cl = ch.Length;
             if (cl > 0)
             {
-                double worst = 0;
-                for (int i = 1; i < n - 1; i++) worst = Math.Max(worst, Math.Abs(Cross(ch, pts[i] - pts[0])) / cl);
-                if (worst <= err)
+                Pt2 chDir = ch * (1.0 / cl);
+                bool tanAligned = (depth == 0) || (t1.Length < 1e-9 && t2.Length < 1e-9) ||
+                    (Math.Abs(Cross(ch, t1)) <= 2.0 * err && Math.Abs(Cross(ch, t2)) <= 2.0 * err &&
+                     Dot(chDir, t1) >= 0.999 && Dot(chDir, t2) <= -0.999);
+                if (tanAligned)
                 {
-                    outSegs.Add(new Seg { P0 = pts[0], P1 = pts[n - 1] });
-                    return;
+                    double worst = 0;
+                    for (int i = 1; i < n - 1; i++) worst = Math.Max(worst, Math.Abs(Cross(ch, pts[i] - pts[0])) / cl);
+                    if (worst <= err)
+                    {
+                        outSegs.Add(new Seg { P0 = pts[0], P1 = pts[n - 1] });
+                        return;
+                    }
                 }
             }
             if (ArcSegs && depth == 0)

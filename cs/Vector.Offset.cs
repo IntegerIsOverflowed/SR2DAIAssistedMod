@@ -845,7 +845,7 @@ namespace Sr2d64CSport
         /// <summary>False: always use the old offset code (A/B checks).</summary>
         public static bool FastPath = true;
         /// <summary>Optional CorelDRAW-style "Reduce Nodes" curve optimization pass after fitting (merges smooth cubic pairs within <see cref="ReduceNodesTolerance"/>).</summary>
-        public static bool ReduceNodes = false;
+        public static bool ReduceNodes = true;
         /// <summary>Maximum curve deviation (mm) allowed when <see cref="ReduceNodes"/> merges adjacent smooth segments (default 0.025 mm, ~0.1 px at 96 dpi).</summary>
         public static double ReduceNodesTolerance = 0.045;
 
@@ -950,7 +950,7 @@ namespace Sr2d64CSport
                     double stepTurn = Math.Atan2(Math.Abs(cross), cos);
                     double sBack = den > 1e-9 ? hw * Math.Abs(cross) / den : 1e30;
                     cumTurn += stepTurn;
-                    if (sBack > 0.9 * Math.Min(l0, l1) || cumTurn > 45.0 * Math.PI / 180.0 || stepTurn > 20.0 * Math.PI / 180.0)
+                    if ((stepTurn > 16.0 * Math.PI / 180.0 && sBack > 0.9 * Math.Min(l0, l1)) || cumTurn > 60.0 * Math.PI / 180.0 || stepTurn > 20.0 * Math.PI / 180.0)
                         split = true;
                 }
                 if (split)
@@ -982,14 +982,15 @@ namespace Sr2d64CSport
                             double cos = u[k - 1].X * u[k].X + u[k - 1].Y * u[k].Y;
                             double den = 1.0 + cos;
                             double sBack = hw * Math.Abs(cross) / den;
-                            if (cross < 0 || sBack <= 0.95 * Math.Min(l0, l1))
+                            bool smoothK = den > 1e-9 && Math.Sqrt(2.0 / den) <= OutlineArrange.SmoothBisectorLimit;
+                            if (smoothK || cross < 0 || sBack <= 0.95 * Math.Min(l0, l1))
                                 plus.Add(poly[k] + (nm[k - 1] + nm[k]) * (hw / den));
                             else
                             {
                                 plus.Add(poly[k] + nm[k - 1] * hw);
                                 plus.Add(poly[k] + nm[k] * hw);
                             }
-                            if (cross > 0 || sBack <= 0.95 * Math.Min(l0, l1))
+                            if (smoothK || cross > 0 || sBack <= 0.95 * Math.Min(l0, l1))
                                 minus.Add(poly[k] - (nm[k - 1] + nm[k]) * (hw / den));
                             else
                             {
@@ -1199,7 +1200,7 @@ namespace Sr2d64CSport
                 {
                     double l0 = (poly[i] - poly[i - 1]).Length, l1 = (poly[i + 1] - poly[i]).Length;
                     double sBack = h * Math.Abs(cross) / den;
-                    if (sBack <= 0.95 * Math.Min(l0, l1))
+                    if ((den > 1e-9 && Math.Sqrt(2 / den) <= OutlineArrange.SmoothBisectorLimit) || sBack <= 0.95 * Math.Min(l0, l1))
                         walk.Add(poly[i] + (n0 + n1) * (h / den));
                     else
                     {
