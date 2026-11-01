@@ -20,6 +20,21 @@ namespace Sr2d64CSport
     // arithmetic (rows, paddings, auto sizes) keeps working and a control switched to a real font looks the same size.
     // ------------------------------------------------------------------------------------------------------------------------
 
+    /// <summary>TypeConverter that offers a drop-down list of installed font families in the Visual Studio property grid (empty = pixel font).</summary>
+    public sealed class InstalledFontFamilyConverter : StringConverter
+    {
+        static StandardValuesCollection? _values;
+        public override bool GetStandardValuesSupported(ITypeDescriptorContext? context) => true;
+        public override bool GetStandardValuesExclusive(ITypeDescriptorContext? context) => false;
+        public override StandardValuesCollection GetStandardValues(ITypeDescriptorContext? context)
+        {
+            if (_values != null) return _values;
+            var list = new List<string> { "" };
+            try { list.AddRange(SpriteFont.SystemFamilies()); } catch { }
+            return _values = new StandardValuesCollection(list);
+        }
+    }
+
     /// <summary>The font a control draws with: <see cref="Font"/> null = the built-in <see cref="PixelFont"/>.</summary>
     public readonly struct ControlText
     {
@@ -212,7 +227,7 @@ namespace Sr2d64CSport
         [Browsable(false), DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
         public SpriteFont? TextFont { get => _font; set { _font = value; OnTextFontChanged(); } }
 
-        [Category("Appearance"), DefaultValue(""), Description("Installed font family for the control's text (e.g. Segoe UI); empty = the app default (SpriteControlBase.DefaultFontFamily) or the built-in pixel font.")]
+        [Category("Appearance"), DefaultValue(""), TypeConverter(typeof(InstalledFontFamilyConverter)), Description("Installed font family for the control's text (e.g. Segoe UI); empty = the app default (SpriteControlBase.DefaultFontFamily) or the built-in pixel font.")]
         public string TextFontFamily { get => _family; set { _family = value ?? ""; OnTextFontChanged(); } }
 
         [Category("Appearance"), DefaultValue(0f), Description("Em size in pixels at TextScale 1 when a real font is used (0 = SpriteControlBase.DefaultFontSize, 12). TextScale multiplies it.")]

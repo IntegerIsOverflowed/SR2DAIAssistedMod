@@ -18,7 +18,7 @@ namespace Sr2d64CSport
     /// (and Escape restores the text from the last commit) so a form can react to "done" like a NumericUpDown.
     /// </summary>
     [ToolboxBitmap(typeof(SpriteTextBox), "SpriteTextBox.bmp")]
-    [DefaultEvent("Committed")]
+    [DefaultEvent("Committed"), DefaultProperty("Text"), DefaultBindingProperty("Text")]
     public class SpriteTextBox : SpriteControlBase
     {
         protected override AccessibleRole DefaultAccessibleRole => AccessibleRole.Text;
@@ -253,10 +253,14 @@ namespace Sr2d64CSport
     /// loss, a button, a key or the wheel); typing alone does not change <see cref="Value"/> yet.
     /// </summary>
     [ToolboxBitmap(typeof(SpriteNumeric), "SpriteNumeric.bmp")]
-    [DefaultEvent("ValueChanged")]
+    [DefaultEvent("ValueChanged"), DefaultProperty("Value"), DefaultBindingProperty("Value")]
     public sealed class SpriteNumeric : SpriteTextBox
     {
         protected override AccessibleRole DefaultAccessibleRole => AccessibleRole.Slider;
+
+        [Browsable(false), EditorBrowsable(EditorBrowsableState.Never), DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden), Bindable(false)]
+        [AllowNull]
+        public override string Text { get => base.Text; set => base.Text = value; }
         decimal _value, _min, _max = 100, _step = 1; int _dec; string _unit = ""; int _pressedBtn; Timer? _repeat; int _repeatDir;
         double[]? _values; bool _pow2;
         SpinnerPlacement _spinner = SpinnerPlacement.Right; bool _wrapMouse = true, _dragSpin = true; int _pixelsPerStep = 4;
@@ -483,7 +487,7 @@ namespace Sr2d64CSport
     /// SR2D <see cref="SpriteMenu"/> with the <see cref="Items"/>; Up / Down and the wheel change the selection directly.
     /// </summary>
     [ToolboxBitmap(typeof(SpriteCombo), "SpriteCombo.bmp")]
-    [DefaultEvent("SelectedIndexChanged")]
+    [DefaultEvent("SelectedIndexChanged"), DefaultProperty("Items"), DefaultBindingProperty("SelectedItem")]
     public sealed class SpriteCombo : SpriteControlBase
     {
         protected override AccessibleRole DefaultAccessibleRole => AccessibleRole.ComboBox;
@@ -498,9 +502,38 @@ namespace Sr2d64CSport
         [Category("Action"), Description("Raised after SelectedIndex changed.")]
         public event EventHandler? SelectedIndexChanged;
 
-        /// <summary>The entries (edit, then call <see cref="RefreshItems"/> or set SelectedIndex; the menu is rebuilt on open).</summary>
-        [Browsable(false), DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
-        public List<string> Items => _items;
+        [Browsable(false), EditorBrowsable(EditorBrowsableState.Never), DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden), Bindable(false)]
+        [AllowNull]
+        public override string Text { get => base.Text; set => base.Text = value; }
+
+        /// <summary>The entries (edit in the WinForms Designer under Data -> Items, or in code).</summary>
+        [Browsable(true), Category("Data"), Description("The entries in the combo box.")]
+        [DesignerSerializationVisibility(DesignerSerializationVisibility.Content)]
+        [Editor("System.Windows.Forms.Design.StringCollectionEditor, System.Design, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+                "System.Drawing.Design.UITypeEditor, System.Drawing, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a")]
+        [MergableProperty(false), Localizable(true)]
+        public List<string> Items
+        {
+            get => _items;
+            set
+            {
+                if (ReferenceEquals(value, _items)) { RefreshItems(); return; }
+                _items.Clear();
+                if (value != null) _items.AddRange(value);
+                RefreshItems();
+            }
+        }
+        bool ShouldSerializeItems() => _items.Count > 0;
+        void ResetItems() { _items.Clear(); RefreshItems(); }
+
+        /// <summary>The entries as a string array (editable one-per-line in the Visual Studio String Collection Editor under Data).</summary>
+        [Browsable(true), Category("Data"), Description("The entries in the combo box as a string array (one per line in the designer).")]
+        [DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
+        public string[] ItemArray
+        {
+            get => _items.ToArray();
+            set => SetItems(value ?? Array.Empty<string>(), _sel >= 0 ? _sel : 0);
+        }
         public void SetItems(IEnumerable<string> items, int select = 0) { _items.Clear(); _items.AddRange(items); _sel = -1; SelectedIndex = _items.Count == 0 ? -1 : Math.Clamp(select, 0, _items.Count - 1); Redraw(); }
         public void RefreshItems() { if (_sel >= _items.Count) SelectedIndex = _items.Count - 1; Redraw(); }
 
@@ -535,6 +568,10 @@ namespace Sr2d64CSport
         }
         void MenuClosed(SpriteMenu m) { _open = false; Redraw(); }
         public void Close() => _menu?.Close();
+        protected override void OnVisibleChanged(EventArgs e) { base.OnVisibleChanged(e); if (!Visible && _open) Close(); }
+        protected override void OnParentVisibleChanged(EventArgs e) { base.OnParentVisibleChanged(e); if (!Visible && _open) Close(); }
+        protected override void OnEnabledChanged(EventArgs e) { base.OnEnabledChanged(e); if (!Enabled && _open) Close(); }
+        protected override void OnHandleDestroyed(EventArgs e) { if (_open) Close(); base.OnHandleDestroyed(e); }
         protected override void Dispose(bool disposing) { if (disposing) _menu?.Dispose(); base.Dispose(disposing); }
 
         protected override void OnMouseDown(MouseEventArgs e)
@@ -612,7 +649,7 @@ namespace Sr2d64CSport
     /// <see cref="ItemActivated"/>.
     /// </summary>
     [ToolboxBitmap(typeof(SpriteListBox), "SpriteListBox.bmp")]
-    [DefaultEvent("SelectedIndexChanged")]
+    [DefaultEvent("SelectedIndexChanged"), DefaultProperty("Items"), DefaultBindingProperty("SelectedItem")]
     public sealed class SpriteListBox : SpriteControlBase
     {
         protected override AccessibleRole DefaultAccessibleRole => AccessibleRole.List;
@@ -641,8 +678,38 @@ namespace Sr2d64CSport
         [Category("Action"), Description("Raised after a check box changed (the item index is passed).")]
         public event EventHandler<int>? ItemChecked;
 
-        [Browsable(false), DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
-        public List<string> Items => _items;
+        [Browsable(false), EditorBrowsable(EditorBrowsableState.Never), DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden), Bindable(false)]
+        [AllowNull]
+        public override string Text { get => base.Text; set => base.Text = value; }
+
+        /// <summary>The entries in the list box (editable in the WinForms Designer under Data -> Items, or in code).</summary>
+        [Browsable(true), Category("Data"), Description("The items in the list box.")]
+        [DesignerSerializationVisibility(DesignerSerializationVisibility.Content)]
+        [Editor("System.Windows.Forms.Design.StringCollectionEditor, System.Design, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+                "System.Drawing.Design.UITypeEditor, System.Drawing, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a")]
+        [MergableProperty(false), Localizable(true)]
+        public List<string> Items
+        {
+            get => _items;
+            set
+            {
+                if (ReferenceEquals(value, _items)) { RefreshItems(); return; }
+                _items.Clear();
+                if (value != null) _items.AddRange(value);
+                RefreshItems();
+            }
+        }
+        bool ShouldSerializeItems() => _items.Count > 0;
+        void ResetItems() { _items.Clear(); RefreshItems(); }
+
+        /// <summary>The entries as a string array (editable one-per-line in the Visual Studio String Collection Editor under Data).</summary>
+        [Browsable(true), Category("Data"), Description("The items in the list box as a string array (one per line in the designer).")]
+        [DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
+        public string[] ItemArray
+        {
+            get => _items.ToArray();
+            set => SetItems(value ?? Array.Empty<string>());
+        }
         /// <summary>
         /// Replaces the items and clears selection and checks. <paramref name="headers"/> = indices drawn as group headers (bold band,
         /// not selectable, skipped by the keyboard); <paramref name="colors"/> = ARGB text colour per index (e.g. greyed entries).

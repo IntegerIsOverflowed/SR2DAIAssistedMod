@@ -284,11 +284,11 @@ namespace Sr2d64CSport
                         Frame();
                         if (PeekMessage(out _, IntPtr.Zero, 0, 0x01FF, 0) != 0 || PeekMessage(out _, IntPtr.Zero, 0x0201, 0x7FFFFFFF, 0) != 0) break;
                     }
-                    // only moves left: coalesce + dispatch here, keep rendering. TranslateMessage is NOT optional:
-                    // the drain also sees the keydowns that arrived during the last Frame(), and without it no WM_CHAR
-                    // is generated - the search box (and every text control) lost most keystrokes (a character slipped
-                    // through only when it happened to be pumped by the main loop)
-                    while (PeekMessage(out var nm, IntPtr.Zero, 0, 0, PM_REMOVE) != 0) { TranslateMessage(ref nm); DispatchMessage(ref nm); }
+                    // If a real click or key message arrived during Frame(), break out to the WinForms message pump
+                    // so Application.AddMessageFilter (e.g. SpriteMenuPanel.OutsideClickFilter) and WM_CHAR run properly.
+                    if (PeekMessage(out _, IntPtr.Zero, 0, 0x01FF, 0) != 0 || PeekMessage(out _, IntPtr.Zero, 0x0201, 0x7FFFFFFF, 0) != 0) break;
+                    // only WM_MOUSEMOVE (0x0200) left: coalesce + dispatch here, keep rendering.
+                    while (PeekMessage(out var nm, IntPtr.Zero, 0x0200, 0x0200, PM_REMOVE) != 0) { TranslateMessage(ref nm); DispatchMessage(ref nm); }
                     // SR2D_TRACE: the state of the window once a second while the loop spins, so a freeze that
                     // involves no messages at all still shows what the form and the real window each think.
                     if (Trace.On)
@@ -335,10 +335,10 @@ namespace Sr2d64CSport
             var mid = new SpritePanel { Style = PanelStyle.Flat, Padding = new Padding(2, 2, 2, 2), Dock = DockStyle.Fill };
             surf.Dock = DockStyle.Fill; surf.BackColor = Color.Black; surf.Painter = _ => { };
             surf.MouseMove += (_, e) => SurfaceMove(e);
-            surf.MouseDown += (_, e) => SurfaceDown(e);
+            surf.MouseDown += (_, e) => { SpriteMenu.CloseAll(); SurfaceDown(e); };
             surf.MouseUp += (_, e) => { if (e.Button == MouseButtons.Left) { dragging = false; orbiting = false; edgeDrag = 0; rotating = false; shadowDrag = false; painting = false; frame.MouseUp(); } if (e.Button == MouseButtons.Middle) panning = false; ctx.HoldRight &= e.Button != MouseButtons.Right; ctx.HoldMiddle &= e.Button != MouseButtons.Middle; };
             surf.MouseWheel += (_, e) => SurfaceWheel(e);
-            surf.MouseEnter += (_, _) => surf.Focus();     // wheel events go to the focused control
+            surf.MouseEnter += (_, _) => { if (!SpriteMenu.AnyOpen) surf.Focus(); };     // wheel events go to the focused control (do not steal focus while a dropdown is open)
             surf.MouseLeave += (_, _) => { if (!dragging && !orbiting && edgeDrag == 0) surf.Cursor = Cursors.Default; };
             // code view (same cell as the canvas; swapped in by the "Code" button / F2)
             var codeHead = new SpriteStackPanel { Orientation = Orientation.Horizontal, Dock = DockStyle.Top, Height = 38, Gap = 6, Padding = new Padding(4), Stretch = false };

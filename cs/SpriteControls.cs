@@ -38,7 +38,12 @@ namespace Sr2d64CSport
         // here: pressed and released inside the control with the same button. Controls that keep StandardClick get it from
         // WinForms and are left alone, so nothing fires twice.
         MouseButtons _clickDown = MouseButtons.None;
-        protected override void OnMouseDown(MouseEventArgs e) { _clickDown = e.Button; base.OnMouseDown(e); }
+        protected override void OnMouseDown(MouseEventArgs e)
+        {
+            SpriteMenuPanel.CloseAllExcept(this);
+            _clickDown = e.Button;
+            base.OnMouseDown(e);
+        }
         protected override void OnMouseUp(MouseEventArgs e)
         {
             var down = _clickDown; _clickDown = MouseButtons.None;
@@ -816,7 +821,7 @@ namespace Sr2d64CSport
     /// mouse turns it), <see cref="Gauge"/> (how the value is shown) and <see cref="Pointer"/> (whether the pointer stops at the ends).
     /// </summary>
     [ToolboxBitmap(typeof(SpriteKnob), "SpriteKnob.bmp")]
-    [DefaultEvent("ValueChanged")]
+    [DefaultEvent("ValueChanged"), DefaultProperty("Value"), DefaultBindingProperty("Value")]
     public sealed class SpriteKnob : SpriteRangeControl
     {
         protected override AccessibleRole DefaultAccessibleRole => AccessibleRole.Slider;
@@ -824,6 +829,8 @@ namespace Sr2d64CSport
         KnobGauge _gauge = KnobGauge.Arc; bool _gaugeSet;
         KnobPointer _pointer = KnobPointer.Bounded;
         double _perTurn; int _turns = 3;
+        bool _preventWrapJump = true, _angularPress;
+        double _lastRawFrac;
         const float StartDeg = 135f, SweepDeg = 270f;      // Arc gauge, y-down screen angles: 135 = bottom-left, 270 = top, 405 = bottom-right
         const float TopDeg = 270f;                          // circular gauges start at 12 o'clock
 
@@ -845,6 +852,11 @@ namespace Sr2d64CSport
 
         [Category("Behavior"), DefaultValue(typeof(decimal), "0"), Description("Endless mode: value change per full turn of the pointer (0 = (Maximum - Minimum) / Turns).")]
         public decimal ValuePerTurn { get => (decimal)_perTurn; set { _perTurn = Math.Max(0, (double)value); Redraw(); } }
+
+        /// <summary>Prevents the value from jumping between Minimum and Maximum when cranking across the bottom gap (Arc gauge) or top seam (Circle gauge) in Angular mode.</summary>
+        [Category("Behavior"), DefaultValue(true), Browsable(true), EditorBrowsable(EditorBrowsableState.Always),
+         Description("Prevents the value from jumping between Minimum and Maximum when dragging across the bottom gap (Arc gauge) or top seam (Circle gauge) in Angular mode.")]
+        public bool PreventWrapJump { get => _preventWrapJump; set => _preventWrapJump = value; }
 
         double PerTurn => _perTurn > 0 ? _perTurn : (DblMax - DblMin) / _turns;
         double FractionOf(double v) => DiscreteFractionOf(v);               // even spacing between the entries of a Values list
@@ -895,6 +907,7 @@ namespace Sr2d64CSport
 
         protected override void OnMouseDown(MouseEventArgs e)
         {
+            if (!IsDragging && IsDragButton(e.Button)) { _angularPress = true; _lastRawFrac = Fraction; }
             if (!IsDragging && IsDragButton(e.Button) && (_mode == KnobDragMode.Endless || _pointer == KnobPointer.Infinite))
             {
                 var (cx, cy, _, _, _, _) = Geometry();
@@ -943,11 +956,26 @@ namespace Sr2d64CSport
                 // an end and back reacts immediately (no dead travel)
                 return Math.Clamp(DblMin + total / (2 * Math.PI) * GainPerTurn, DblMin, DblMax);
             }
+            bool press = _angularPress; _angularPress = false;
             double deg = a * 180 / Math.PI;                                       // -180..180, y down
             if (Gauge == KnobGauge.Arc || Gauge == KnobGauge.None)
             {
                 double rel = ((deg - StartDeg) % 360 + 360) % 360;                // 0 at the start of the arc, clockwise
-                double t = rel <= SweepDeg ? rel / SweepDeg : (rel < SweepDeg + (360 - SweepDeg) / 2 ? 1 : 0);   // the gap snaps to the nearer end
+                double t;
+                if (rel <= SweepDeg)
+                {
+                    t = rel / SweepDeg;
+                    if (_preventWrapJump && !press && Math.Abs(t - _lastRawFrac) > 0.45)
+                        t = _lastRawFrac < 0.5 ? 0 : 1;
+                }
+                else
+                {
+                    if (_preventWrapJump && !press)
+                        t = _lastRawFrac <= 0.35 ? 0 : _lastRawFrac >= 0.65 ? 1 : (rel < SweepDeg + (360 - SweepDeg) / 2 ? 1 : 0);
+                    else
+                        t = rel < SweepDeg + (360 - SweepDeg) / 2 ? 1 : 0;       // the gap snaps to the nearer end
+                }
+                _lastRawFrac = t;
                 return FromFraction(t);
             }
             else
@@ -955,7 +983,11 @@ namespace Sr2d64CSport
                 // full-circle gauges in Angular mode: one turn from the top = the whole range; the seam at 12 o'clock is
                 // crossed only by the mouse going round, so the value cannot jump between the ends by itself
                 double rel = ((deg - TopDeg) % 360 + 360) % 360;
-                return FromFraction(rel / 360);
+                double t = rel / 360;
+                if (_preventWrapJump && !press && Math.Abs(t - _lastRawFrac) > 0.45)
+                    t = _lastRawFrac < 0.5 ? 0 : 1;
+                _lastRawFrac = t;
+                return FromFraction(t);
             }
         }
 
@@ -1111,7 +1143,7 @@ namespace Sr2d64CSport
     /// value text. Same interaction model as <see cref="SpriteKnob"/>: the thumb is always exactly under the pointer.
     /// </summary>
     [ToolboxBitmap(typeof(SpriteSlider), "SpriteSlider.bmp")]
-    [DefaultEvent("ValueChanged")]
+    [DefaultEvent("ValueChanged"), DefaultProperty("Value"), DefaultBindingProperty("Value")]
     public class SpriteSlider : SpriteRangeControl
     {
         protected override AccessibleRole DefaultAccessibleRole => AccessibleRole.Slider;

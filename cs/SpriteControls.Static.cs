@@ -8,6 +8,7 @@ using System;
 using System.Collections.Generic;
 using System.ComponentModel;
 using System.ComponentModel.Design;
+using System.Diagnostics.CodeAnalysis;
 using System.Drawing;
 using System.Windows.Forms;
 using Timer = System.Windows.Forms.Timer;   // ImplicitUsings also brings System.Threading.Timer
@@ -34,7 +35,7 @@ namespace Sr2d64CSport
     /// (it grows with the text; turn it off for a fixed box), five styles (<see cref="LabelStyle"/>). It is not selectable.
     /// </summary>
     [ToolboxBitmap(typeof(SpriteLabel), "SpriteLabel.bmp")]
-    [DefaultEvent("Click")]
+    [DefaultEvent("Click"), DefaultProperty("Text"), DefaultBindingProperty("Text")]
     public sealed class SpriteLabel : SpriteControlBase
     {
         protected override AccessibleRole DefaultAccessibleRole => AccessibleRole.StaticText;
@@ -133,7 +134,7 @@ namespace Sr2d64CSport
 
     /// <summary>A thin rule (horizontal or vertical) with an optional centred caption: "── or ──".</summary>
     [ToolboxBitmap(typeof(SpriteSeparator), "SpriteSeparator.bmp")]
-    [DefaultEvent("Click")]
+    [DefaultEvent("Click"), DefaultProperty("Text")]
     public sealed class SpriteSeparator : SpriteControlBase
     {
         Orientation _orient = Orientation.Horizontal;
@@ -171,7 +172,7 @@ namespace Sr2d64CSport
     /// <see cref="Clickable"/> - then it toggles and raises <see cref="OnChanged"/>, which makes it a very small toggle.
     /// </summary>
     [ToolboxBitmap(typeof(SpriteLed), "SpriteLed.bmp")]
-    [DefaultEvent("OnChanged")]
+    [DefaultEvent("OnChanged"), DefaultProperty("On"), DefaultBindingProperty("On")]
     public sealed class SpriteLed : SpriteControlBase
     {
         bool _on, _clickable, _phase = true; int _blink; Color _led = DefaultLed; LedShape _shape; Timer? _timer;
@@ -284,10 +285,14 @@ namespace Sr2d64CSport
     /// </summary>
     [Designer("System.Windows.Forms.Design.ParentControlDesigner, System.Design", typeof(IDesigner))]
     [ToolboxBitmap(typeof(SpritePanel), "SpritePanel.bmp")]
-    [DefaultEvent("Click")]
+    [DefaultEvent("Click"), DefaultProperty("Style")]
     public class SpritePanel : SpriteControlBase
     {
         protected override AccessibleRole DefaultAccessibleRole => AccessibleRole.Client;
+
+        [Browsable(false), EditorBrowsable(EditorBrowsableState.Never), DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden), Bindable(false)]
+        [AllowNull]
+        public override string Text { get => base.Text; set => base.Text = value; }
         protected override void OnControlAdded(ControlEventArgs e) { base.OnControlAdded(e); ContainerButtons.MakePopup(e.Control); }
         PanelStyle _style = PanelStyle.Sunken; int _radius = 6;
         public SpritePanel()
@@ -353,12 +358,16 @@ namespace Sr2d64CSport
     /// </summary>
     [Designer("System.Windows.Forms.Design.ParentControlDesigner, System.Design", typeof(IDesigner))]
     [ToolboxBitmap(typeof(SpriteGroupBox), "SpriteGroupBox.bmp")]
-    [DefaultEvent("CheckedChanged")]
+    [DefaultEvent("CheckedChanged"), DefaultProperty("Text")]
     public sealed class SpriteGroupBox : SpritePanel
     {
         protected override AccessibleRole DefaultAccessibleRole => AccessibleRole.Grouping;
         bool _showCheck, _checked = true, _hotCheck; HorizontalAlignment _capAlign = HorizontalAlignment.Left;
-        public SpriteGroupBox() { Style = PanelStyle.Outline; Size = new Size(200, 120); }
+        public SpriteGroupBox() { SnapAnim(1f); Style = PanelStyle.Outline; Size = new Size(200, 120); }
+
+        [Browsable(true), EditorBrowsable(EditorBrowsableState.Always), DesignerSerializationVisibility(DesignerSerializationVisibility.Visible), Bindable(true)]
+        [AllowNull]
+        public override string Text { get => base.Text; set => base.Text = value; }
 
         [Category("Action"), Description("Raised after Checked changed.")]
         public event EventHandler? CheckedChanged;
@@ -425,10 +434,15 @@ namespace Sr2d64CSport
 
     /// <summary>One page of a <see cref="SpriteTabControl"/>: a flat panel with the tab's caption in <see cref="Control.Text"/>.</summary>
     [Designer("System.Windows.Forms.Design.ParentControlDesigner, System.Design", typeof(IDesigner))]
+    [DefaultProperty("Text")]
     public sealed class SpriteTabPage : SpritePanel
     {
         protected override AccessibleRole DefaultAccessibleRole => AccessibleRole.PageTab;
         public SpriteTabPage() { Style = PanelStyle.Flat; Padding = new Padding(8); Visible = false; }
+
+        [Browsable(true), EditorBrowsable(EditorBrowsableState.Always), DesignerSerializationVisibility(DesignerSerializationVisibility.Visible), Bindable(true)]
+        [AllowNull]
+        public override string Text { get => base.Text; set => base.Text = value; }
         public SpriteTabPage(string text) : this() { Text = text; }
         protected override void OnTextChanged(EventArgs e) { base.OnTextChanged(e); if (Parent is SpriteTabControl tc) tc.Redraw(); }
         // page colour: a shade lighter than the tab control so the selected tab visibly connects to it
@@ -445,11 +459,16 @@ namespace Sr2d64CSport
     /// adds one, the strip shows their Text, <see cref="SelectedIndex"/> switches. Left / Right keys change the page when the
     /// strip has the focus; the wheel over the strip does too. The rest of the client area is the page (Dock = Fill inside it).
     /// </summary>
+    [Designer("System.Windows.Forms.Design.ParentControlDesigner, System.Design", typeof(IDesigner))]
     [ToolboxBitmap(typeof(SpriteTabControl), "SpriteTabControl.bmp")]
-    [DefaultEvent("SelectedIndexChanged")]
+    [DefaultEvent("SelectedIndexChanged"), DefaultProperty("SelectedIndex")]
     public sealed class SpriteTabControl : SpriteControlBase
     {
         protected override AccessibleRole DefaultAccessibleRole => AccessibleRole.PageTabList;
+
+        [Browsable(false), EditorBrowsable(EditorBrowsableState.Never), DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden), Bindable(false)]
+        [AllowNull]
+        public override string Text { get => base.Text; set => base.Text = value; }
         readonly System.Collections.Generic.List<SpriteTabPage> _pages = new();
         int _sel = -1, _hot = -1, _tabW; TabSide _side; bool _stretch;
 
@@ -473,6 +492,7 @@ namespace Sr2d64CSport
             {
                 value = _pages.Count == 0 ? -1 : Math.Clamp(value, -1, _pages.Count - 1);
                 if (value == _sel) return;
+                SpriteMenu.CloseAll();
                 _sel = value;
                 for (int i = 0; i < _pages.Count; i++) _pages[i].Visible = i == _sel;
                 LayoutPages(); Redraw();

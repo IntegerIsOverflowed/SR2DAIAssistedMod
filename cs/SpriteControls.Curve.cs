@@ -16,7 +16,8 @@ using System.Windows.Forms;
 
 namespace Sr2d64CSport
 {
-    [DefaultEvent("Click")]
+    [ToolboxBitmap(typeof(SpriteCurveEditor), "SpriteCurveEditor.bmp")]
+    [DefaultEvent("CurveChanged"), DefaultProperty("Guides")]
     public sealed class SpriteCurveEditor : SpriteControlBase
     {
         protected override AccessibleRole DefaultAccessibleRole => AccessibleRole.Graphic;
@@ -28,15 +29,23 @@ namespace Sr2d64CSport
         double viewLo, viewHi = 1;                                             // the visible value range (wheel zooms, middle pans)
         double panLo, panHi;
 
-        public SpriteCurveEditor() { Size = new Size(300, 170); curve.Changed += (_, _) => Redraw(); }   // an edit made on the Curve object itself (code, another control) repaints here
+        public SpriteCurveEditor()
+        {
+            Size = new Size(300, 170);
+            curve.Changed += (_, _) => { Redraw(); CurveChanged?.Invoke(this, EventArgs.Empty); };   // an edit made on the Curve object itself (code, another control) repaints and raises CurveChanged here
+        }
         protected override void Dispose(bool disposing)
         {
             if (disposing) { _menu?.Close(); _menu?.Dispose(); _menu = null; } // CA2213: the popped-up menu is ours
             base.Dispose(disposing);
         }
 
+        /// <summary>Raised when the curve's points, tangent modes or clamping change.</summary>
+        [Category("Action"), Description("Raised when the curve's points, tangent modes or clamping change.")]
+        public event EventHandler? CurveChanged;
+
         /// <summary>The edited curve. Assigning copies the points, the tangent modes and the clamping into the editor's own instance (the editor always edits the object it was built with, so a <see cref="Curve.Changed"/> subscription stays valid). Designer serialization is hidden - the curve is runtime data.</summary>
-        [System.ComponentModel.DesignerSerializationVisibility(System.ComponentModel.DesignerSerializationVisibility.Hidden)]
+        [Browsable(false), DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
         public Curve Curve
         {
             get => curve;
@@ -50,8 +59,22 @@ namespace Sr2d64CSport
         }
         bool guides = true;
         /// <summary>Draw the centre cross, the 0 / 1 lines and the identity diagonal (on by default).</summary>
-        [System.ComponentModel.DesignerSerializationVisibility(System.ComponentModel.DesignerSerializationVisibility.Hidden), System.ComponentModel.DefaultValue(true)]
+        [Category("Appearance"), DefaultValue(true), Description("Draw the centre cross, the 0 / 1 lines and the identity diagonal.")]
         public bool Guides { get => guides; set { guides = value; Redraw(); } }
+
+        /// <summary>Clamp evaluated curve values to 0..1.</summary>
+        [Category("Behavior"), DefaultValue(true), Description("Clamp evaluated curve values to 0..1.")]
+        public bool Clamp01
+        {
+            get => curve.Clamp01;
+            set
+            {
+                if (curve.Clamp01 == value) return;
+                curve.Clamp01 = value;
+                if (value) { curve.ClampTo01(); viewLo = 0; viewHi = 1; }
+                Redraw();
+            }
+        }
 
         // The caption band at the bottom is not plot: the endpoints of a curve sit AT the bottom edge (y = 0), so a
         // plot that ran under the text drew the caption straight through the two endpoint nodes and the 0.0 line.

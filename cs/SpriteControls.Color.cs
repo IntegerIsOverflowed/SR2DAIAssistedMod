@@ -1,5 +1,6 @@
 using System;
 using System.ComponentModel;
+using System.Diagnostics.CodeAnalysis;
 using System.Drawing;
 using System.Globalization;
 using System.Windows.Forms;
@@ -23,9 +24,12 @@ namespace Sr2d64CSport
     //     using var dlg = new SpriteColorDialog { Value = current };
     //     if (dlg.ShowDialog(this) == DialogResult.OK) current = dlg.Value;
     //
-    [DefaultEvent("ValueChanged")]
+    [DefaultEvent("ValueChanged"), DefaultProperty("Value"), DefaultBindingProperty("Value")]
     public sealed class SpriteColorPicker : SpriteControlBase
     {
+        [Browsable(false), EditorBrowsable(EditorBrowsableState.Never), DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden), Bindable(false)]
+        [AllowNull]
+        public override string Text { get => base.Text; set => base.Text = value; }
         float _h;                                   // 0..<360
         float _s = 1f, _v = 1f;                     // 0..1
         int _a = 255;                               // 0..255

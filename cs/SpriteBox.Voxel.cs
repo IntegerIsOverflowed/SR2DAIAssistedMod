@@ -149,6 +149,7 @@ namespace Sr2d64CSport
         public void SetLight(float x, float y, float z, float ambient = 0.4f) { _light1 = x; _light2 = y; _light3 = z; _ambient = ambient; Changed(); }
         [Category("Voxel lighting")] public Color NightBackColor { get => _nightBack; set { _nightBack = value; Changed(); } }
         bool ShouldSerializeNightBackColor() => _nightBack != DefaultNightBack;
+        void ResetNightBackColor() => NightBackColor = DefaultNightBack;
 
         // ------------------------------------------------------------------ performance / overlay settings
         [Category("Behavior"), DefaultValue(true), Description("Render in horizontal bands on all cores (worth it above ~100k drawn voxels).")]

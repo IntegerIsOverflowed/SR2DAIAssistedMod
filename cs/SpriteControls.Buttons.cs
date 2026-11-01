@@ -93,13 +93,25 @@ namespace Sr2d64CSport
     /// (accent-coloured face). Raises <see cref="Control.Click"/> on release inside (or Space / Enter).
     /// </summary>
     [ToolboxBitmap(typeof(SpriteButton), "SpriteButton.bmp")]
-    [DefaultEvent("Click")]
-    public sealed class SpriteButton : SpriteClickable
+    [DefaultEvent("Click"), DefaultProperty("Text")]
+    public sealed class SpriteButton : SpriteClickable, IButtonControl
     {
         protected override AccessibleRole DefaultAccessibleRole => AccessibleRole.PushButton;
         ButtonShape _shape = ButtonShape.Rounded; bool _accented; ControlLook _look = ControlLook.Classic;
+        DialogResult _dialogResult = DialogResult.None; bool _isDefault;
 
         public SpriteButton() { Size = new Size(120, 36); }
+
+        [Category("Behavior"), DefaultValue(DialogResult.None), Description("The dialog result produced in a modal form by clicking the button.")]
+        public DialogResult DialogResult { get => _dialogResult; set => _dialogResult = value; }
+
+        public void NotifyDefault(bool value) { if (_isDefault != value) { _isDefault = value; Redraw(); } }
+        public void PerformClick() { if (CanSelect) Activate(); }
+        protected override void Activate()
+        {
+            if (_dialogResult != DialogResult.None && FindForm() is Form f) f.DialogResult = _dialogResult;
+            base.Activate();
+        }
 
         [Category("Appearance"), DefaultValue(ButtonShape.Rounded), Description("Rounded rectangle, pill, round or square.")]
         public ButtonShape Shape { get => _shape; set { _shape = value; Redraw(); } }
@@ -256,7 +268,7 @@ namespace Sr2d64CSport
     /// of the control; the caption uses the rest of the width.
     /// </summary>
     [ToolboxBitmap(typeof(SpriteToggle), "SpriteToggle.bmp")]
-    [DefaultEvent("CheckedChanged")]
+    [DefaultEvent("CheckedChanged"), DefaultProperty("Checked"), DefaultBindingProperty("Checked")]
     public sealed class SpriteToggle : SpriteClickable
     {
         protected override AccessibleRole DefaultAccessibleRole => AccessibleRole.CheckButton;
@@ -395,7 +407,7 @@ namespace Sr2d64CSport
     /// the group; the name lets several groups share a panel).
     /// </summary>
     [ToolboxBitmap(typeof(SpriteRadio), "SpriteRadio.bmp")]
-    [DefaultEvent("CheckedChanged")]
+    [DefaultEvent("CheckedChanged"), DefaultProperty("Checked"), DefaultBindingProperty("Checked")]
     public sealed class SpriteRadio : SpriteClickable
     {
         protected override AccessibleRole DefaultAccessibleRole => AccessibleRole.RadioButton;
@@ -469,7 +481,7 @@ namespace Sr2d64CSport
     /// drawn with <see cref="Segments"/> (LED-style bar).
     /// </summary>
     [ToolboxBitmap(typeof(SpriteProgress), "SpriteProgress.bmp")]
-    [DefaultEvent("Click")]
+    [DefaultEvent("Click"), DefaultProperty("Value"), DefaultBindingProperty("Value")]
     public sealed class SpriteProgress : SpriteControlBase
     {
         protected override AccessibleRole DefaultAccessibleRole => AccessibleRole.ProgressBar;

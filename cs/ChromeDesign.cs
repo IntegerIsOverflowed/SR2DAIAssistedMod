@@ -184,6 +184,7 @@ namespace Sr2d64CSport
 
         /// <summary>The list itself: swatch + hex per row, Add / Edit / Remove under it. internal so the
         /// harness can open it against a real value and photograph it.</summary>
+        [ToolboxItem(false), DesignerCategory("Code")]
         internal sealed class PaletteForm : Form
         {
             readonly ListBox list;
