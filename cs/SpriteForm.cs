@@ -236,6 +236,8 @@ namespace Sr2d64CSport
         public SpriteForm()
         {
             FormBorderStyle = FormBorderStyle.None;
+            BackColor = Color.FromArgb(46, 52, 60);
+            ForeColor = Color.White;
             Size = new Size(960, 640);
             Text = " ";
             stripeSeedValue = Environment.TickCount;              // StripeSeed = -1: one random seed for the life of the form
@@ -1344,6 +1346,9 @@ namespace Sr2d64CSport
 
         /// <summary>The form's background changed: every SR2D control that sits directly on it and has no colour of
         /// its own follows, and the containers among them hand their own face on down.</summary>
+        public override void ResetForeColor() => ForeColor = Color.White;
+        private bool ShouldSerializeForeColor() => ForeColor != Color.White;
+
         protected override void OnBackColorChanged(EventArgs e)
         {
             base.OnBackColorChanged(e);

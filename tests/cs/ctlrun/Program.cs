@@ -75,6 +75,30 @@ static class P {
     var pr = new SpriteProgress { Value = 62, Style = ProgressStyle.Ring, Size = new Size(100, 100) }; c.Draw(pr.RenderOnce(), x + 340, y, SR2D.Op.Paint);
     var pr2 = new SpriteProgress { Value = 62, Style = ProgressStyle.Ring, Segments = 12, Size = new Size(100, 100), AccentColor = Color.FromArgb(0x60,0xE0,0x80) }; c.Draw(pr2.RenderOnce(), x + 450, y, SR2D.Op.Paint);
     var pr3 = new SpriteProgress { Marquee = true, Phase = 0.85f, Style = ProgressStyle.Ring, Size = new Size(60, 60) }; c.Draw(pr3.RenderOnce(), x + 560, y, SR2D.Op.Paint);
+    // AutoSize on SpriteToggle / SpriteRadio / SpriteLed + SpriteRadioGrid multi-button switch checks
+    {
+      var tEmpty = new SpriteToggle { Style = ToggleStyle.Rocker, OnText = "ONE SHAPE", OffText = "TABLE", Size = new Size(280, 40) };
+      Chk(tEmpty.AutoSize && tEmpty.Width < 120, $"SpriteToggle AutoSize shrinks empty-Text rocker to graphic width ({tEmpty.Width}x{tEmpty.Height})");
+      tEmpty.Text = "Caption text";
+      int wWithText = tEmpty.Width;
+      tEmpty.Text = "";
+      Chk(wWithText > tEmpty.Width, $"SpriteToggle AutoSize grows with Text ({wWithText}) and shrinks back when cleared ({tEmpty.Width})");
+      var rg = new SpriteRadioGrid
+      {
+        Rows = 2,
+        Columns = 2,
+        Size = new Size(180, 64),
+        AccentColors = new[] { Color.Red, Color.Green, Color.Blue, Color.Orange },
+        DepressedButtonColored = true,
+      };
+      rg.SetItems(new[] { "ONE SHAPE", "TWO", "THREE", "FOUR" }, 0);
+      int rgEvents = 0;
+      rg.SelectedIndexChanged += (_, _) => rgEvents++;
+      rg.Tap(135, 48); // bottom-right cell (row 1, col 1 -> index 3)
+      Chk(rg.SelectedIndex == 3 && rg.SelectedRow == 1 && rg.SelectedColumn == 1 && rgEvents == 1, $"SpriteRadioGrid selects cell 3 on tap (sel={rg.SelectedIndex}, events={rgEvents})");
+      rg.DepressedButtonColored = false;
+      rg.RenderOnce();
+    }
     Save(c, "buttons.rgba");
   }
   static void Wheels() {

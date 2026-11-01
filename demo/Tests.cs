@@ -4059,16 +4059,15 @@ T(GControls, "SpriteLabel / GroupBox / Tabs / TextBox / Numeric / Combo / ListBo
                 },
                 () => $"the conversion of \"{ChosenShape().Key}\" at {Positions[PosChoice].ToLowerInvariant()}, {WidthMm.ToString("0.##", System.Globalization.CultureInfo.InvariantCulture)} mm");
 
-                // the panel fits its width: the rocker and both groups follow the panel, their rows follow the group
+                // the panel fits its width: both groups follow the panel, their non-autosized rows follow the group
                 void FitWidths()
                 {
                     int w = root.ClientSize.Width;
                     if (w <= 0) return;
-                    rocker.Width = Math.Max(120, w - 16);
                     table.Width = one.Width = dash.Width = files.Width = Math.Max(120, w - 8);
                     foreach (var g in new Control[] { table, one })
                         foreach (Control c in g.Controls)
-                            if (c is not SpriteRadio) c.Width = Math.Max(60, g.ClientSize.Width - 16);
+                            if (c is not SpriteRadio && !c.AutoSize) c.Width = Math.Max(60, g.ClientSize.Width - 16);
                 }
                 root.Controls.Add(rocker); root.Controls.Add(table); root.Controls.Add(one); root.Controls.Add(dash); root.Controls.Add(files);
                 root.Resize += (_, _) => FitWidths();
@@ -4407,7 +4406,7 @@ T(GControls, "SpriteLabel / GroupBox / Tabs / TextBox / Numeric / Combo / ListBo
                     {
                         g.Width = Math.Max(120, w - 8);
                         foreach (Control c in g.Controls)
-                            if (c is not SpriteRadio) c.Width = Math.Max(60, g.ClientSize.Width - 16);
+                            if (c is not SpriteRadio && !c.AutoSize) c.Width = Math.Max(60, g.ClientSize.Width - 16);
                     }
                     int rw = Math.Max(40, (shape.ClientSize.Width - 16) / 3);
                     for (int i = 0; i < posRadios.Length; i++)
