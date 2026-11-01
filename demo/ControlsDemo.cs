@@ -259,7 +259,7 @@ namespace Sr2d64CSport
             {
                 Rows = 2,
                 Columns = 2,
-                Size = new Size(276, 74),
+                Size = new Size(276, 82),
                 Margin = new Padding(0, 2, 0, 4),
                 AccentColors = new[]
                 {
@@ -268,7 +268,9 @@ namespace Sr2d64CSport
                     Color.FromArgb(0xFF, 0x90, 0x30),
                     Color.FromArgb(0xE0, 0x60, 0xC0),
                 },
-                DepressedButtonColored = true,
+                ColoringStyle = ColoringStyle.UnpressedGray,
+                UnpressedColor = Color.FromArgb(0x48, 0x52, 0x60),
+                PressedColor = Color.FromArgb(0xFF, 0x90, 0x30),
             };
             radioGrid.SetItems(new[] { "Paint", "Alpha Blend", "Add Glow", "Blend Mix" }, OpChoice);
             animated.Add(radioGrid);
@@ -296,11 +298,25 @@ namespace Sr2d64CSport
                 }
                 finally { syncingOp = false; }
             };
-            var tDepCol = new SpriteToggle { Text = "DepressedButtonColored", Style = ToggleStyle.CheckBox, Checked = true, Size = new Size(260, 24), Margin = new Padding(0, 2, 0, 0), AccentColor = Color.FromArgb(0xFF, 0x90, 0x30) };
-            tDepCol.CheckedChanged += (_, _) => { radioGrid.DepressedButtonColored = tDepCol.Checked; Bump("DepressedButtonColored = " + tDepCol.Checked); };
-            animated.Add(tDepCol);
+            var cColoring = new SpriteCombo { Size = new Size(276, 26), Margin = new Padding(0, 2, 0, 0) };
+            cColoring.SetItems(new[]
+            {
+                "ColoringStyle: UnpressedGray",
+                "ColoringStyle: UnpressedDarkAccent",
+                "ColoringStyle: Override",
+            }, 0);
+            cColoring.SelectedIndexChanged += (_, _) =>
+            {
+                radioGrid.ColoringStyle = cColoring.SelectedIndex switch
+                {
+                    1 => ColoringStyle.UnpressedDarkAccent,
+                    2 => ColoringStyle.Override,
+                    _ => ColoringStyle.UnpressedGray,
+                };
+                Bump("ColoringStyle = " + radioGrid.ColoringStyle);
+            };
             var col4 = new FlowLayoutPanel { FlowDirection = FlowDirection.TopDown, Dock = DockStyle.Fill, WrapContents = false, Margin = new Padding(0), BackColor = Color.Transparent };
-            col4.Controls.AddRange(new Control[] { radios, Head("SpriteRadioGrid (2x2, per-button colours)"), radioGrid, tDepCol });
+            col4.Controls.AddRange(new Control[] { radios, Head("SpriteRadioGrid (2x2, per-button colours)"), radioGrid, cColoring });
             // (the colour controls moved to their own test - see ColorDemo below; the strip is about
             // knobs / sliders / wheels / buttons, the canvas shows the sprite they drive)
             strip.Controls.Add(col1, 0, 0); strip.Controls.Add(col2, 1, 0); strip.Controls.Add(col3, 2, 0); strip.Controls.Add(col4, 3, 0);

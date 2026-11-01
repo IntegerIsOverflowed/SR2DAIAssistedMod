@@ -330,7 +330,7 @@ namespace Sr2d64CSport
     public sealed class SpriteToggle : SpriteClickable
     {
         protected override AccessibleRole DefaultAccessibleRole => AccessibleRole.CheckButton;
-        ToggleStyle _style = ToggleStyle.Switch; bool _checked, _autoSize = true, _fitting; string _onText = "I", _offText = "O";
+        ToggleStyle _style = ToggleStyle.Switch; bool _checked, _autoSize = true, _onlyButtonGlows = true, _fitting; string _onText = "I", _offText = "O";
 
         public SpriteToggle()
         {
@@ -355,6 +355,8 @@ namespace Sr2d64CSport
         public string OnText { get => _onText; set { _onText = value ?? ""; Redraw(); } }
         [Category("Appearance"), DefaultValue("O"), Description("Rocker: label of the OFF half (wraps and centres inside the cap).")]
         public string OffText { get => _offText; set { _offText = value ?? ""; Redraw(); } }
+        [Category("Appearance"), DefaultValue(true), Description("Rocker: when true (default), only the rocker button itself glows in AccentColor when Checked, leaving the housing and button contour unlit. Set false to also glow the contour.")]
+        public bool OnlyButtonGlows { get => _onlyButtonGlows; set { if (_onlyButtonGlows == value) return; _onlyButtonGlows = value; Redraw(); } }
 
         protected override void Activate() { Checked = !Checked; base.Activate(); }
         protected override void OnHandleCreated(EventArgs e) { base.OnHandleCreated(e); SnapAnim(_checked ? 1f : 0f); }
@@ -412,13 +414,44 @@ namespace Sr2d64CSport
                 }
                 case ToggleStyle.Ellipse:
                 {
-                    float ry = h / 2f - 1.5f, rx = sw / 2f - 1.5f, cx = sw / 2f, cy = h / 2f;
-                    s.FillEllipse(cx, cy, rx, ry, Mix(BackColor, ThumbColor, 0.1f), SR2D.LineOp.Set, true);
-                    s.DrawEllipse(cx, cy, rx, ry, Lerp(rim, Accent, t), rimW * 1.2f, true);
-                    float cr = ry - rimW * 2.5f, x0 = cx - rx + ry, x1 = cx + rx - ry, ccx = x0 + (x1 - x0) * t;
-                    if (down) cr *= 0.9f;
-                    s.FillCircle(ccx, cy, cr, Lerp(off, onCol, t), SR2D.LineOp.Set, true);
-                    s.FillCircle(ccx - cr * 0.2f, cy - cr * 0.2f, cr * 0.45f, Lerp(Mix(BackColor, ThumbColor, 0.4f), onRim, t), SR2D.LineOp.Set, true);
+                    // 3D elliptical well + 3D circular button cap in the original Rocker style:
+                    // recessed dark well with a top inner shadow band, and a raised circular cap with a dark 3D cylinder
+                    // wall below it and a horizontal-clipped upper 45% bevel highlight on top (depresses into the well when pressed).
+                    float lift = Math.Max(2.5f, (h - 3) * 0.16f);
+                    float inset = Math.Max(1f, rimW);
+                    float rx = sw / 2f - 1.5f, ry = Math.Max(3f, (h - lift * 0.7f) / 2f - 1.5f);
+                    float cx = sw / 2f, cy = lift * 0.45f + (h - lift * 0.45f) / 2f;
+                    int wellCol = Mix(BackColor, Black, 0.50f);
+                    int wellShadow = Mix(BackColor, Black, 0.72f);
+                    s.FillEllipse(cx, cy, rx, ry, wellCol, SR2D.LineOp.Set, true);
+                    int shBot = Math.Clamp((int)MathF.Round(cy - ry + inset + Math.Max(2f, ry * 0.42f)), 1, h);
+                    using (var sh = s.CreateView(new Rectangle(0, 0, sw, shBot)))
+                        sh.FillEllipse(cx, cy, Math.Max(1f, rx - inset), Math.Max(1f, ry - inset), wellShadow, SR2D.LineOp.Set, true);
+                    int ellRim = Lerp(rim, Mix(AccentRaw, BackColor, 0.30f), t);
+                    s.DrawEllipse(cx, cy, rx, ry, ellRim, rimW * 1.2f, true);
+
+                    float rxIn = Math.Max(2f, rx - inset - 0.5f), ryIn = Math.Max(2f, ry - inset - 0.5f);
+                    float cr = ryIn * 0.84f;
+                    float ratio = Math.Clamp(cr / ryIn, 0f, 0.98f);
+                    float dx = Math.Max(cr * 0.4f, rxIn * MathF.Sqrt(1f - ratio * ratio) - cr * 0.35f);
+                    float x0 = cx - dx, x1 = cx + dx, ccx = x0 + (x1 - x0) * t;
+                    float up = down ? 0.45f : 1f;
+                    float ccy = cy - lift * up;
+
+                    int upFace = Mix(BackColor, ThumbColor, hot ? 0.44f : 0.38f);
+                    int upHi = Mix(BackColor, ThumbColor, hot ? 0.64f : 0.58f);
+                    int face = Lerp(upFace, Accent, t);
+                    int hi = Lerp(upHi, Mix(AccentRaw, White, 0.28f), t);
+                    int sideCol = Mix(face, Black, 0.50f);
+
+                    // 3D cylindrical side wall below the raised circular cap (anchored at well level cy)
+                    s.FillCircle(ccx, cy, cr, sideCol, SR2D.LineOp.Set, true);
+                    // Main circular cap face shifted up by -lift * up
+                    s.FillCircle(ccx, ccy, cr, face, SR2D.LineOp.Set, true);
+                    // Upper 45% inset bevel highlight (matching the original Rocker cap highlight)
+                    int hlBot = Math.Clamp((int)MathF.Round(ccy - cr + (2f * cr) * 0.45f), 1, h);
+                    using (var hl = s.CreateView(new Rectangle(0, 0, sw, hlBot)))
+                        hl.FillCircle(ccx, ccy, Math.Max(1f, cr - inset), hi, SR2D.LineOp.Set, true);
                     break;
                 }
                 case ToggleStyle.Rocker:
@@ -436,14 +469,15 @@ namespace Sr2d64CSport
                     float rad = Math.Min(bw, bh) * 0.14f;
                     int bezelCol = Mix(BackColor, Black, 0.45f);
                     int cavityCol = Mix(BackColor, Black, 0.72f);
-                    int bezelRim = Lerp(rim, Mix(AccentRaw, ThumbColor, 0.35f), t);
+                    int bezelRim = _onlyButtonGlows ? rim : Lerp(rim, Mix(AccentRaw, ThumbColor, 0.35f), t);
                     FillRound(s, bx, by, bw, bh, rad, bezelCol);
                     DrawRound(s, bx, by, bw, bh, rad, bezelRim, rimW);
                     float pad = Math.Max(1.5f, rimW + 1f);
                     float wx = bx + pad, wy = by + pad, ww = bw - 2f * pad, wh = bh - 2f * pad;
                     FillRound(s, wx, wy, ww, wh, Math.Max(0f, rad - pad), cavityCol);
 
-                    float leftUp = t, rightUp = 1f - t;
+                    float tiltT = down ? (t + (0.5f - t) * 0.22f) : t;
+                    float leftUp = tiltT, rightUp = 1f - tiltT;
                     float rx0 = wx + 1f, rx1 = wx + ww - 1f, rcx = (rx0 + rx1) * 0.5f;
                     float baseTop = wy + 0.5f, baseBot = wy + wh - 0.5f;
                     float pivLift = lift * 0.12f;
@@ -459,7 +493,7 @@ namespace Sr2d64CSport
                     float botR = baseBot - lift * rightUp;
 
                     int offBody = Mix(BackColor, ThumbColor, hot ? 0.40f : 0.33f);
-                    int bodyCol = Lerp(offBody, onCol, t);
+                    int bodyCol = Lerp(offBody, Accent, t);
                     int skirtCol = Mix(bodyCol, Black, 0.46f);
                     int cheekCol = Mix(bodyCol, Black, 0.34f);
                     int skirtEdge = Mix(bodyCol, Black, 0.25f);
@@ -532,8 +566,8 @@ namespace Sr2d64CSport
                     sheenR[3] = new PointF(rcx, midM);
                     s.FillPolygon(sheenR, Mix(rightFace, White, 0.12f + 0.10f * rightUp), SR2D.LineOp.Set, true);
 
-                    // Continuous outer rim of the one-piece rocker cap + central pivot crease highlight
-                    int capEdgeCol = Mix(bodyCol, White, 0.30f);
+                    // Continuous outer rim of the one-piece rocker cap + central pivot crease
+                    int capEdgeCol = _onlyButtonGlows ? skirtEdge : Mix(bodyCol, White, 0.30f);
                     Span<PointF> capOutline = stackalloc PointF[6];
                     capOutline[0] = new PointF(topLx, topL);
                     capOutline[1] = new PointF(rcx, topM);
@@ -542,7 +576,8 @@ namespace Sr2d64CSport
                     capOutline[4] = new PointF(rcx, botM);
                     capOutline[5] = new PointF(botLx, botL);
                     s.DrawPolygon(capOutline, capEdgeCol, 1.2f, true);
-                    s.DrawWideLine(rcx, topM + 1f, rcx, botM - 1f, Mix(bodyCol, White, 0.38f), Math.Max(1f, rimW * 0.9f), true);
+                    int creaseCol = _onlyButtonGlows ? Mix(bodyCol, Black, 0.18f) : Mix(bodyCol, White, 0.38f);
+                    s.DrawWideLine(rcx, topM + 1f, rcx, botM - 1f, creaseCol, Math.Max(1f, rimW * 0.9f), true);
 
                     // Wrapped and centred labels on each half of the top cap
                     int ts = AutoTextScale(h * 2);
@@ -679,12 +714,22 @@ namespace Sr2d64CSport
         }
     }
 
+    /// <summary>How unpressed (raised) and pressed (depressed) button caps are coloured in a <see cref="SpriteRadioGrid"/>.</summary>
+    public enum ColoringStyle
+    {
+        /// <summary>Unpressed (raised) buttons are neutral grey (<see cref="SpriteControlBase.ThumbColor"/>); the pressed (depressed) button lights up in its per-button accent colour.</summary>
+        UnpressedGray,
+        /// <summary>Unpressed (raised) buttons use a darker shade of their per-button accent colour; the pressed (depressed) button lights up in its full per-button accent colour.</summary>
+        UnpressedDarkAccent,
+        /// <summary>Override mode: all unpressed (raised) buttons use <see cref="SpriteRadioGrid.UnpressedColor"/> and the pressed (depressed) button uses <see cref="SpriteRadioGrid.PressedColor"/>.</summary>
+        Override,
+    }
+
     /// <summary>
-    /// Multi-button interlocking radio switch grid (<see cref="Rows"/> x <see cref="Columns"/> push-button caps in a shared dark well):
+    /// Multi-button interlocking 3D radio switch grid (<see cref="Rows"/> x <see cref="Columns"/> sculpted push-button caps in recessed wells):
     /// only one button can be depressed (<see cref="SelectedIndex"/>) at a time, and pressing any button automatically unpresses the rest.
-    /// Each button cap can have its own accent colour via <see cref="AccentColors"/> (or <see cref="AccentColorList"/>): raised buttons
-    /// show their accent colour with a top highlight and 3D side wall; the depressed button shows a darker shade of its accent colour
-    /// when <see cref="DepressedButtonColored"/> is true, or the neutral dark thumb/well shade when false. Labels wrap and centre inside each cap.
+    /// Raised caps stand proud above the well rim with a 3D bottom wall and upper 45% bevel highlight (matching the original rocker look),
+    /// while the depressed cap sinks into the well under the top rim shadow. Colouring is controlled by <see cref="ColoringStyle"/>.
     /// </summary>
     [ToolboxBitmap(typeof(SpriteRadioGrid), "SpriteRadio.bmp")]
     [DefaultEvent("SelectedIndexChanged"), DefaultProperty("SelectedIndex"), DefaultBindingProperty("SelectedIndex")]
@@ -692,7 +737,10 @@ namespace Sr2d64CSport
     {
         protected override AccessibleRole DefaultAccessibleRole => AccessibleRole.Grouping;
         int _rows = 1, _cols = 2, _selected, _prevSelected, _hoverCell = -1, _pressCell = -1;
-        bool _depressedColored = true;
+        ColoringStyle _coloringStyle = ColoringStyle.UnpressedGray;
+        Color _unpressedColor = Color.FromArgb(0x48, 0x52, 0x60);
+        Color _pressedColor = Color.FromArgb(0xFF, 0x90, 0x30);
+        bool _fromPress;
         readonly List<string> _items = new();
         int[] _palette = Array.Empty<int>();
 
@@ -733,9 +781,10 @@ namespace Sr2d64CSport
                 if (_selected == v) return;
                 _prevSelected = _selected;
                 _selected = v;
+                bool pressedStart = _fromPress;
                 SelectedIndexChanged?.Invoke(this, EventArgs.Empty);
-                SnapAnim(0f);
-                AnimateTo(1f, 150);
+                SnapAnim(pressedStart ? 0.32f : 0f);
+                AnimateTo(1f, pressedStart ? 110 : 140);
             }
         }
 
@@ -747,11 +796,45 @@ namespace Sr2d64CSport
         [Browsable(false), DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
         public int SelectedColumn => _cols > 0 ? _selected % _cols : 0;
 
-        [Category("Appearance"), DefaultValue(true), Description("When true, the depressed (selected) button uses a darker shade of its accent colour. When false, the depressed button uses the neutral dark thumb/well shade.")]
+        [Category("Appearance"), DefaultValue(ColoringStyle.UnpressedGray), Description("How unpressed (raised) and pressed (depressed) caps are coloured: UnpressedGray (grey raised, per-button accent pressed), UnpressedDarkAccent (darker per-button accent raised, full accent pressed), or Override (UnpressedColor / PressedColor).")]
+        public ColoringStyle ColoringStyle
+        {
+            get => _coloringStyle;
+            set { if (_coloringStyle == value) return; _coloringStyle = value; Redraw(); }
+        }
+
+        [Category("Appearance"), DefaultValue(typeof(Color), "72, 82, 96"), Description("ColoringStyle.Override: colour of all unpressed (raised) button caps.")]
+        public Color UnpressedColor
+        {
+            get => _unpressedColor;
+            set { if (_unpressedColor == value) return; _unpressedColor = value; Redraw(); }
+        }
+
+        [Category("Appearance"), DefaultValue(typeof(Color), "255, 144, 48"), Description("ColoringStyle.Override: colour of the pressed (depressed) button cap.")]
+        public Color PressedColor
+        {
+            get => _pressedColor;
+            set { if (_pressedColor == value) return; _pressedColor = value; Redraw(); }
+        }
+
+        // Hidden compatibility shims so older code/tests referencing the boolean flags still compile cleanly
+        [Browsable(false), EditorBrowsable(EditorBrowsableState.Never), DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
         public bool DepressedButtonColored
         {
-            get => _depressedColored;
-            set { if (_depressedColored == value) return; _depressedColored = value; Redraw(); }
+            get => _coloringStyle != ColoringStyle.Override || _pressedColor != Color.Empty;
+            set { Redraw(); }
+        }
+        [Browsable(false), EditorBrowsable(EditorBrowsableState.Never), DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
+        public bool DepressedButtonGlows
+        {
+            get => true;
+            set { Redraw(); }
+        }
+        [Browsable(false), EditorBrowsable(EditorBrowsableState.Never), DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden)]
+        public bool RaisedButtonsColored
+        {
+            get => _coloringStyle == ColoringStyle.UnpressedDarkAccent;
+            set { _coloringStyle = value ? ColoringStyle.UnpressedDarkAccent : ColoringStyle.UnpressedGray; Redraw(); }
         }
 
         /// <summary>Per-button accent colours (cycled when shorter than <see cref="ButtonCount"/>; empty = use <see cref="SpriteControlBase.AccentColor"/> for every button).</summary>
@@ -890,7 +973,12 @@ namespace Sr2d64CSport
         {
             int target = e.Button == MouseButtons.Left && ClientRectangle.Contains(e.Location) ? HitCell(e.X, e.Y) : -1;
             int pressed = _pressCell; _pressCell = -1;
-            if (target >= 0 && target == pressed) SelectedIndex = target;
+            if (target >= 0 && target == pressed)
+            {
+                _fromPress = true;
+                try { SelectedIndex = target; }
+                finally { _fromPress = false; }
+            }
             base.OnMouseUp(e);
         }
         protected override bool IsInputKey(Keys keyData)
@@ -923,82 +1011,139 @@ namespace Sr2d64CSport
             if (w < 6 || h < 6) return;
             bool hot = IsHot && Enabled;
             float anim = IsAnimating || Animated ? AnimT : 1f;
-            float rimW = Math.Max(1f, Math.Min(w / Math.Max(1f, _cols), h / Math.Max(1f, _rows)) * 0.05f);
-            float cellW = (w - 3f) / _cols, cellH = (h - 3f) / _rows;
-            float lift = Math.Max(2f, Math.Min(cellH - 3f, 44f) * 0.16f);
-            float x0 = 1.5f, y0 = 1.5f + lift, ww = w - 3f, wellH = h - 3f - lift;
-            if (wellH < 4f) { y0 = 1.5f; wellH = h - 3f; lift = 0f; }
-            float rad = Math.Min(cellW, wellH / _rows) * 0.18f;
-
-            int wellCol = Mix(BackColor, TrackColor, 0.12f), wallCol = Mix(BackColor, Black, 0.45f);
-            int rimCol = Mix(BackColor, TrackColor, hot ? 0.68f : 0.52f);
-            int shadow = Mix(BackColor, Black, 0.58f);
-            FillRound(s, x0, y0, ww, wellH, rad, wellCol);
-            DrawRound(s, x0, y0, ww, wellH, rad, rimCol, rimW);
-
-            float rowWellH = wellH / _rows;
-            for (int c = 1; c < _cols; c++)
-                s.DrawWideLine(x0 + c * cellW, y0 + 1f, x0 + c * cellW, y0 + wellH - 1f, wallCol, Math.Max(1f, rimW), true);
-            for (int r = 1; r < _rows; r++)
-                s.DrawWideLine(x0 + 1f, y0 + r * rowWellH, x0 + ww - 1f, y0 + r * rowWellH, wallCol, Math.Max(1f, rimW), true);
-
-            int ts = AutoTextScale((int)MathF.Round(rowWellH * 2f));
+            float x = 1.5f, ww = w - 3f;
+            float cellW = ww / _cols;
+            float rowGap = _rows > 1 ? 3f : 0f;
+            float rowSliceH = (h - 3f - (_rows - 1) * rowGap) / _rows;
+            if (rowSliceH < 6f) { rowGap = 0f; rowSliceH = (h - 3f) / _rows; }
+            float lift = Math.Max(2.5f, Math.Min(rowSliceH - 4f, 48f) * 0.20f);
+            float wellH = rowSliceH - lift;
+            if (wellH < 4f) { wellH = rowSliceH; lift = 0f; }
+            float rad = Math.Min(cellW, wellH) * 0.18f;
+            float rimW = Math.Max(1f, Math.Min(cellW, rowSliceH) * 0.05f);
             float inset = Math.Max(1f, rimW);
+
+            int wellCol = Mix(BackColor, Black, 0.55f);
+            int seamCol = Mix(BackColor, Black, 0.72f);
+            int rimCol = Mix(BackColor, ThumbColor, hot ? 0.62f : 0.50f);
+            int shadow = Mix(BackColor, Black, 0.65f);
+            int ts = AutoTextScale((int)MathF.Round(rowSliceH * 2f));
+
+            int unpOverride = Enabled ? (_unpressedColor.ToArgb() | unchecked((int)0xFF000000)) : Mix(_unpressedColor.ToArgb(), BackColor, 0.5f);
+            int prsOverride = Enabled ? (_pressedColor.ToArgb() | unchecked((int)0xFF000000)) : Mix(_pressedColor.ToArgb(), BackColor, 0.5f);
 
             for (int r = 0; r < _rows; r++)
             {
+                float rowTop = 1.5f + r * (rowSliceH + rowGap);
+                float wy = rowTop + lift;
+
+                // Draw the row's recessed well and its rim first (so raised caps stand proud above the top well rim!)
+                FillRound(s, x, wy, ww, wellH, rad, wellCol);
+                DrawRound(s, x, wy, ww, wellH, rad, rimCol, rimW);
+                for (int c = 1; c < _cols; c++)
+                    s.DrawWideLine(x + c * cellW, wy + 1f, x + c * cellW, wy + wellH - 1f, seamCol, Math.Max(1f, rimW), true);
+
+                float capX = x + inset, capW = ww - 2f * inset, capH = wellH - 2f * inset, capRad = Math.Max(0f, rad - inset);
+                int rowY = Math.Max(0, (int)MathF.Floor(rowTop));
+                int rowH = Math.Min(h - rowY, (int)MathF.Ceiling(rowSliceH + 1f));
+                if (rowH <= 0) continue;
+
                 for (int c = 0; c < _cols; c++)
                 {
                     int idx = r * _cols + c;
                     bool isSel = idx == _selected;
-                    // up: 1 = fully raised (unpressed), 0 = fully depressed (selected)
+                    // up: 1 = fully raised (standing proud above the well rim), 0 = fully depressed (sunk into the well)
                     float up = isSel ? (1f - anim) : (idx == _prevSelected && _prevSelected != _selected ? anim : 1f);
                     if (_prevSelected == _selected) up = isSel ? 0f : 1f;
-                    if (IsPressed && _pressCell == idx) up *= 0.5f;
 
-                    float cx0 = x0 + c * cellW, cy0 = y0 + r * rowWellH;
-                    float capX = cx0 + inset, capW = cellW - 2f * inset, capH = rowWellH - 2f * inset;
-                    float capRad = Math.Max(0f, rad - inset);
-                    float dy = -lift * up;
+                    bool cellPressed = IsPressed && _pressCell == idx && (_hoverCell == idx || _hoverCell == -1);
+                    float colorUp;
+                    if (cellPressed && !isSel)
+                    {
+                        // Holding mouse down on a raised cap pushes it partway down while keeping its solid raised colour
+                        up = Math.Min(up, 0.68f);
+                        colorUp = 1f;
+                    }
+                    else
+                    {
+                        colorUp = up;
+                    }
 
                     int btnAccent = GetButtonAccent(idx);
                     bool cellHot = hot && _hoverCell == idx;
-                    int upFace = cellHot ? Mix(btnAccent, White, 0.14f) : btnAccent;
-                    int upHi = Mix(upFace, White, 0.22f);
-                    int downFace = _depressedColored ? Mix(btnAccent, Black, 0.42f) : Mix(BackColor, ThumbColor, 0.14f);
-                    int face = Lerp(downFace, upFace, up);
-                    int sideWall = Mix(btnAccent, Black, 0.58f);
-
-                    int vx = (int)MathF.Round(cx0), vy = (int)MathF.Max(0f, MathF.Round(cy0 - lift));
-                    int vw = Math.Max(1, (int)MathF.Round(cellW)), vh = Math.Max(1, (int)MathF.Round(rowWellH + lift));
-                    using (var v = s.CreateView(new Rectangle(vx, vy, vw, vh)))
+                    int upFace, upHi, sideCol, downFace;
+                    switch (_coloringStyle)
                     {
+                        case ColoringStyle.UnpressedDarkAccent:
+                            upFace = Mix(btnAccent, BackColor, cellHot ? 0.34f : 0.42f);
+                            upHi = Mix(upFace, White, 0.25f);
+                            sideCol = Mix(upFace, Black, 0.50f);
+                            downFace = cellHot ? Mix(btnAccent, White, 0.12f) : btnAccent;
+                            break;
+                        case ColoringStyle.Override:
+                            upFace = cellHot ? Mix(unpOverride, White, 0.12f) : unpOverride;
+                            upHi = Mix(upFace, White, 0.25f);
+                            sideCol = Mix(upFace, Black, 0.50f);
+                            downFace = cellHot ? Mix(prsOverride, White, 0.12f) : prsOverride;
+                            break;
+                        default: // ColoringStyle.UnpressedGray
+                            upFace = Mix(BackColor, ThumbColor, cellHot ? 0.44f : 0.38f);
+                            upHi = Mix(BackColor, ThumbColor, cellHot ? 0.64f : 0.58f);
+                            sideCol = Mix(upFace, Black, 0.48f);
+                            downFace = cellHot ? Mix(btnAccent, White, 0.12f) : btnAccent;
+                            break;
+                    }
+
+                    int face = Lerp(downFace, upFace, colorUp);
+                    float dy = -lift * up;
+                    float capY = wy + inset + dy;
+
+                    int hx = Math.Max(0, (int)MathF.Round(x + c * cellW));
+                    int hxNext = Math.Min(w, (int)MathF.Round(x + (c + 1) * cellW));
+                    int hw = Math.Max(1, hxNext - hx);
+
+                    using (var v = s.CreateView(new Rectangle(hx, rowY, hw, rowH)))
+                    {
+                        // 1) 3D vertical side wall below the raised cap, anchored at fixed wy + inset (inside the well!)
                         if (up > 0.02f)
-                            FillRound(v, capX, cy0 + inset + dy + lift, capW, capH, capRad, sideWall);
-                        FillRound(v, capX, cy0 + inset + dy, capW, capH, capRad, face);
+                            FillRound(v, capX, wy + inset, capW, capH, capRad, sideCol);
+
+                        // 2) Solid cap face at capY = wy + inset + dy
+                        FillRound(v, capX, capY, capW, capH, capRad, face);
+
+                        // 3) Sculpted bevel highlight on the upper 45% of a raised cap (moves with capY)
                         if (up > 0.02f)
                         {
-                            int hlH = Math.Max(1, (int)(cy0 + inset + dy + capH * 0.45f) - vy);
-                            using var hl = v.CreateView(new Rectangle(vx, vy, vw, hlH));
-                            FillRound(hl, capX + inset, cy0 + inset + dy + inset, capW - 2f * inset, capH - 2f * inset, Math.Max(0f, capRad - inset), Lerp(face, upHi, up));
+                            int hlBot = Math.Clamp((int)MathF.Round(capY + capH * 0.45f), rowY + 1, rowY + rowH);
+                            using var hl = v.CreateView(new Rectangle(hx, rowY, hw, hlBot - rowY));
+                            FillRound(hl, capX + inset, capY + inset, capW - 2f * inset, capH - 2f * inset, Math.Max(0f, capRad - inset), Lerp(face, upHi, colorUp));
                         }
-                        if (up < 0.98f)
+
+                        // 4) Top-edge shadow band under the well rim when sunk into the well (moves with capY, never cuts across a raised cap)
+                        if (up < 0.45f && !(cellPressed && !isSel))
                         {
-                            int shY = (int)MathF.Round(cy0 + inset), shH = Math.Max(1, (int)MathF.Round(Math.Max(1f, capH * 0.22f)));
-                            using var sh = v.CreateView(new Rectangle(vx, shY, vw, shH));
-                            FillRound(sh, capX, cy0 + inset + dy, capW, capH, capRad, Lerp(Mix(face, shadow, 0.55f), face, up));
+                            float shT = (0.45f - up) / 0.45f;
+                            int shTop = Math.Clamp((int)MathF.Round(capY), rowY, rowY + rowH - 1);
+                            int shH = Math.Clamp((int)MathF.Round(Math.Max(1f, capH * 0.22f)), 1, rowY + rowH - shTop);
+                            using var sh = v.CreateView(new Rectangle(hx, shTop, hw, shH));
+                            FillRound(sh, capX, capY, capW, capH, capRad, Lerp(face, Mix(face, shadow, 0.52f), shT));
                         }
                     }
 
+                    // Crisp seam line between columns
+                    if (c > 0)
+                        s.DrawWideLine(x + c * cellW, Math.Max(rowTop, capY), x + c * cellW, wy + wellH - 1f, seamCol, Math.Max(1f, rimW * 0.85f), true);
+
+                    // Wrapped and centred label inside the cap
                     string lbl = idx < _items.Count ? _items[idx] : (idx + 1).ToString(CultureInfo.InvariantCulture);
                     if (lbl.Length > 0)
                     {
-                        int upTextCol = Enabled ? unchecked((int)0xFFFFFFFF) : Fore;
-                        int downTextCol = _depressedColored ? (Enabled ? unchecked((int)0xFFFFFFFF) : Fore) : Mix(BackColor, ForeColor, 0.65f);
-                        int lc = Lerp(downTextCol, upTextCol, up);
-                        float textCx = cx0 + cellW * 0.5f;
-                        float textCy = cy0 + rowWellH * 0.5f + dy + (1f - up) * 1f;
-                        DrawWrappedCentered(s, textCx, textCy, Math.Max(4, (int)capW - 4), Math.Max(4, (int)capH - 2), lbl, lc, ts);
+                        int litLbl = Enabled ? unchecked((int)0xFFFFFFFF) : Fore;
+                        int unlitLbl = Mix(BackColor, ForeColor, 0.88f);
+                        int lc = Lerp(litLbl, unlitLbl, colorUp);
+                        float textCx = x + (c + 0.5f) * cellW;
+                        float textCy = capY + capH * 0.5f;
+                        DrawWrappedCentered(s, textCx, textCy, Math.Max(4, hw - 4), Math.Max(4, (int)capH - 2), lbl, lc, ts);
                     }
                 }
             }
