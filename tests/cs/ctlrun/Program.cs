@@ -83,21 +83,27 @@ static class P {
       int wWithText = tEmpty.Width;
       tEmpty.Text = "";
       Chk(wWithText > tEmpty.Width, $"SpriteToggle AutoSize grows with Text ({wWithText}) and shrinks back when cleared ({tEmpty.Width})");
+      Chk(tEmpty.OnlyButtonGlows, "SpriteToggle OnlyButtonGlows defaults to true");
+      tEmpty.Checked = true; tEmpty.RenderOnce();
+      tEmpty.OnlyButtonGlows = false; tEmpty.RenderOnce();
       var rg = new SpriteRadioGrid
       {
         Rows = 2,
         Columns = 2,
-        Size = new Size(180, 64),
+        Size = new Size(180, 68),
         AccentColors = new[] { Color.Red, Color.Green, Color.Blue, Color.Orange },
-        DepressedButtonColored = true,
+        ColoringStyle = ColoringStyle.UnpressedGray,
+        UnpressedColor = Color.DimGray,
+        PressedColor = Color.Gold,
       };
+      Chk(rg.ColoringStyle == ColoringStyle.UnpressedGray, "SpriteRadioGrid ColoringStyle defaults to UnpressedGray");
       rg.SetItems(new[] { "ONE SHAPE", "TWO", "THREE", "FOUR" }, 0);
       int rgEvents = 0;
       rg.SelectedIndexChanged += (_, _) => rgEvents++;
-      rg.Tap(135, 48); // bottom-right cell (row 1, col 1 -> index 3)
+      rg.Down(135, 48); rg.RenderOnce(); rg.Up(135, 48); // press & release bottom-right cell (row 1, col 1 -> index 3)
       Chk(rg.SelectedIndex == 3 && rg.SelectedRow == 1 && rg.SelectedColumn == 1 && rgEvents == 1, $"SpriteRadioGrid selects cell 3 on tap (sel={rg.SelectedIndex}, events={rgEvents})");
-      rg.DepressedButtonColored = false;
-      rg.RenderOnce();
+      rg.ColoringStyle = ColoringStyle.UnpressedDarkAccent; rg.RenderOnce();
+      rg.ColoringStyle = ColoringStyle.Override; rg.RenderOnce();
     }
     Save(c, "buttons.rgba");
   }
