@@ -614,7 +614,7 @@ namespace Sr2d64CSport
                     // otherwise a sharp inner corner or tight bend at large stroke widths shoots a bow-tie spike
                     // past the ends of the segments and forms phantom loops outside the shape.
                     double sBack = den > 1e-9 ? absD * Math.Abs(cross) / den : 1e30;
-                    if (den > 1e-9 && sBack <= 0.95 * Math.Min(l0, l1))
+                    if (den > 1e-9 && (Math.Sqrt(2 / den) <= SmoothBisectorLimit || sBack <= 0.95 * Math.Min(l0, l1)))
                         outp.Add(cur + (n0 + n1) * (d / den));
                     else
                     {
