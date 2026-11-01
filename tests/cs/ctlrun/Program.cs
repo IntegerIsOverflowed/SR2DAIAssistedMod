@@ -433,6 +433,15 @@ static class P {
     // combo
     var combo = new SpriteCombo { Size = new Size(220, 24), Placeholder = "pick one" }; int cch = 0; combo.SelectedIndexChanged += (_, _) => cch++;
     combo.SetItems(new[]{"Row", "Column", "Diagonal", "Ring"}, 0);
+    {
+      var wrapKnob = new SpriteKnob { Minimum = 0, Maximum = 100, Value = 0, Gauge = KnobGauge.Arc, DragMode = KnobDragMode.Angular, Size = new Size(100, 100) };
+      Chk(wrapKnob.PreventWrapJump, "knob: PreventWrapJump is true by default");
+      wrapKnob.Down(20, 80); // near bottom-left (Minimum = 0)
+      wrapKnob.Move(50, 95); // drag across bottom gap toward right side
+      wrapKnob.Move(80, 80); // near bottom-right (Maximum = 100)
+      wrapKnob.Up(80, 80);
+      Chk(wrapKnob.Value == 0, $"knob: PreventWrapJump prevented jump from Min to Max across Arc gap (got {wrapKnob.Value})");
+    }
     combo.Key(Keys.Down); combo.Key(Keys.Down); combo.Wheel(10, 10, 120); combo.Key(Keys.End); combo.Key(Keys.D0 + ('R' - '0'));
     if (combo.SelectedIndex != 0 || combo.SelectedItem != "Row") Fail($"combo keys: {combo.SelectedIndex} {combo.SelectedItem}");
     Console.WriteLine($"combo: {cch} SelectedIndexChanged events (expect 6: SetItems + 5 keys)"); if (cch != 6) Fail("combo events");

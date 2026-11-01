@@ -2,7 +2,7 @@
 using System; using System.Drawing;
 namespace System.Windows.Forms {
   public enum MouseButtons { None, Left, Right, Middle }
-  [Flags] public enum Keys { None = 0, Back = 8, Left = 37, Up = 38, Right = 39, Down = 40, Home = 36, End = 35, PageUp = 33, PageDown = 34, Space = 32, Enter = 13, Escape = 27, Delete = 46, Insert = 45, Add = 107, Subtract = 109, Oemplus = 187, OemMinus = 189, Apps = 93, Menu = 18, C = 67, F = 70, I = 73, N = 78, V = 86, X = 88, D0 = 48, NumPad0 = 96, A = 65, Z = 90, Shift = 0x10000, Control = 0x20000, Alt = 0x40000, KeyCode = 0xFFFF, Modifiers = unchecked((int)0xFFFF0000) }
+  [Flags] public enum Keys { None = 0, Back = 8, Left = 37, Up = 38, Right = 39, Down = 40, Home = 36, End = 35, PageUp = 33, PageDown = 34, Space = 32, Enter = 13, Escape = 27, Delete = 46, Insert = 45, Add = 107, Subtract = 109, Oemplus = 187, OemMinus = 189, Apps = 93, Menu = 18, F4 = 115, C = 67, F = 70, I = 73, N = 78, V = 86, X = 88, D0 = 48, NumPad0 = 96, A = 65, Z = 90, Shift = 0x10000, Control = 0x20000, Alt = 0x40000, KeyCode = 0xFFFF, Modifiers = unchecked((int)0xFFFF0000) }
   public enum Orientation { Horizontal, Vertical }
   public class MouseEventArgs : EventArgs { public MouseButtons Button; public int X, Y, Delta; public int Clicks { get; } public Point Location => new Point(X, Y); public MouseEventArgs(MouseButtons b, int clicks, int x, int y, int delta) { Button = b; Clicks = clicks; X = x; Y = y; Delta = delta; } }
   public class HandledMouseEventArgs : MouseEventArgs { public bool Handled; public HandledMouseEventArgs(MouseButtons b, int c, int x, int y, int d) : base(b, c, x, y, d) { } }
@@ -23,7 +23,8 @@ namespace System.Windows.Forms {
   public struct Message { public int Msg; public IntPtr WParam, LParam, Result; }
   public interface IMessageFilter { bool PreFilterMessage(ref Message m); }
   public static class Application { public static System.Collections.Generic.List<IMessageFilter> Filters = new(); public static void AddMessageFilter(IMessageFilter f) => Filters.Add(f); public static void RemoveMessageFilter(IMessageFilter f) => Filters.Remove(f); }
-  public enum FormBorderStyle { None, FixedSingle, Sizable, FixedDialog } public enum FormStartPosition { Manual, CenterScreen, CenterParent } public enum DockStyle { None, Top, Bottom, Left, Right, Fill } public enum DialogResult { None, OK, Cancel }
+  public enum FormBorderStyle { None, FixedSingle, Sizable, FixedDialog } public enum FormStartPosition { Manual, CenterScreen, CenterParent } public enum DockStyle { None, Top, Bottom, Left, Right, Fill } public enum DialogResult { None, OK, Cancel, Abort, Retry, Ignore, Yes, No }
+  public interface IButtonControl { DialogResult DialogResult { get; set; } void NotifyDefault(bool value); void PerformClick(); }
   public class Screen { public Rectangle WorkingArea = new Rectangle(0, 0, 1920, 1080); public Rectangle Bounds = new Rectangle(0, 0, 1920, 1080); public static Screen FromPoint(Point p) => new Screen(); }
   public class Form : Control {
     public FormBorderStyle FormBorderStyle { get; set; } public bool ShowInTaskbar { get; set; } public FormStartPosition StartPosition { get; set; } public bool TopMost { get; set; }
@@ -31,7 +32,7 @@ namespace System.Windows.Forms {
     // (the headless checks assert the maths and the events, not the modality)
     public bool MinimizeBox { get; set; } public bool MaximizeBox { get; set; } public bool KeyPreview { get; set; }
     public DialogResult DialogResult { get; set; } = DialogResult.None;
-    public Control? AcceptButton { get; set; } public Control? CancelButton { get; set; }
+    public IButtonControl? AcceptButton { get; set; } public IButtonControl? CancelButton { get; set; }
     public void Close() { Visible = false; }
     public DialogResult ShowDialog(Form? owner) { Show(); return DialogResult; }
     protected virtual bool ShowWithoutActivation => false; protected override void WndProc(ref Message m) { }
@@ -52,7 +53,7 @@ namespace System.Windows.Forms {
     protected virtual void OnControlAdded(ControlEventArgs e) { } protected virtual void OnControlRemoved(ControlEventArgs e) { } protected virtual void OnKeyPress(KeyPressEventArgs e) { }
     protected virtual void OnVisibleChanged(EventArgs e) { } protected virtual void OnParentVisibleChanged(EventArgs e) { }   // raised by the Visible setter (see above)
     public void Type(string s) { foreach (char c in s) OnKeyPress(new KeyPressEventArgs(c)); }
-    public bool Enabled { get; set; } = true; bool _visible = true;   // real-WinForms semantics: the getter walks the ancestor chain (a child of a hidden form
+    public bool Enabled { get; set; } = true; public bool CanSelect => Enabled && Visible; bool _visible = true;   // real-WinForms semantics: the getter walks the ancestor chain (a child of a hidden form
     // reports Visible == false), flips raise OnVisibleChanged here and OnParentVisibleChanged on the children
     public bool Visible { get { var c = this; while (c != null) { if (!c._visible) return false; c = c._parent!; } return true; } set { if (_visible == value) return; _visible = value; OnVisibleChanged(EventArgs.Empty); foreach (Control k in Controls) k.OnParentVisibleChanged(EventArgs.Empty); } } public Rectangle Bounds { get => new Rectangle(Location, Size); set { Location = value.Location; Size = value.Size; } } public Point Location { get; set; }
     protected virtual CreateParams CreateParams => new CreateParams(); protected virtual void OnResize(EventArgs e) { } public Point PointToScreen(Point p) => p; public Point PointToClient(Point p) => p; public Rectangle RectangleToScreen(Rectangle r) { r.Offset(Location); return r; } public bool TabStop { get; set; } public AccessibleRole AccessibleRole { get; set; } public string? AccessibleName { get; set; } public virtual Cursor Cursor { get; set; } = Cursors.Hand; bool _cap; public bool Capture { get => _cap; set { if (_cap == value) return; _cap = value; if (!value) OnMouseCaptureChanged(EventArgs.Empty); } } public bool Focused => false; public bool IsHandleCreated => true; public bool DesignMode => false; public void BeginInvoke(Action a) => a() /* inline: exercises the re-layout re-entry path headless */; public ContextMenuStrip? ContextMenuStrip { get; set; } public MouseButtons MouseButtons => MouseButtons.None; public void Update() { } public void Refresh() { } public Font Font { get => _font!; set => _font = value; } Font? _font;   // never created: GDI+ throws on non-Windows runtimes
@@ -75,7 +76,7 @@ namespace System.Windows.Forms {
     public void Invalidate() { } public void Invalidate(Rectangle r) { } public Form? FindForm() { Control? c = this; while (c != null && !(c is Form)) c = c.Parent; return c as Form; } public DialogResult DialogResult { get; set; }   // SpriteButton.DialogResult: WinForms closes the form on click
     public static System.Drawing.Font? DefaultFont;   // SpriteControlBase.DefaultFont deliberately hides it (a GDI Font in real WinForms)
     public void Hide() { Visible = false; } public void Dispose() => Dispose(true); protected virtual void Dispose(bool disposing) { }
-    public class ControlCollection : System.Collections.Generic.List<Control> { readonly Control _o; public ControlCollection(Control o) { _o = o; } public new void Add(Control c) { base.Add(c); c.Parent = _o; _o.OnControlAdded(new ControlEventArgs(c)); } public new bool Remove(Control c) { bool r = base.Remove(c); if (r) { c.Parent = null; _o.OnControlRemoved(new ControlEventArgs(c)); } return r; } }
+    public class ControlCollection : System.Collections.Generic.List<Control> { readonly Control _o; public ControlCollection(Control o) { _o = o; } public new void Add(Control c) { base.Add(c); c.Parent = _o; _o.OnControlAdded(new ControlEventArgs(c)); } public new bool Remove(Control c) { bool r = base.Remove(c); if (r) { c.Parent = null; _o.OnControlRemoved(new ControlEventArgs(c)); } return r; } public new void Clear() { foreach (var c in ToArray()) Remove(c); } }
     public event EventHandler? Click; protected virtual void OnClick(EventArgs e) => Click?.Invoke(this, e);
     public event EventHandler? LostFocus, GotFocus; public event KeyEventHandler? KeyDown; public void BringToFront() { } public void FireLostFocus() { OnLostFocus(EventArgs.Empty); LostFocus?.Invoke(this, EventArgs.Empty); } void UnusedEvents() { GotFocus?.Invoke(this, EventArgs.Empty); KeyDown?.Invoke(this, new KeyEventArgs(Keys.None)); }
     protected virtual void OnKeyUp(KeyEventArgs e) { }
@@ -108,4 +109,9 @@ namespace System.ComponentModel {
   [AttributeUsage(AttributeTargets.All)] public class DesignerSerializationVisibilityAttribute : Attribute { public DesignerSerializationVisibilityAttribute(DesignerSerializationVisibility v) { } }
   public enum DesignerSerializationVisibility { Hidden, Visible, Content }
   [AttributeUsage(AttributeTargets.All)] public class DefaultValueAttribute : Attribute { public DefaultValueAttribute(object? o) { } public DefaultValueAttribute(double d) { } public DefaultValueAttribute(int i) { } public DefaultValueAttribute(bool b) { } public DefaultValueAttribute(string s) { } public DefaultValueAttribute(Type t, string s) { } }
+  [AttributeUsage(AttributeTargets.All)] public class DefaultPropertyAttribute : Attribute { public DefaultPropertyAttribute(string s) { } }
+  [AttributeUsage(AttributeTargets.All)] public class DefaultBindingPropertyAttribute : Attribute { public DefaultBindingPropertyAttribute(string s) { } }
+  [AttributeUsage(AttributeTargets.All)] public class MergablePropertyAttribute : Attribute { public MergablePropertyAttribute(bool b) { } }
+  [AttributeUsage(AttributeTargets.All)] public class LocalizableAttribute : Attribute { public LocalizableAttribute(bool b) { } }
+  [AttributeUsage(AttributeTargets.All)] public class EditorAttribute : Attribute { public EditorAttribute(string a, string b) { } public EditorAttribute(Type a, Type b) { } }
 }

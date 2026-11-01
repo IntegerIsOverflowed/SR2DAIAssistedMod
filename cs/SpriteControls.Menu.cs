@@ -72,6 +72,12 @@ namespace Sr2d64CSport
         SpriteMenuPanel? _panel;
         internal SpriteMenu? Parent; internal SpriteMenuItem? ParentItem;
 
+        /// <summary>True when any <see cref="SpriteMenu"/> (or <see cref="SpriteCombo"/> drop-down) is currently open on screen.</summary>
+        public static bool AnyOpen => SpriteMenuPanel.HasOpenMenu;
+
+        /// <summary>Closes all currently open <see cref="SpriteMenu"/> popups (including open <see cref="SpriteCombo"/> drop-downs).</summary>
+        public static void CloseAll() => SpriteMenuPanel.CloseAllExcept(null);
+
         // ------------------------------------------------------------------ building
         public SpriteMenuItem Add(SpriteMenuItem it) { Items.Add(it); return it; }
         public SpriteMenuItem Add(string text, Action click, string? hint = null, Func<bool>? enabled = null) => Add(new SpriteMenuItem { Kind = MenuItemKind.Command, Text = text, Click = click, Hint = hint, IsEnabled = enabled });
@@ -122,6 +128,7 @@ namespace Sr2d64CSport
     }
 
     /// <summary>The window of one open menu level: an SR2D-painted SpriteBox in a borderless, non-activating tool window.</summary>
+    [ToolboxItem(false)]
     public sealed class SpriteMenuPanel : SpriteBox
     {
         readonly SpriteMenu _menu; MenuHost? _host; Control? _owner;
@@ -129,6 +136,20 @@ namespace Sr2d64CSport
         Timer? _subTimer; SpriteMenu? _openSub; Size _want;
         static readonly List<SpriteMenu> OpenRoots = new List<SpriteMenu>();
         static OutsideClickFilter? _filter;
+
+        internal static bool HasOpenMenu => OpenRoots.Count > 0;
+        bool ShouldHoldCapture => _menu.Parent == null && _menu.IsOpen && Visible && _openSub == null;
+        readonly List<Control> _watchedAncestors = new List<Control>();
+
+        internal static void CloseAllExcept(Control? opener)
+        {
+            if (OpenRoots.Count == 0) return;
+            foreach (var root in OpenRoots.ToArray())
+            {
+                if (opener != null && root.Panel != null && (root.Panel == opener || root.Panel.Owner == opener)) continue;
+                root.CloseDown();
+            }
+        }
 
         public SpriteMenuPanel(SpriteMenu m)
         {
@@ -139,6 +160,7 @@ namespace Sr2d64CSport
         internal Control? Owner => _owner;
 
         // ------------------------------------------------------------------ host window
+        [ToolboxItem(false), DesignerCategory("Code")]
         sealed class MenuHost : Form
         {
             public MenuHost() { FormBorderStyle = FormBorderStyle.None; ShowInTaskbar = false; StartPosition = FormStartPosition.Manual; }
@@ -153,6 +175,11 @@ namespace Sr2d64CSport
 
         public void Popup(Control owner, Point screen, bool asSubmenu)
         {
+            if (!asSubmenu)
+            {
+                foreach (var other in OpenRoots.ToArray())
+                    if (other != _menu) other.CloseDown();
+            }
             _owner = owner;
             if (_host == null) { _host = new MenuHost(); _host.Controls.Add(this); Dock = DockStyle.Fill; }
             // owned by the owner's top-level window: stays above it (no TopMost needed) and goes with it when another window
@@ -160,6 +187,7 @@ namespace Sr2d64CSport
             var top = owner.FindForm();
             if (top != null && _host.Owner != top) { try { _host.Owner = top; } catch { } }
             if (!asSubmenu && top != null) { top.Deactivate -= OwnerDeactivated; top.Deactivate += OwnerDeactivated; top.LocationChanged -= OwnerMoved; top.LocationChanged += OwnerMoved; top.SizeChanged -= OwnerMoved; top.SizeChanged += OwnerMoved; _top = top; }
+            if (!asSubmenu) WatchOwnerHierarchy(owner);
             LayoutRows();
             var area = Screen.FromPoint(screen).WorkingArea;
             int x = screen.X, y = screen.Y, w = _want.Width, h = _want.Height;
@@ -187,10 +215,43 @@ namespace Sr2d64CSport
 #pragma warning disable CA2213 // the owner form (event subscriptions only) - not owned, never disposed here
         Form? _top;
 #pragma warning restore CA2213
+        void WatchOwnerHierarchy(Control? owner)
+        {
+            UnwatchOwnerHierarchy();
+            for (Control? c = owner; c != null; c = c.Parent)
+            {
+                c.VisibleChanged += OwnerHierarchyVisibleChanged;
+                c.EnabledChanged += OwnerHierarchyVisibleChanged;
+                _watchedAncestors.Add(c);
+            }
+        }
+        void UnwatchOwnerHierarchy()
+        {
+            foreach (var c in _watchedAncestors)
+            {
+                c.VisibleChanged -= OwnerHierarchyVisibleChanged;
+                c.EnabledChanged -= OwnerHierarchyVisibleChanged;
+            }
+            _watchedAncestors.Clear();
+        }
+        void OwnerHierarchyVisibleChanged(object? s, EventArgs e)
+        {
+            if (_menu.Parent == null && (_owner == null || !_owner.Visible || !_owner.Enabled))
+                _menu.Close();
+        }
         void OwnerDeactivated(object? s, EventArgs e) { if (_menu.Parent == null) _menu.Close(); }
         void OwnerMoved(object? s, EventArgs e) { if (_menu.Parent == null) _menu.Close(); }
+        protected override void WndProc(ref Message m)
+        {
+            base.WndProc(ref m);
+            // Control.WmMouseUp always clears Capture in its finally block after OnMouseUp returns.
+            // Re-acquire capture here after WM_LBUTTONUP / WM_RBUTTONUP / WM_MBUTTONUP if the menu stayed open.
+            if ((m.Msg == 0x0202 || m.Msg == 0x0205 || m.Msg == 0x0208) && ShouldHoldCapture && !Capture)
+                Capture = true;
+        }
         public new void Hide()
         {
+            UnwatchOwnerHierarchy();
             if (_top != null) { _top.Deactivate -= OwnerDeactivated; _top.LocationChanged -= OwnerMoved; _top.SizeChanged -= OwnerMoved; _top = null; }
             CloseSub();
             _subTimer?.Stop();
@@ -376,7 +437,7 @@ namespace Sr2d64CSport
             if (Capture) Capture = false;   // the sub-menu level navigates through the filter - a held capture would route its clicks here
             it.Sub.ShowAt(_owner!, _host!.PointToScreen(new Point(Width - 4, r.Y - 4)), asSubmenu: true);
         }
-        void CloseSub() { if (_openSub != null) { var s = _openSub; _openSub = null; s.CloseDown(); } if (_menu.IsOpen && Visible && !Capture) Capture = true; }
+        void CloseSub() { if (_openSub != null) { var s = _openSub; _openSub = null; s.CloseDown(); } if (ShouldHoldCapture && !Capture) Capture = true; }
         protected override void OnMouseLeave(EventArgs e)
         {
             base.OnMouseLeave(e);
@@ -400,12 +461,13 @@ namespace Sr2d64CSport
             base.OnMouseUp(e);
             if (!Visible) return;
             if (Capture) Capture = false;
-            if (_pressedSlider >= 0) { _pressedSlider = -1; Redraw(); return; }
-            if (e.Button != MouseButtons.Left) return;
+            if (_pressedSlider >= 0) { _pressedSlider = -1; if (ShouldHoldCapture) Capture = true; Redraw(); return; }
+            if (e.Button != MouseButtons.Left) { if (ShouldHoldCapture) Capture = true; return; }
             int i = RowAt(e.Location);
             if (i < 0) i = RowAt(PointToClient(Cursor.Position));   // an up with a stale / zeroed position still activates the row under the pointer
-            if (i < 0) return;
+            if (i < 0) { if (ShouldHoldCapture) Capture = true; return; }
             Activate(i);
+            if (ShouldHoldCapture) Capture = true;
         }
         void SliderTo(int i, int x)
         {
@@ -473,11 +535,12 @@ namespace Sr2d64CSport
             int i = _hot;
             for (int s = 0; s < n; s++) { i = ((i < 0 ? (dir > 0 ? -1 : 0) : i) + dir + n) % n; if (_menu.Items[i].Selectable) { SetHot(i, false); return; } }
         }
-        internal void SubClosedByKey() { _openSub = null; Redraw(); }
+        internal void SubClosedByKey() { _openSub = null; if (ShouldHoldCapture && !Capture) Capture = true; Redraw(); }
         protected override void Dispose(bool disposing)
         {
             if (disposing)
             {
+                UnwatchOwnerHierarchy();
                 if (_top != null) { _top.Deactivate -= OwnerDeactivated; _top.LocationChanged -= OwnerMoved; _top.SizeChanged -= OwnerMoved; _top = null; }
                 RootClosed(_menu);                      // never leave a dead panel in the open list (the filter would touch it on every click)
                 _subTimer?.Dispose(); _host?.Dispose();

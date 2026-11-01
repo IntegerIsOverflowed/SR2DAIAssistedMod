@@ -143,8 +143,10 @@ namespace Sr2d64CSport
         [Category("Appearance"), DefaultValue(4f), Description("Effective scale (screen pixels per image pixel) from which the pixel grid is drawn. Default 4 = 400 %.")]
         public virtual float PixelGridMinScale { get => _pixelGridMin; set { value = Math.Max(2f, value); if (_pixelGridMin == value) return; _pixelGridMin = value; ViewInvalidate(false); } }
         /// <summary>Colour of the pixel grid lines (ARGB, alpha blended over the picture). Default 0x60000000.</summary>
-        [Category("Appearance"), DefaultValue(typeof(Color), "96, 0, 0, 0"), Description("Colour of the pixel grid lines (alpha blended).")]
+        [Category("Appearance"), Description("Colour of the pixel grid lines (alpha blended).")]
         public virtual Color PixelGridColor { get => Color.FromArgb(_pixelGridColor); set { if (_pixelGridColor == value.ToArgb()) return; _pixelGridColor = value.ToArgb(); ViewInvalidate(false); } }
+        bool ShouldSerializePixelGridColor() => _pixelGridColor != 0x60000000;
+        void ResetPixelGridColor() => PixelGridColor = Color.FromArgb(0x60000000);
         /// <summary>True when the grid is switched on and the current zoom is high enough for it to be drawn.</summary>
         [Browsable(false)] public bool PixelGridVisible => _pixelGrid && Viewed && _view.ScaleX >= _pixelGridMin && _view.ScaleY >= _pixelGridMin;
         [Category("Behavior"), DefaultValue(SpriteNavigation.Full), Description("Built-in mouse / keyboard navigation while a SizeMode is on: None; Hand (Space = hand, middle button drags, Ctrl + wheel zooms); Full (as Hand, plus the magnifier on the plain left button: drag left / right = zoom, click = in, Alt + click = out).")]

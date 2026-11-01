@@ -1,5 +1,6 @@
 using System;
 using System.ComponentModel;
+using System.Diagnostics.CodeAnalysis;
 using System.Drawing;
 using System.Windows.Forms;
 
@@ -14,7 +15,7 @@ namespace Sr2d64CSport
     /// ordinary control. It does not take the focus when clicked (the view it scrolls keeps it).
     /// </summary>
     [ToolboxBitmap(typeof(SpriteScrollBar), "SpriteScrollBar.bmp")]
-    [DefaultEvent("ValueChanged")]
+    [DefaultEvent("ValueChanged"), DefaultProperty("Value"), DefaultBindingProperty("Value")]
     public sealed class SpriteScrollBar : SpriteRangeControl
     {
         protected override AccessibleRole DefaultAccessibleRole => AccessibleRole.ScrollBar;
@@ -24,6 +25,9 @@ namespace Sr2d64CSport
         int _grab; int _hitPart;             // 0 none, 1 thumb, 2 track before, 3 track after, 4 arrow up/left, 5 arrow down/right
 
         public SpriteScrollBar() { Size = new Size(16, 120); ShowValue = false; TabStop = false; Cursor = Cursors.Default; }
+
+        [Browsable(false), EditorBrowsable(EditorBrowsableState.Never), DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden), Bindable(false)]
+        [AllowNull] public override string Text { get => base.Text; set => base.Text = value; }
 
         [Category("Behavior"), DefaultValue(Orientation.Vertical), Description("Vertical or horizontal bar.")]
         public Orientation Orientation { get => _orient; set { _orient = value; Redraw(); } }

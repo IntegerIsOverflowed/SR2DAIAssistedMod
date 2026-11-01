@@ -152,6 +152,7 @@ namespace Sr2d64CSport
         /// <summary>Text colour (edits in the designer with the usual colour cell).</summary>
         public Color Color { get; set; } = Color.FromArgb(0xC8, 0xD0, 0xDC);
         /// <summary>Installed font family ("" = the app default / the pixel font).</summary>
+        [TypeConverter(typeof(InstalledFontFamilyConverter))]
         public string FontFamily { get; set; } = "";
         /// <summary>Font size in px (0 = the default).</summary>
         public float FontSize { get; set; }
@@ -527,10 +528,10 @@ namespace Sr2d64CSport
         [Category("Appearance"), DefaultValue(2), Description("How many px the darkening plate is taller than the text's ink, on each side (top and bottom).")]
         public int TitleDarkenExtraHeight { get => darkenExtraHeight; set { darkenExtraHeight = Math.Clamp(value, 0, 128); bar.Touch(); } }
         /// <summary>How many px the plate's left and right edges fade out over ("feather width").</summary>
-        [Category("Appearance"), DefaultValue(8), Description("How many px the darkening plate fades out over at its left and right edges (feather width).")]
+        [Category("Appearance"), DefaultValue(4), Description("How many px the darkening plate fades out over at its left and right edges (feather width).")]
         public int TitleDarkenFeatherWidth { get => darkenFeatherWidth; set { darkenFeatherWidth = Math.Clamp(value, 0, 256); bar.Touch(); } }
         /// <summary>How many px the plate's top and bottom edges fade out over ("feather height").</summary>
-        [Category("Appearance"), DefaultValue(4), Description("How many px the darkening plate fades out over at its top and bottom edges (feather height).")]
+        [Category("Appearance"), DefaultValue(2), Description("How many px the darkening plate fades out over at its top and bottom edges (feather height).")]
         public int TitleDarkenFeatherHeight { get => darkenFeatherHeight; set { darkenFeatherHeight = Math.Clamp(value, 0, 128); bar.Touch(); } }
         /// <summary>How dark the plate is: 0 = invisible, 100 = solid black.</summary>
         [Category("Appearance"), DefaultValue(55), Description("Darkening opacity in % (0 = invisible, 100 = solid black).")]
@@ -554,6 +555,7 @@ namespace Sr2d64CSport
         /// <summary>Caption font family ("" = the app default / the built-in pixel font). Any installed family
         /// here switches the caption from the pixel font to that real, anti-aliased font.</summary>
         [Category("Appearance"), DefaultValue(""), Description("Caption font family (empty = the app default or the built-in pixel font).")]
+        [TypeConverter(typeof(InstalledFontFamilyConverter))]
         public string TitleTextFontFamily { get => titleFontFamily; set { titleFontFamily = value ?? ""; bar.Touch(); } }
         /// <summary>Caption em size in px when a real font is used (0 = the app default).</summary>
         [Category("Appearance"), DefaultValue(0f), Description("Caption em size in px with a real font (0 = the app default).")]

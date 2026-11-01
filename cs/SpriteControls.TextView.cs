@@ -29,7 +29,7 @@ namespace Sr2d64CSport
     /// pixel font (monospace) unless a TextFont / TextFontFamily is set.
     /// </summary>
     [ToolboxBitmap(typeof(SpriteTextView), "SpriteTextView.bmp")]
-    [DefaultEvent("Click")]
+    [DefaultEvent("Click"), DefaultProperty("Text")]
     public sealed class SpriteTextView : SpriteControlBase
     {
         protected override AccessibleRole DefaultAccessibleRole => AccessibleRole.Text;
@@ -62,7 +62,10 @@ namespace Sr2d64CSport
 
         // ------------------------------------------------------------------ content
         /// <summary>The whole text (lines joined with Environment.NewLine, like a TextBox; "\r\n", "\n" and "\r" are all accepted when set).</summary>
-        [Browsable(false), DesignerSerializationVisibility(DesignerSerializationVisibility.Hidden), AllowNull]
+        [Browsable(true), EditorBrowsable(EditorBrowsableState.Always), DesignerSerializationVisibility(DesignerSerializationVisibility.Visible), AllowNull]
+        [Category("Appearance"), Description("The multi-line text content displayed in the view.")]
+        [Editor("System.ComponentModel.Design.MultilineStringEditor, System.Design, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+                "System.Drawing.Design.UITypeEditor, System.Drawing, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a")]
         public override string Text
         {
             get => string.Join(Environment.NewLine, _lines);
