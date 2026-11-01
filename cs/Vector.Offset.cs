@@ -999,8 +999,13 @@ namespace Sr2d64CSport
                             }
                         }
                     }
+                    bool revEnd = (i < segs) && (1.0 + (u[i - 1].X * u[i].X + u[i - 1].Y * u[i].Y) <= 1e-5);
                     var ring = new List<Pt2>(plus);
-                    if (i == segs && capEnd == VectorCap.Round)
+                    if (revEnd && join == 2)
+                    {
+                        CapArc(ring, poly[i], nm[i - 1], u[i - 1], hw, VectorCap.Round);
+                    }
+                    else if (i == segs && capEnd == VectorCap.Round)
                     {
                         if (keepEnd == 0)
                         {
