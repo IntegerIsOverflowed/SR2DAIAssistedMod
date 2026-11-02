@@ -1276,39 +1276,101 @@ namespace Sr2d64CSport
             }
         }
 
-        // the flat looks' track and value: Hairline = a 1 px track with a 3 px accent bar (the pending part of a deferred
-        // drag in the faded accent); Segmented = a row of cells, lit from zero to the committed value
+        // Two completely new slider track looks:
+        // Hairline = Pressurized Glass Tube with glowing plasma/liquid mercury fill;
+        // Segmented = Riveted Brushed-Steel Faceplate with slotted groove and 45-degree diagonal hazard/turbine stripes!
         void PaintLookTrack(Sprite s, float a, float b, float m, float tr, bool hz, float f0, float fc, float fp)
         {
+            float qa = MathF.Min(a, b), qb = MathF.Max(a, b);
+            float q0 = a + (b - a) * MathF.Min(f0, fc), q1 = a + (b - a) * MathF.Max(f0, fc);
+            float fq0 = MathF.Min(q0, q1), fq1 = MathF.Max(q0, q1);
+
             if (_look == ControlLook.Hairline)
             {
-                LookBar(s, a, b, m, 1f, hz, Mix(BackColor, ThumbColor, 0.45f));
-                LookBar(s, a + (b - a) * f0, a + (b - a) * fc, m, 3f, hz, Accent);
-                LookBar(s, a + (b - a) * fc, a + (b - a) * fp, m, 3f, hz, Mix(Accent, Track, 0.5f));
+                // Pressurized Glass Tube Track
+                float tubeR = Math.Max(4.5f, tr * 0.42f);
+                if (hz)
+                {
+                    FillRound(s, qa - tubeR, m - tubeR, (qb - qa) + 2f * tubeR, 2f * tubeR, tubeR, Mix(BackColor, Black, 0.68f));
+                    if (fq1 - fq0 > 0.5f)
+                    {
+                        float ir = Math.Max(2f, tubeR - 1.5f);
+                        s.FillRoundRect(fq0 - ir * 0.5f, m - ir, (fq1 - fq0) + ir, 2f * ir, ir,
+                            SpriteGradient.Linear(0f, 0f, 0f, 1f, Accent, Mix(AccentRaw, White, 0.65f), Accent), true);
+                    }
+                    s.DrawWideLine(qa, m - tubeR + 1.5f, qb, m - tubeR + 1.5f, Argb(White, 115), 1.2f, true, SR2D.LineOp.AlphaBlend);
+                    DrawRound(s, qa - tubeR, m - tubeR, (qb - qa) + 2f * tubeR, 2f * tubeR, tubeR, Mix(BackColor, ThumbColor, 0.48f), 1f);
+                }
+                else
+                {
+                    FillRound(s, m - tubeR, qa - tubeR, 2f * tubeR, (qb - qa) + 2f * tubeR, tubeR, Mix(BackColor, Black, 0.68f));
+                    if (fq1 - fq0 > 0.5f)
+                    {
+                        float ir = Math.Max(2f, tubeR - 1.5f);
+                        s.FillRoundRect(m - ir, fq0 - ir * 0.5f, 2f * ir, (fq1 - fq0) + ir, ir,
+                            SpriteGradient.Linear(0f, 0f, 1f, 0f, Accent, Mix(AccentRaw, White, 0.65f), Accent), true);
+                    }
+                    s.DrawWideLine(m - tubeR + 1.5f, qa, m - tubeR + 1.5f, qb, Argb(White, 115), 1.2f, true, SR2D.LineOp.AlphaBlend);
+                    DrawRound(s, m - tubeR, qa - tubeR, 2f * tubeR, (qb - qa) + 2f * tubeR, tubeR, Mix(BackColor, ThumbColor, 0.48f), 1f);
+                }
                 return;
             }
-            double lo = Math.Min(f0, fc), hi = Math.Max(f0, fc), plo = Math.Min(fc, fp), phi = Math.Max(fc, fp);
-            float th = Math.Max(3f, tr * 0.4f);
-            int n = Math.Clamp((int)(Math.Abs(b - a) / (th + 2f)), 4, 60);
-            LookCells(s, a, b, m, th, hz, n, 2f, c => c >= lo && c <= hi ? Accent : c > plo && c <= phi ? Mix(Accent, Track, 0.5f) : Track);
+
+            // Segmented: Riveted Brushed-Steel Faceplate + Deep Slotted Groove + Diagonal Hazard-Stripe Bar
+            float plateHalf = Math.Max(7.5f, tr * 0.68f);
+            float slotHalf  = Math.Max(3.5f, tr * 0.30f);
+            if (hz)
+            {
+                LookIndustrialPlate(s, qa - 8f, m - plateHalf, (qb - qa) + 16f, 2f * plateHalf, Mix(BackColor, ThumbColor, 0.20f), Mix(BackColor, ThumbColor, 0.45f), rivets: true);
+                s.FillRect((int)MathF.Round(qa), (int)MathF.Round(m - slotHalf), (int)MathF.Round(qb - qa), (int)MathF.Round(2f * slotHalf), Mix(BackColor, Black, 0.82f));
+                if (fq1 - fq0 > 0.5f)
+                    LookHazardBar(s, fq0, m - slotHalf + 1f, fq1 - fq0, 2f * slotHalf - 2f, true, Accent, Mix(AccentRaw, Black, 0.42f));
+            }
+            else
+            {
+                LookIndustrialPlate(s, m - plateHalf, qa - 8f, 2f * plateHalf, (qb - qa) + 16f, Mix(BackColor, ThumbColor, 0.20f), Mix(BackColor, ThumbColor, 0.45f), rivets: true);
+                s.FillRect((int)MathF.Round(m - slotHalf), (int)MathF.Round(qa), (int)MathF.Round(2f * slotHalf), (int)MathF.Round(qb - qa), Mix(BackColor, Black, 0.82f));
+                if (fq1 - fq0 > 0.5f)
+                    LookHazardBar(s, m - slotHalf + 1f, fq0, 2f * slotHalf - 2f, fq1 - fq0, false, Accent, Mix(AccentRaw, Black, 0.42f));
+            }
         }
 
-        // the flat thumb: Hairline = a solid accent square; Segmented = a marker across the cells
+        // Two completely new slider thumb looks:
+        // Hairline = 3D Translucent Glass Sphere / Magnifying Orb;
+        // Segmented = Heavy Machined Knurled Steel Block with grip ridges and an Accent pointer notch!
         void PaintLookThumb(Sprite s, float m, float tr, bool hz, float tq)
         {
-            int cx = (int)MathF.Round(hz ? tq : m), cy = (int)MathF.Round(hz ? m : tq);
+            float cx = hz ? tq : m, cy = hz ? m : tq;
             if (_look == ControlLook.Hairline)
             {
-                // a solid accent square with a darker edge (white while dragged)
-                int half = Math.Max(3, (int)MathF.Round(tr * 0.8f));
-                s.FillRect(cx - half, cy - half, 2 * half, 2 * half, IsDragging ? White : Accent);
-                s.DrawRect(cx - half + 0.5f, cy - half + 0.5f, 2 * half - 1, 2 * half - 1, Mix(Accent, Black, 0.45f), 1f, false);
+                float orbR = Math.Max(5f, tr * 0.85f);
+                int tint = IsDragging ? Mix(AccentRaw, White, 0.35f) : AccentRaw.ToArgb();
+                int rimCol = IsDragging ? White : Mix(AccentRaw, White, 0.55f);
+                LookGlassOrb(s, cx, cy, orbR, tint, rimCol);
                 return;
             }
-            int hh = (int)MathF.Round(Math.Max(3f, tr * 0.4f) / 2 + 2);
-            int col = IsDragging ? White : Thumb;
-            if (hz) s.FillRect(cx - 1, cy - hh, 3, 2 * hh, col);
-            else s.FillRect(cx - hh, cy - 1, 2 * hh, 3, col);
+            // Segmented: Heavy Machined Knurled Steel Block Thumb
+            int bw = Math.Max(5, (int)MathF.Round(tr * 0.56f));
+            int bh = Math.Max(7, (int)MathF.Round(tr * 0.85f));
+            int rx = hz ? bw : bh, ry = hz ? bh : bw;
+            int ix = (int)MathF.Round(cx), iy = (int)MathF.Round(cy);
+            int steel = IsDragging ? Mix(ThumbColor, White, 0.35f) : Mix(BackColor, ThumbColor, 0.58f);
+            s.FillRect(ix - rx - 1, iy - ry - 1, 2 * rx + 2, 2 * ry + 2, Mix(BackColor, Black, 0.85f));
+            s.FillRect(ix - rx, iy - ry, 2 * rx, 2 * ry, steel);
+            s.FillRect(ix - rx, iy - ry, 2 * rx, 1, Mix(steel, White, 0.42f));
+            s.FillRect(ix - rx, iy + ry - 1, 2 * rx, 1, Mix(steel, Black, 0.45f));
+            if (hz)
+            {
+                for (int kx = ix - rx + 2; kx <= ix + rx - 2; kx += 2)
+                    if (Math.Abs(kx - ix) > 1) s.FillRect(kx, iy - ry + 2, 1, 2 * ry - 4, Mix(steel, Black, 0.35f));
+                s.FillRect(ix - 1, iy - ry, 2, 2 * ry, Accent);
+            }
+            else
+            {
+                for (int ky = iy - ry + 2; ky <= iy + ry - 2; ky += 2)
+                    if (Math.Abs(ky - iy) > 1) s.FillRect(ix - rx + 2, ky, 2 * rx - 4, 1, Mix(steel, Black, 0.35f));
+                s.FillRect(ix - rx, iy - 1, 2 * rx, 2, Accent);
+            }
         }
 
         // rounded bar from q0 to q1 along the axis (round caps via DrawWideLine)

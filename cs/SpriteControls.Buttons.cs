@@ -216,68 +216,80 @@ namespace Sr2d64CSport
             CaptionIn(s, new Rectangle(0, (int)off, w, h), Text, textCol, ts);
         }
 
-        /// <summary>The flat looks: <see cref="ControlLook.Hairline"/> and <see cref="ControlLook.Segmented"/> (same shapes, sizes and caption as Classic).</summary>
+        /// <summary>Two completely new looks: <see cref="ControlLook.Hairline"/> (Liquid Glass / Aqua Neon) and <see cref="ControlLook.Segmented"/> (Heavy Industrial / Riveted Steel).</summary>
         void PaintLook(Sprite s, int w, int h, bool down, bool hot)
         {
-            bool hair = _look == ControlLook.Hairline;
+            bool glass = _look == ControlLook.Hairline;
             float inset = 1.5f, off = down ? 1f : 0f;
-            int face = _accented ? (down ? Mix(AccentRaw, Black, 0.2f) : hot ? Mix(AccentRaw, White, 0.12f) : Accent)
-                       : hair ? (down ? Mix(BackColor, Accent, 0.24f) : Mix(BackColor, ThumbColor, hot ? 0.12f : 0.07f))
-                       : (down ? Mix(BackColor, ThumbColor, 0.12f) : Mix(BackColor, ThumbColor, hot ? 0.24f : 0.18f));
-            int rim = down || _accented ? Accent : _look == ControlLook.Hairline ? Mix(Accent, BackColor, hot ? 0.25f : 0.5f) : Mix(BackColor, ThumbColor, hot ? 0.7f : 0.5f);
-            int mark = _accented ? White : Accent;                  // keyline, corner / dial ticks, LED strip
-            int dim = Mix(face, Black, 0.35f), dots = Mix(face, Black, 0.2f);   // unlit LED cells, dot-matrix dots
-            bool lit = _accented || hot || down;                    // the LED strip (Segmented) lights up
-            int textCol = _accented ? (Enabled ? White : Fore) : Fore;
+            int textCol = Enabled ? White : Fore;
             int ts = AutoTextScale(h * 2);
+
             if (_shape == ButtonShape.Round)
             {
-                float r = Math.Min(w, h) / 2f - 1.5f, cx = w / 2f, cy = h / 2f;
-                s.FillCircle(cx, cy, r, face, SR2D.LineOp.Set, true);
-                if (hair)
+                float r = Math.Min(w, h) / 2f - 1.5f, cx = w / 2f, cy = h / 2f + off * 0.5f;
+                if (glass)
                 {
-                    s.DrawCircle(cx, cy, r, rim, 1f, true);
-                    s.DrawCircle(cx, cy, r - 3f, Argb(mark, 110), 1f, true, SR2D.LineOp.AlphaBlend);
-                    LookDial(s, cx, cy, r - 9f, 12, 2, 4, 3, Argb(mark, 200));
+                    // 3D Liquid Glass Orb / Convex Jewel Lens
+                    int tint = _accented || hot || down ? AccentRaw.ToArgb() : Mix(AccentRaw, ThumbColor, 0.45f);
+                    int rimCol = down || _accented ? Mix(AccentRaw, White, 0.55f) : Mix(AccentRaw, ThumbColor, hot ? 0.50f : 0.30f);
+                    LookGlassOrb(s, cx, cy, r, tint, rimCol);
                 }
                 else
                 {
-                    LookDots(s, w, h, r, true, dots);
-                    for (int k = 0; k < 24; k++)
+                    // Heavy Industrial Bolted Steel Flange + Inner Push Plunger
+                    int flangeCol = Mix(BackColor, ThumbColor, hot ? 0.34f : 0.28f);
+                    int flangeRim = Mix(BackColor, ThumbColor, 0.55f);
+                    s.FillCircle(cx, cy, r, flangeCol, SR2D.LineOp.Set, true);
+                    s.DrawCircle(cx, cy, r, flangeRim, 1.2f, true);
+                    for (int k = 0; k < 6; k++)
                     {
-                        double a = (270 + 360.0 * k / 24) * Math.PI / 180;
-                        s.FillCircle(cx + (float)Math.Cos(a) * (r - 3f), cy + (float)Math.Sin(a) * (r - 3f), 1.4f, lit ? mark : dim, SR2D.LineOp.Set, true);
+                        double ang = (k * 60 + 30) * Math.PI / 180.0;
+                        LookRivet(s, cx + (float)Math.Cos(ang) * (r - 4.2f), cy + (float)Math.Sin(ang) * (r - 4.2f), 1.6f);
                     }
+                    float innerR = Math.Max(4f, r - 7.5f);
+                    int capCol = _accented ? (down ? Mix(AccentRaw, Black, 0.25f) : Accent) : (down ? Mix(BackColor, ThumbColor, 0.20f) : Mix(BackColor, ThumbColor, 0.38f));
+                    s.FillCircle(cx, cy, innerR + 1f, Mix(BackColor, Black, 0.78f), SR2D.LineOp.Set, true);
+                    s.FillCircle(cx, cy, innerR, capCol, SR2D.LineOp.Set, true);
+                    s.DrawCircle(cx, cy, innerR, _accented || hot || down ? Accent : Mix(BackColor, ThumbColor, 0.60f), 1f, true);
                 }
                 if (!string.IsNullOrEmpty(Text))
                 {
-                    int avail = (int)(r * 1.5f), sc = FitScale(Text, avail, ts);
+                    int avail = (int)(r * 1.4f), sc = FitScale(Text, avail, ts);
                     T.Draw(s, (int)MathF.Round(cx), (int)MathF.Round(cy), FitText(Text, avail, sc), textCol, 0, sc, 0, 0, SR2D.LineOp.Set, 128, TextAnchor.Center);
                 }
                 return;
             }
-            float rad = _shape == ButtonShape.Pill ? h / 2f : _shape == ButtonShape.Square ? 0f : h * 0.2f;
+
             float x = inset, y = inset + off, ww = w - 2 * inset, hh = h - 2 * inset - off;
-            FillRound(s, x, y, ww, hh, rad, face);
-            if (hair)
+            if (glass)
             {
-                DrawRound(s, x, y, ww, hh, rad, rim, 1f);
-                s.DrawRoundRect(x + 3f, y + 3f, ww - 6, hh - 6, Math.Max(0, rad - 3), Argb(mark, 110), 1f, true, SR2D.LineOp.AlphaBlend);
-                // corner ticks sit inside the keyline; a pill's ends are round, so it keeps the keyline alone
-                if (_shape != ButtonShape.Pill && ww >= 24 && hh >= 16)
-                    LookCornerTicks(s, x + 5f, y + 5f, ww - 10, hh - 10, Math.Clamp((int)Math.Min(ww, hh) / 6, 2, 6), mark);
-                // an instrument index bar along the top inside edge (not on pills: their ends are round)
-                if (_shape != ButtonShape.Pill && ww >= 40 && hh >= 16)
-                    s.FillRect((int)MathF.Round(x + 8f), (int)MathF.Round(y + 3f), (int)MathF.Round(ww - 16f), 2, mark);
+                // Liquid Glass Capsule with upper curved reflection dome and bottom subsurface neon glow
+                float rad = _shape == ButtonShape.Square ? 4f : hh * 0.48f;
+                int tint = _accented ? AccentRaw.ToArgb() : Mix(AccentRaw, ThumbColor, hot || down ? 0.25f : 0.52f);
+                float glow = down ? 0.95f : _accented ? 0.80f : hot ? 0.55f : 0.25f;
+                int rimCol = down || _accented ? Mix(AccentRaw, White, 0.50f) : Mix(AccentRaw, ThumbColor, hot ? 0.55f : 0.35f);
+                LookGlassCapsule(s, x, y, ww, hh, rad, tint, glow, rimCol);
+                CaptionIn(s, new Rectangle(0, (int)off, w, h), Text, textCol, ts);
             }
             else
             {
-                // solid face (no dot matrix); LED strip: chunky cells along the bottom inside edge, lit while hot, pressed or accented
-                float sy = y + hh - 6f, sx0 = x + Math.Max(rad, 6f), sx1 = x + ww - Math.Max(rad, 6f);
-                int n = Math.Max(3, (int)((sx1 - sx0) / 9f));
-                if (sx1 > sx0) LookCells(s, sx0, sx1, sy + 1.5f, 3f, true, n, 3f, _ => lit ? mark : dim);
+                // Heavy Industrial Riveted Brushed-Steel Plate + Vertical Pilot-Lamp Indicator Slot
+                int plateCol = _accented ? Mix(AccentRaw, BackColor, down ? 0.48f : 0.35f) : Mix(BackColor, ThumbColor, down ? 0.20f : hot ? 0.32f : 0.26f);
+                int rimCol = down || _accented ? Accent : Mix(BackColor, ThumbColor, hot ? 0.60f : 0.42f);
+                LookIndustrialPlate(s, x, y, ww, hh, plateCol, rimCol, rivets: true);
+
+                // Vertical recessed pilot-lamp jewel on the left side of the plate
+                if (ww >= 42 && hh >= 16)
+                {
+                    int lx = (int)MathF.Round(x + 11f), ly = (int)MathF.Round(y + 5f), lh = Math.Max(4, (int)MathF.Round(hh - 10f));
+                    bool lit = _accented || hot || down;
+                    int lampCol = lit ? (_accented && down ? White : Accent) : Mix(BackColor, Black, 0.55f);
+                    s.FillRect(lx - 1, ly - 1, 6, lh + 2, Mix(BackColor, Black, 0.82f));
+                    s.FillRect(lx, ly, 4, lh, lampCol);
+                    if (lit) s.FillRect(lx + 1, ly + 1, 2, Math.Max(1, lh / 3), Mix(lampCol, White, 0.55f));
+                }
+                CaptionIn(s, new Rectangle(6, (int)off, Math.Max(8, w - 12), h), Text, textCol, ts);
             }
-            CaptionIn(s, new Rectangle(0, (int)off, w, h), Text, textCol, ts);
         }
 
         /// <summary>
@@ -414,44 +426,71 @@ namespace Sr2d64CSport
                 }
                 case ToggleStyle.Ellipse:
                 {
-                    // 3D elliptical well + 3D circular button cap in the original Rocker style:
-                    // recessed dark well with a top inner shadow band, and a raised circular cap with a dark 3D cylinder
-                    // wall below it and a horizontal-clipped upper 45% bevel highlight on top (depresses into the well when pressed).
-                    float lift = Math.Max(2.5f, (h - 3) * 0.16f);
-                    float inset = Math.Max(1f, rimW);
-                    float rx = sw / 2f - 1.5f, ry = Math.Max(3f, (h - lift * 0.7f) / 2f - 1.5f);
-                    float cx = sw / 2f, cy = lift * 0.45f + (h - lift * 0.45f) / 2f;
-                    int wellCol = Mix(BackColor, Black, 0.50f);
-                    int wellShadow = Mix(BackColor, Black, 0.72f);
-                    s.FillEllipse(cx, cy, rx, ry, wellCol, SR2D.LineOp.Set, true);
-                    int shBot = Math.Clamp((int)MathF.Round(cy - ry + inset + Math.Max(2f, ry * 0.42f)), 1, h);
-                    using (var sh = s.CreateView(new Rectangle(0, 0, sw, shBot)))
-                        sh.FillEllipse(cx, cy, Math.Max(1f, rx - inset), Math.Max(1f, ry - inset), wellShadow, SR2D.LineOp.Set, true);
-                    int ellRim = Lerp(rim, Mix(AccentRaw, BackColor, 0.30f), t);
+                    // Recessed 3D elliptical hole (shaded with a vertical depth gradient from deep top shadow to a lit lower floor)
+                    // with a tall 3D cylindrical knob whose base emerges from the very bottom of the elliptical hole and whose
+                    // flat top sticks out proud above the top rim of the ellipse.
+                    float topRoom = Math.Max(4.5f, (h - 3f) * 0.25f);
+                    float rx = Math.Max(4f, sw / 2f - 2f);
+                    float ry = Math.Max(3f, (h - topRoom) / 2f - 1.5f);
+                    float cx = sw / 2f, cy = topRoom + (h - topRoom) / 2f;
+
+                    int holeTop = Mix(BackColor, Black, 0.88f);
+                    int holeMid = Mix(BackColor, Black, 0.54f);
+                    int holeBot = Lerp(Mix(BackColor, ThumbColor, 0.28f), Mix(BackColor, AccentRaw, 0.42f), t);
+                    s.FillEllipse(cx, cy, rx, ry, SpriteGradient.Linear(0f, 0f, 0f, 1f, holeTop, holeMid, holeBot), true);
+
+                    int ellRim = _onlyButtonGlows ? rim : Lerp(rim, Mix(AccentRaw, ThumbColor, 0.35f), t);
                     s.DrawEllipse(cx, cy, rx, ry, ellRim, rimW * 1.2f, true);
 
-                    float rxIn = Math.Max(2f, rx - inset - 0.5f), ryIn = Math.Max(2f, ry - inset - 0.5f);
-                    float cr = ryIn * 0.84f;
-                    float ratio = Math.Clamp(cr / ryIn, 0f, 0.98f);
-                    float dx = Math.Max(cr * 0.4f, rxIn * MathF.Sqrt(1f - ratio * ratio) - cr * 0.35f);
+                    // Cylindrical knob geometry: base anchored at the bottom arc of the hole, flat top sticking out above cy - ry
+                    float cr = ry * 0.78f;
+                    float topRy = cr * 0.76f;
+                    float dx = Math.Max(cr * 0.25f, (rx - cr - rimW * 1.2f) * 0.82f);
                     float x0 = cx - dx, x1 = cx + dx, ccx = x0 + (x1 - x0) * t;
-                    float up = down ? 0.45f : 1f;
-                    float ccy = cy - lift * up;
+                    float stickOut = topRoom * (down ? 0.55f : 0.85f);
+                    float topY = (cy - ry) + topRy - stickOut;
 
-                    int upFace = Mix(BackColor, ThumbColor, hot ? 0.44f : 0.38f);
-                    int upHi = Mix(BackColor, ThumbColor, hot ? 0.64f : 0.58f);
-                    int face = Lerp(upFace, Accent, t);
-                    int hi = Lerp(upHi, Mix(AccentRaw, White, 0.28f), t);
-                    int sideCol = Mix(face, Black, 0.50f);
+                    int baseCol = Lerp(Mix(BackColor, ThumbColor, hot ? 0.46f : 0.40f), Accent, t);
+                    int cylLeft  = Mix(baseCol, Black, 0.52f);
+                    int cylHi    = Mix(baseCol, White, 0.10f);
+                    int cylMid   = Mix(baseCol, Black, 0.24f);
+                    int cylRight = Mix(baseCol, Black, 0.64f);
 
-                    // 3D cylindrical side wall below the raised circular cap (anchored at well level cy)
-                    s.FillCircle(ccx, cy, cr, sideCol, SR2D.LineOp.Set, true);
-                    // Main circular cap face shifted up by -lift * up
-                    s.FillCircle(ccx, ccy, cr, face, SR2D.LineOp.Set, true);
-                    // Upper 45% inset bevel highlight (matching the original Rocker cap highlight)
-                    int hlBot = Math.Clamp((int)MathF.Round(ccy - cr + (2f * cr) * 0.45f), 1, h);
-                    using (var hl = s.CreateView(new Rectangle(0, 0, sw, hlBot)))
-                        hl.FillCircle(ccx, ccy, Math.Max(1f, cr - inset), hi, SR2D.LineOp.Set, true);
+                    float rxIn = Math.Max(2f, rx - rimW * 0.5f);
+                    float ryIn = Math.Max(2f, ry - rimW * 0.5f);
+                    int xLeft = (int)MathF.Round(ccx - cr);
+                    int xRight = (int)MathF.Round(ccx + cr);
+                    int spanX = Math.Max(1, xRight - xLeft);
+                    for (int x = xLeft; x <= xRight; x++)
+                    {
+                        float xf = (x - xLeft) / (float)spanX;
+                        int scol = xf < 0.28f ? Lerp(cylLeft, cylHi, xf / 0.28f)
+                                 : xf < 0.65f ? Lerp(cylHi, cylMid, (xf - 0.28f) / 0.37f)
+                                 : Lerp(cylMid, cylRight, (xf - 0.65f) / 0.35f);
+                        float dxNorm = Math.Clamp((x - cx) / rxIn, -1f, 1f);
+                        float yBot = cy + ryIn * MathF.Sqrt(Math.Max(0f, 1f - dxNorm * dxNorm));
+                        int iy0 = (int)MathF.Round(topY);
+                        int iy1 = Math.Max(iy0 + 1, (int)MathF.Round(yBot));
+                        s.FillRect(x, iy0, 1, iy1 - iy0, scol);
+                    }
+                    // Crisp vertical side edges of the cylinder down to the bottom arc of the hole
+                    float dxL = Math.Clamp((ccx - cr - cx) / rxIn, -1f, 1f);
+                    float dxR = Math.Clamp((ccx + cr - cx) / rxIn, -1f, 1f);
+                    float yBotL = cy + ryIn * MathF.Sqrt(Math.Max(0f, 1f - dxL * dxL));
+                    float yBotR = cy + ryIn * MathF.Sqrt(Math.Max(0f, 1f - dxR * dxR));
+                    s.DrawWideLine(ccx - cr, topY, ccx - cr, yBotL, Mix(baseCol, Black, 0.68f), 1f, true);
+                    s.DrawWideLine(ccx + cr, topY, ccx + cr, yBotR, Mix(baseCol, Black, 0.72f), 1f, true);
+
+                    // Redraw the lower/front lip of the elliptical hole rim so the cylinder base sits inside the hole
+                    int midY = Math.Clamp((int)MathF.Round(cy + 1f), 0, h - 1);
+                    using (var frontLip = s.CreateView(new Rectangle(0, midY, sw, h - midY)))
+                        frontLip.DrawEllipse(cx, cy, rx, ry, ellRim, rimW * 1.2f, true);
+
+                    // Flat circular/elliptical top face of the cylinder sticking out above the ellipse
+                    int flatTopCol = Lerp(Mix(BackColor, ThumbColor, hot ? 0.54f : 0.48f), Mix(AccentRaw, White, 0.16f), t);
+                    int flatTopRim = Lerp(Mix(BackColor, ThumbColor, 0.72f), Mix(AccentRaw, White, 0.48f), t);
+                    s.FillEllipse(ccx, topY, cr, topRy, flatTopCol, SR2D.LineOp.Set, true);
+                    s.DrawEllipse(ccx, topY, cr, topRy, flatTopRim, 1f, true);
                     break;
                 }
                 case ToggleStyle.Rocker:
@@ -1258,63 +1297,161 @@ namespace Sr2d64CSport
         // a cell is lit inside the marquee window (a run of `window` of a turn that wraps), otherwise up to the value
         bool LitCell(double c, double f, double window) => _marquee ? ((c - _phase) % 1 + 1) % 1 <= window : c <= f;
 
-        // the flat looks of the ring: Hairline = a thin track ring with dial ticks and a 2 px arc; Segmented = arc cells
+        // Two completely new ring looks:
+        // Hairline = Liquid Glass Torus Ring with glowing neon plasma core and glowing orb tip;
+        // Segmented = Heavy Industrial Bolted Pressure-Gauge Dial with 8 perimeter rivets and a pivoting analog needle!
         void PaintLookRing(Sprite s, int w, int h, double f, string cap)
         {
-            bool hair = _look == ControlLook.Hairline;
+            bool glass = _look == ControlLook.Hairline;
             float r = Math.Min(w, h) / 2f - 1.5f, cx = w / 2f, cy = h / 2f;
-            float tw = hair ? 2f : Math.Max(3f, r * 0.2f);
-            float tr = hair ? r - 9f : r - tw / 2;                      // the stroke's centre; the hairline keeps room for the dial
-            if (hair)
+            if (glass)
             {
-                s.DrawCircle(cx, cy, tr, Track, 1f, true);
-                LookDial(s, cx, cy, tr + 4f, 60, 2, 4, 5, Mix(BackColor, ThumbColor, 0.5f));
-                if (_marquee) { LookArc(s, cx, cy, tr, tw, _phase, 0.25, Accent); if (_phase > 0.75) LookArc(s, cx, cy, tr, tw, 0, _phase - 0.75, Accent); }
-                else LookArc(s, cx, cy, tr, tw, 0, f, Accent);
+                float tw = Math.Max(5f, r * 0.24f);
+                float tr = r - tw / 2f - 1.5f;
+                // Recessed dark glass torus channel with inner & outer glass rims
+                s.DrawCircle(cx, cy, tr, Mix(BackColor, Black, 0.65f), tw + 2f, true);
+                s.DrawCircle(cx, cy, tr + tw / 2f + 1f, Mix(BackColor, ThumbColor, 0.42f), 1f, true);
+                s.DrawCircle(cx, cy, Math.Max(2f, tr - tw / 2f - 1f), Mix(BackColor, ThumbColor, 0.30f), 1f, true);
+
+                // Glossy convex glass center dome
+                float innerR = Math.Max(4f, tr - tw / 2f - 3f);
+                s.FillCircle(cx, cy, innerR, Mix(BackColor, Black, 0.45f), SR2D.LineOp.Set, true);
+                s.FillEllipse(cx, cy - innerR * 0.42f, innerR * 0.65f, innerR * 0.32f, Argb(White, 45), SR2D.LineOp.AlphaBlend, true);
+
+                double start = _marquee ? _phase : 0.0;
+                double sweep = _marquee ? 0.28 : f;
+                if (sweep > 0.002)
+                {
+                    // Layered glowing neon liquid arc + hot white-tinted center core
+                    LookArc(s, cx, cy, tr, tw * 0.85f, start, sweep, Accent);
+                    LookArc(s, cx, cy, tr, Math.Max(1.5f, tw * 0.36f), start, sweep, Mix(AccentRaw, White, 0.62f));
+                    if (_marquee && start + sweep > 1.0)
+                    {
+                        LookArc(s, cx, cy, tr, tw * 0.85f, 0, start + sweep - 1.0, Accent);
+                        LookArc(s, cx, cy, tr, Math.Max(1.5f, tw * 0.36f), 0, start + sweep - 1.0, Mix(AccentRaw, White, 0.62f));
+                    }
+                    // Glowing orb tip at the leading edge of the liquid arc
+                    double endAng = (270 + 360.0 * (start + sweep)) * Math.PI / 180.0;
+                    float tx = cx + (float)Math.Cos(endAng) * tr, ty = cy + (float)Math.Sin(endAng) * tr;
+                    s.FillCircle(tx, ty, tw * 0.48f, Mix(AccentRaw, White, 0.78f), SR2D.LineOp.Set, true);
+                }
+                int ts = AutoTextScale((int)(r * 2.2f));
+                if (cap.Length > 0) { int sc = FitScale(cap, (int)(innerR * 1.6f), ts); T.Draw(s, (int)cx, (int)cy, FitText(cap, (int)(innerR * 1.6f), sc), Fore, 0, sc, 0, 0, SR2D.LineOp.Set, 128, TextAnchor.Center); }
             }
             else
             {
-                int n = _segments > 0 ? _segments : 24;
-                for (int i = 0; i < n; i++)
-                    LookArc(s, cx, cy, tr, tw, (double)i / n + 0.12 / n, 0.76 / n, LitCell((i + 0.5) / n, f, 0.25) ? Accent : Track);
+                // Heavy Industrial Bolted Analog Pressure-Gauge Dial with Pivoting Needle
+                int flangeCol = Mix(BackColor, ThumbColor, 0.25f);
+                s.FillCircle(cx, cy, r, flangeCol, SR2D.LineOp.Set, true);
+                s.DrawCircle(cx, cy, r, Mix(BackColor, ThumbColor, 0.55f), 1.2f, true);
+                float flangeW = Math.Clamp(r * 0.22f, 5f, 8f);
+                for (int k = 0; k < 8; k++)
+                {
+                    double ang = k * Math.PI * 2.0 / 8.0;
+                    LookRivet(s, cx + (float)Math.Cos(ang) * (r - flangeW * 0.5f), cy + (float)Math.Sin(ang) * (r - flangeW * 0.5f), Math.Clamp(flangeW * 0.22f, 1.3f, 2.0f));
+                }
+                float dialR = Math.Max(6f, r - flangeW);
+                s.FillCircle(cx, cy, dialR, Mix(BackColor, Black, 0.78f), SR2D.LineOp.Set, true);
+                s.DrawCircle(cx, cy, dialR, Mix(BackColor, ThumbColor, 0.38f), 1f, true);
+                LookDial(s, cx, cy, Math.Max(3f, dialR - 5f), 24, 2, 4, 6, Mix(BackColor, ThumbColor, 0.48f));
+
+                float arcR = Math.Max(4f, dialR - 3.5f);
+                double start = _marquee ? _phase : 0.0;
+                double sweep = _marquee ? 0.25 : f;
+                LookArc(s, cx, cy, arcR, Math.Max(2.5f, r * 0.10f), start, sweep, Accent);
+
+                // Pivoting analog gauge needle pointing to the active angle
+                double needleTurn = _marquee ? (_phase + 0.125) : f;
+                double nAng = (270 + 360.0 * needleTurn) * Math.PI / 180.0;
+                float ca = (float)Math.Cos(nAng), sa = (float)Math.Sin(nAng);
+                float px = -sa * 2.4f, py = ca * 2.4f;
+                float tipLen = Math.Max(4f, dialR - 3f);
+                Span<PointF> needle = stackalloc PointF[3]
+                {
+                    new(cx + px, cy + py),
+                    new(cx - px, cy - py),
+                    new(cx + ca * tipLen, cy + sa * tipLen)
+                };
+                s.FillPolygon(needle, Mix(AccentRaw, White, 0.55f), SR2D.LineOp.Set, true);
+                float bossR = Math.Clamp(r * 0.16f, 3.5f, 6f);
+                s.FillCircle(cx, cy, bossR, Mix(BackColor, ThumbColor, 0.58f), SR2D.LineOp.Set, true);
+                s.DrawCircle(cx, cy, bossR, Mix(BackColor, Black, 0.85f), 1f, true);
             }
-            int ts = AutoTextScale((int)(r * 2.2f));
-            if (cap.Length > 0) { int sc = FitScale(cap, (int)(tr * 1.4f), ts); T.Draw(s, (int)cx, (int)cy, FitText(cap, (int)(tr * 1.4f), sc), Fore, 0, sc, 0, 0, SR2D.LineOp.Set, 128, TextAnchor.Center); }
         }
 
-        // the flat looks of the bar: Hairline = a keyline frame and a flat accent fill; Segmented = a row of cells (no frame)
+        // Two completely new bar looks:
+        // Hairline = Pressurized Liquid Glass Tube with glowing plasma core, upper glass reflection streak, and meniscus orb;
+        // Segmented = Riveted Industrial Steel Viewport filled with 45-degree diagonal hazard/turbine chevron stripes!
         void PaintLookBar(Sprite s, int w, int h, bool hz, double f, string cap)
         {
             if (_look == ControlLook.Hairline)
             {
-                int rim = Mix(BackColor, ThumbColor, 0.5f);
-                LookKeyline(s, 0, 0, w, h, 0, rim, Argb(rim, 110));
-                float ix = 4f, iy = 4f, iw = w - 8, ih = h - 8;         // inside the keyline
-                void Fill(double from, double len)
+                // Pressurized Liquid Glass Tube
+                float rad = Math.Min(w, h) * 0.48f;
+                FillRound(s, 0.5f, 0.5f, w - 1f, h - 1f, rad, Mix(BackColor, Black, 0.68f));
+                float pad = 2.5f;
+                float ix = pad, iy = pad, iw = Math.Max(2f, w - 2f * pad), ih = Math.Max(2f, h - 2f * pad);
+                float irad = Math.Max(1f, rad - pad);
+
+                double from = _marquee ? Math.Max(0.0, _phase * 1.3 - 0.3) : 0.0;
+                double to   = _marquee ? Math.Min(1.0, _phase * 1.3) : f;
+                double len  = Math.Max(0.0, to - from);
+                if (len > 0.005)
                 {
-                    if (len <= 0) return;
-                    if (hz) LookBar(s, ix + iw * (float)from, ix + iw * (float)(from + len), iy + ih / 2f, ih, true, Accent);
-                    else LookBar(s, iy + ih * (float)(1 - from), iy + ih * (float)(1 - from - len), ix + iw / 2f, iw, false, Accent);
-                }
-                if (_marquee) { double len = 0.3, p = _phase * (1 + len) - len; Fill(Math.Max(0, p), Math.Min(len, Math.Min(p + len, 1) - Math.Max(0, p))); }
-                else
-                {
-                    Fill(0, f);
-                    if (f > 0.01 && f < 0.99)                        // the needle: a light 2 px mark at the end of the fill
+                    int edgeCol = Mix(AccentRaw, Black, 0.18f);
+                    int coreCol = Mix(AccentRaw, White, 0.58f);
+                    if (hz)
                     {
-                        int needle = Mix(Accent, White, 0.55f);
-                        if (hz) s.FillRect((int)MathF.Round(ix + iw * (float)f) - 1, (int)iy, 2, (int)ih, needle);
-                        else s.FillRect((int)ix, (int)MathF.Round(iy + ih * (float)(1 - f)) - 1, (int)iw, 2, needle);
+                        float fx = ix + iw * (float)from, fw = Math.Max(2f, iw * (float)len);
+                        s.FillRoundRect(fx, iy, fw, ih, irad, SpriteGradient.Linear(0f, 0f, 0f, 1f, edgeCol, coreCol, edgeCol), true);
+                        // Glowing meniscus orb at the leading edge
+                        float mx = Math.Clamp(fx + fw - ih * 0.35f, ix + ih * 0.35f, ix + iw - ih * 0.35f);
+                        s.FillCircle(mx, iy + ih * 0.5f, ih * 0.42f, Mix(AccentRaw, White, 0.78f), SR2D.LineOp.Set, true);
+                    }
+                    else
+                    {
+                        float fh = Math.Max(2f, ih * (float)len), fy = iy + ih * (float)(1.0 - from) - fh;
+                        s.FillRoundRect(ix, fy, iw, fh, irad, SpriteGradient.Linear(0f, 0f, 1f, 0f, edgeCol, coreCol, edgeCol), true);
+                        float my = Math.Clamp(fy + iw * 0.35f, iy + iw * 0.35f, iy + ih - iw * 0.35f);
+                        s.FillCircle(ix + iw * 0.5f, my, iw * 0.42f, Mix(AccentRaw, White, 0.78f), SR2D.LineOp.Set, true);
                     }
                 }
+                // Full-length upper glass tube specular reflection streak + outer glass rim
+                if (hz && w > 16)
+                    s.DrawWideLine(rad, 3.5f, w - rad, 3.5f, Argb(White, 130), 1.4f, true, SR2D.LineOp.AlphaBlend);
+                else if (!hz && h > 16)
+                    s.DrawWideLine(3.5f, rad, 3.5f, h - rad, Argb(White, 130), 1.4f, true, SR2D.LineOp.AlphaBlend);
+                DrawRound(s, 0.5f, 0.5f, w - 1f, h - 1f, rad, Mix(AccentRaw, ThumbColor, 0.48f), 1.1f);
             }
             else
             {
-                float across = hz ? h : w, extent = hz ? w : h;
-                float th = Math.Min(across - 2, Math.Max(4f, across * 0.55f));
-                int n = _segments > 0 ? _segments : Math.Max(4, (int)((extent - 2) / (th * 1.1f)));
-                float qa = hz ? 1f : h - 1f, qb = hz ? w - 1f : 1f;
-                LookCells(s, qa, qb, hz ? h / 2f : w / 2f, th, hz, n, 2f, c => LitCell(c, f, 0.3) ? Accent : Track);
+                // Heavy Industrial Riveted Steel Frame + Diagonal Hazard-Stripe Active Bar
+                LookIndustrialPlate(s, 0, 0, w, h, Mix(BackColor, ThumbColor, 0.22f), Mix(BackColor, ThumbColor, 0.48f), rivets: true);
+                float endPad = (hz ? w : h) >= 40 ? 10f : 4f;
+                float sidePad = 3.5f;
+                float ix = hz ? endPad : sidePad, iy = hz ? sidePad : endPad;
+                float iw = Math.Max(2f, w - 2f * ix), ih = Math.Max(2f, h - 2f * iy);
+                s.FillRect((int)MathF.Round(ix), (int)MathF.Round(iy), (int)MathF.Round(iw), (int)MathF.Round(ih), Mix(BackColor, Black, 0.80f));
+
+                double from = _marquee ? Math.Max(0.0, _phase * 1.3 - 0.3) : 0.0;
+                double to   = _marquee ? Math.Min(1.0, _phase * 1.3) : f;
+                double len  = Math.Max(0.0, to - from);
+                if (len > 0.005)
+                {
+                    int stripeCol = Mix(AccentRaw, Black, 0.42f);
+                    if (hz)
+                    {
+                        float fx = ix + iw * (float)from, fw = Math.Max(1f, iw * (float)len);
+                        LookHazardBar(s, fx, iy, fw, ih, true, Accent, stripeCol);
+                        s.FillRect((int)MathF.Round(fx + fw) - 1, (int)MathF.Round(iy), 2, (int)MathF.Round(ih), Mix(ThumbColor, White, 0.45f));
+                    }
+                    else
+                    {
+                        float fh = Math.Max(1f, ih * (float)len), fy = iy + ih * (float)(1.0 - from) - fh;
+                        LookHazardBar(s, ix, fy, iw, fh, false, Accent, stripeCol);
+                        s.FillRect((int)MathF.Round(ix), (int)MathF.Round(fy), (int)MathF.Round(iw), 2, Mix(ThumbColor, White, 0.45f));
+                    }
+                }
             }
             if (cap.Length > 0)
             {

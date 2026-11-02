@@ -417,13 +417,25 @@ namespace Sr2d64CSport
             {
                 var look = looks[i];
                 var col = new FlowLayoutPanel { FlowDirection = FlowDirection.TopDown, WrapContents = false, Dock = DockStyle.Fill, BackColor = Color.Transparent, Margin = new Padding(0) };
-                col.Controls.Add(new Label { Text = look.ToString(), ForeColor = Color.Gainsboro, Font = new Font(SystemFonts.DefaultFont, FontStyle.Bold), AutoSize = true, Margin = new Padding(0, 2, 0, 6) });
-                col.Controls.Add(new SpriteButton { Text = "Button", Look = look, Size = new Size(160, 34), Margin = new Padding(0, 0, 0, 6) });
-                col.Controls.Add(new SpriteButton { Text = "GO", Look = look, Shape = ButtonShape.Round, Accented = true, Size = new Size(56, 56), Margin = new Padding(0, 0, 0, 6) });
-                col.Controls.Add(new SpriteSlider { Text = "Level", Look = look, Value = 60, Ticks = 4, Size = new Size(260, 40), Margin = new Padding(0, 0, 0, 4) });
-                col.Controls.Add(new SpriteProgress { Look = look, Value = 60, ShowPercent = false, Size = new Size(260, 20), Margin = new Padding(0, 0, 0, 6) });
-                col.Controls.Add(new SpriteProgress { Look = look, Value = 60, Style = ProgressStyle.Ring, Segments = 12, ShowPercent = false, Size = new Size(72, 72), Margin = new Padding(0, 0, 0, 6) });
-                col.Controls.Add(new SpriteWheel { Look = look, Orientation = Orientation.Horizontal, Minimum = 0, Maximum = 100, Value = 42, Size = new Size(260, 52) });
+                string title = look switch
+                {
+                    ControlLook.Hairline => "Liquid Glass / Aqua Neon",
+                    ControlLook.Segmented => "Heavy Industrial / Riveted Steel",
+                    _ => "Classic (Default)",
+                };
+                col.Controls.Add(new Label { Text = title, ForeColor = Color.Gainsboro, Font = new Font(SystemFonts.DefaultFont, FontStyle.Bold), AutoSize = true, Margin = new Padding(0, 2, 0, 6) });
+                var btn = new SpriteButton { Text = "Button", Look = look, Size = new Size(160, 34), Margin = new Padding(0, 0, 0, 6) };
+                var go = new SpriteButton { Text = "GO", Look = look, Shape = ButtonShape.Round, Accented = true, Size = new Size(56, 56), Margin = new Padding(0, 0, 0, 6) };
+                var sl = new SpriteSlider { Text = "Level", Look = look, Value = 60, Ticks = 4, Size = new Size(260, 40), Margin = new Padding(0, 0, 0, 4) };
+                var pb = new SpriteProgress { Look = look, Value = 60, ShowPercent = false, Size = new Size(260, 20), Margin = new Padding(0, 0, 0, 6) };
+                var pr = new SpriteProgress { Look = look, Value = 60, Style = ProgressStyle.Ring, Segments = 12, ShowPercent = false, Size = new Size(72, 72), Margin = new Padding(0, 0, 0, 6) };
+                var wh = new SpriteWheel { Look = look, Orientation = Orientation.Horizontal, Minimum = 0, Maximum = 100, Value = 60, Size = new Size(260, 52) };
+                bool sync = false;
+                sl.ValueChanged += (_, _) => { if (sync) return; sync = true; pb.Value = pr.Value = wh.Value = sl.Value; sync = false; };
+                wh.ValueChanged += (_, _) => { if (sync) return; sync = true; pb.Value = pr.Value = sl.Value = wh.Value; sync = false; };
+                btn.Click += (_, _) => { sl.Value = Math.Min(100, sl.Value + 10); };
+                go.Click += (_, _) => { sl.Value = sl.Value >= 100 ? 0 : 100; };
+                col.Controls.AddRange(new Control[] { btn, go, sl, pb, pr, wh });
                 strip.Controls.Add(col, i, 0);
             }
             return strip;
