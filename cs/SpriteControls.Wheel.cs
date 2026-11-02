@@ -266,9 +266,35 @@ namespace Sr2d64CSport
             var band = drum; if (hub > 0) { if (hz) band.Inflate(0, -hub); else band.Inflate(-hub, 0); }   // the rubber part
             int dark = Mix(BackColor, Black, detailed ? 0.55f : 0.35f), light = Mix(BackColor, ThumbColor, (detailed ? 0.22f : 0.30f) + 0.10f * lift), ridge = Mix(BackColor, Color.Black, 0.55f);
 
-            // 1. the cylinder: one strip per pixel along the axis, brightness by cos of the surface angle (a soft specular near the middle)
+            // 1. the cylinder:
+            // Classic = shaded cylinder;
+            // Hairline (Liquid Glass) = luminous smoked-glass gradient cylinder with upper curved reflection sheen;
+            // Segmented (Heavy Industrial) = riveted brushed-steel outer housing with a deep dark gear cavity
             int lo = hz ? drum.Left : drum.Top;
-            if (flat) s.FillRect(band.Left, band.Top, band.Width, band.Height, _look == ControlLook.Segmented ? dark : Mix(BackColor, ThumbColor, 0.12f));   // seams / flat face
+            if (_look == ControlLook.Hairline)
+            {
+                int edgeGlass = Mix(BackColor, Black, 0.70f);
+                int midGlass  = Mix(BackColor, AccentRaw, 0.28f);
+                for (int i = 0; i < len; i++)
+                {
+                    float t = MathF.Abs((i + 0.5f - R) / R);
+                    int col = Lerp(midGlass, edgeGlass, MathF.Pow(t, 1.15f));
+                    if (hz) s.FillRect(lo + i, band.Top, 1, band.Height, col);
+                    else s.FillRect(band.Left, lo + i, band.Width, 1, col);
+                }
+                // Upper curved glass reflection streak across the cylinder
+                if (hz && band.Height >= 12)
+                    s.FillRect(band.Left + 2, band.Top + 2, Math.Max(2, band.Width - 4), Math.Max(2, band.Height / 4), Argb(White, 45), SR2D.LineOp.AlphaBlend);
+                else if (!hz && band.Width >= 12)
+                    s.FillRect(band.Left + 2, band.Top + 2, Math.Max(2, band.Width / 4), Math.Max(2, band.Height - 4), Argb(White, 45), SR2D.LineOp.AlphaBlend);
+            }
+            else if (_look == ControlLook.Segmented)
+            {
+                LookIndustrialPlate(s, drum.Left, drum.Top, drum.Width, drum.Height, Mix(BackColor, ThumbColor, 0.22f), Mix(BackColor, ThumbColor, 0.48f), rivets: true);
+                int pad = Math.Min(8, Math.Max(3, thick / 8));
+                if (hz) s.FillRect(drum.Left + pad, drum.Top + 3, Math.Max(2, drum.Width - 2 * pad), Math.Max(2, drum.Height - 6), Mix(BackColor, Black, 0.82f));
+                else s.FillRect(drum.Left + 3, drum.Top + pad, Math.Max(2, drum.Width - 6), Math.Max(2, drum.Height - 2 * pad), Mix(BackColor, Black, 0.82f));
+            }
             else
             {
                 for (int i = 0; i < len; i++)
@@ -315,13 +341,25 @@ namespace Sr2d64CSport
                 else if (i < 0 || i > maxIdx + 1e-9) continue;
                 float cos = (float)Math.Cos(off), q = c0 + (float)Math.Sin(off) * R * dir;
                 if (_look == ControlLook.Segmented)
-                {   // faceted blocks: one flat tone per step (three tones by the facing angle); the seams show the dark face
-                    float pw = pitch * cos;
-                    int tone = Mix(BackColor, ThumbColor, cos > 0.8f ? 0.30f : cos > 0.45f ? 0.20f : 0.12f);
-                    if (pw > 1.5f)
+                {   // Heavy Industrial machined gear-tooth ribs with 3D metallic highlight & undercut shadow
+                    float toothW = Math.Max(2f, pitch * 0.52f * cos);
+                    int tone = Mix(BackColor, ThumbColor, cos > 0.8f ? 0.42f : cos > 0.45f ? 0.28f : 0.16f);
+                    int a0 = (int)MathF.Round(q - toothW * 0.5f), a1 = (int)MathF.Round(q + toothW * 0.5f);
+                    int tSpan = a1 - a0;
+                    if (tSpan >= 2)
                     {
-                        if (hz) s.FillRect(q - pw / 2 + 0.5f, band.Top, pw - 1, band.Height, tone);
-                        else s.FillRect(band.Left, q - pw / 2 + 0.5f, band.Width, pw - 1, tone);
+                        if (hz)
+                        {
+                            s.FillRect(a0, band.Top + 4, tSpan, Math.Max(2, band.Height - 8), tone);
+                            s.FillRect(a0, band.Top + 4, 1, Math.Max(2, band.Height - 8), Mix(tone, White, 0.32f));
+                            s.FillRect(a1 - 1, band.Top + 4, 1, Math.Max(2, band.Height - 8), Mix(tone, Black, 0.55f));
+                        }
+                        else
+                        {
+                            s.FillRect(band.Left + 4, a0, Math.Max(2, band.Width - 8), tSpan, tone);
+                            s.FillRect(band.Left + 4, a0, Math.Max(2, band.Width - 8), 1, Mix(tone, White, 0.32f));
+                            s.FillRect(band.Left + 4, a1 - 1, Math.Max(2, band.Width - 8), 1, Mix(tone, Black, 0.55f));
+                        }
                     }
                 }
                 if (detailed)
@@ -374,19 +412,33 @@ namespace Sr2d64CSport
                     else s.FillRect(band.Left + 1, hq - hl / 2 + i, band.Width - 2, 1, Argb(white, a), SR2D.LineOp.AlphaBlend);
                 }
             }
-            // 5. centre window: accent band + read-out; Detailed adds a hairline through the middle and a darker glass tint
+            // 5. centre window:
+            // Classic = accent band;
+            // Hairline (Liquid Glass) = convex magnifying glass pill lens with upper specular reflection dome;
+            // Segmented (Heavy Industrial) = bolted steel sight-glass frame with side pointer wedges
             int acc = Accent;
             float w0 = c0 - window / 2f;
-            if (hz)
+            if (_look == ControlLook.Hairline)
+            {
+                float lx = hz ? w0 - 2f : drum.Left + 2f, ly = hz ? drum.Top + 2f : w0 - 2f;
+                float lw = hz ? window + 4f : drum.Width - 4f, lh = hz ? drum.Height - 4f : window + 4f;
+                float lrad = Math.Min(lw, lh) * 0.35f;
+                s.FillRoundRect(lx, ly, lw, lh, lrad, Argb(acc, 75 + (int)(40 * lift)), SR2D.LineOp.AlphaBlend);
+                s.FillRoundRect(lx + 2f, ly + 1.5f, Math.Max(2f, lw - 4f), Math.Max(2f, lh * 0.36f), lrad * 0.6f, Argb(White, 95), SR2D.LineOp.AlphaBlend);
+                DrawRound(s, lx, ly, lw, lh, lrad, Mix(AccentRaw, White, 0.55f), 1.2f);
+            }
+            else if (hz)
             {
                 s.FillRect(w0, drum.Top, window, drum.Height, Argb(acc, (detailed ? 36 : 50) + (int)(40 * lift)), SR2D.LineOp.AlphaBlend);
-                s.FillRect(w0, drum.Top, 1, drum.Height, acc); s.FillRect(c0 + window / 2f - 1, drum.Top, 1, drum.Height, acc);
+                s.FillRect(w0, drum.Top, _look == ControlLook.Segmented ? 2 : 1, drum.Height, acc);
+                s.FillRect(c0 + window / 2f - (_look == ControlLook.Segmented ? 2 : 1), drum.Top, _look == ControlLook.Segmented ? 2 : 1, drum.Height, acc);
                 if (detailed && !ShowValue) s.FillRect(c0 - 0.5f, drum.Top, 1, drum.Height, Argb(acc, 150), SR2D.LineOp.AlphaBlend);
             }
             else
             {
                 s.FillRect(drum.Left, w0, drum.Width, window, Argb(acc, (detailed ? 36 : 50) + (int)(40 * lift)), SR2D.LineOp.AlphaBlend);
-                s.FillRect(drum.Left, w0, drum.Width, 1, acc); s.FillRect(drum.Left, c0 + window / 2f - 1, drum.Width, 1, acc);
+                s.FillRect(drum.Left, w0, drum.Width, _look == ControlLook.Segmented ? 2 : 1, acc);
+                s.FillRect(drum.Left, c0 + window / 2f - (_look == ControlLook.Segmented ? 2 : 1), drum.Width, _look == ControlLook.Segmented ? 2 : 1, acc);
                 if (detailed && !ShowValue) s.FillRect(drum.Left, c0 - 0.5f, drum.Width, 1, Argb(acc, 150), SR2D.LineOp.AlphaBlend);
             }
             if (ShowValue && !IsEditing)
@@ -405,11 +457,9 @@ namespace Sr2d64CSport
                 else T.Draw(s, band.Left + band.Width / 2, (int)c0, FitText(ValueText, avail, vts), col, 0, vts, 0, 0, SR2D.LineOp.Set, 128, TextAnchor.Center);
             }
             // 6. frame (brighter while dragging / lifted) and caption
-            int rim = IsDragging ? Accent : Mix(BackColor, ThumbColor, IsHot && Enabled ? 0.55f : 0.4f);
-            if (detailed) DrawRound(s, drum.Left - 0.5f, drum.Top - 0.5f, drum.Width + 1, drum.Height + 1, 3f, rim, 1f);
+            int rim = IsDragging ? Accent : (_look == ControlLook.Hairline ? Mix(AccentRaw, ThumbColor, 0.45f) : Mix(BackColor, ThumbColor, IsHot && Enabled ? 0.55f : 0.4f));
+            if (detailed || _look == ControlLook.Hairline) DrawRound(s, drum.Left - 0.5f, drum.Top - 0.5f, drum.Width + 1, drum.Height + 1, _look == ControlLook.Hairline ? 6f : 3f, rim, 1.1f);
             else s.DrawRect(drum.Left - 0.5f, drum.Top - 0.5f, drum.Width + 1, drum.Height + 1, rim, 1f, false);
-            if (_look == ControlLook.Hairline && drum.Width > 8 && drum.Height > 8)   // the hairline keyline, three pixels in
-                s.DrawRect(drum.Left + 2.5f, drum.Top + 2.5f, drum.Width - 5, drum.Height - 5, Argb(rim, 110), 1f, false, SR2D.LineOp.AlphaBlend);
             if (capH > 0) { int cs = FitScale(Text, ClientSize.Width - 2, ts); T.Draw(s, 1, 1 + (capH - LineHeight(cs)) / 2, FitText(Text, ClientSize.Width - 2, cs), Fore, 0, cs); }
         }
         // dark cap from the end-stop position to the drum edge (beyond Minimum / Maximum)
